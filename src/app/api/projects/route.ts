@@ -1,0 +1,52 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
+export async function GET() {
+  try {
+    const projects = await db.project.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { files: { select: { id: true, fileCost: true, presentPosition: true } } },
+    });
+    const result = projects.map((p) => {
+      const files = p.files;
+      const fileCount = files.length;
+      const committedFiles = files.reduce((s, f) => s + (f.fileCost || 0), 0);
+      return {
+        ...p,
+        fileCount,
+        committedFiles,
+        balance: p.voteAllocation - p.actualSpent,
+        utilization: p.voteAllocation > 0 ? (p.actualSpent / p.voteAllocation) * 100 : 0,
+      };
+    });
+    return NextResponse.json(result);
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const project = await db.project.create({
+      data: {
+        name: body.name,
+        voteNumber: body.voteNumber,
+        voteAllocation: Number(body.voteAllocation) || 0,
+        committed: Number(body.committed) || 0,
+        actualSpent: Number(body.actualSpent) || 0,
+        startDate: body.startDate || null,
+        endDate: body.endDate || null,
+        department: body.department || null,
+        projectOfficer: body.projectOfficer || null,
+        status: body.status || "Active",
+        description: body.description || null,
+      },
+    });
+    return NextResponse.json(project, { status: 201 });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
+  }
+}

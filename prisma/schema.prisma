@@ -1,0 +1,254 @@
+// CE Logistic Panel — Prisma schema
+// Dockyard ERP: Projects, Procurement, Stores, Rate Finder, Collection
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── MODULE 2: PROJECTS ─────────────────────────
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  voteNumber    String
+  voteAllocation Float   @default(0)
+  committed     Float    @default(0)
+  actualSpent   Float    @default(0)
+  startDate     String?
+  endDate       String?
+  department    String?
+  projectOfficer String?
+  status        String   @default("Active") // Active | On Hold | Completed | Cancelled
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  files        ProjectFile[]
+  allocations  Allocation[]
+}
+
+model ProjectFile {
+  id              String   @id @default(cuid())
+  projectId       String
+  prNumber        String
+  itemCode        String
+  itemName        String
+  unit            String
+  qty             Float    @default(0)
+  unitPrice       Float    @default(0)
+  fileCost        Float    @default(0)
+  supplier        String?
+  presentPosition String   @default("PR Raised") // see PRESENT_POSITIONS
+  fileCategory    String   @default("General")
+  createdBy       String?
+  authorizedBy    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  logs        FileLog[]
+
+  @@index([projectId])
+}
+
+model FileLog {
+  id          String   @id @default(cuid())
+  fileId      String
+  oldPosition String?
+  newPosition String
+  changedBy   String?
+  comment     String?
+  changedAt   DateTime @default(now())
+
+  file ProjectFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+model Allocation {
+  id            String   @id @default(cuid())
+  projectId     String
+  date          String
+  description   String
+  amount        Float    @default(0)
+  type          String   @default("Commitment") // Commitment | Actual | Release
+  authorizedBy  String?
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ───────────────────────── MODULE 3: PROCUREMENT ─────────────────────────
+// Procurement files are stored independently so they can be queried across projects.
+model ProcurementFile {
+  id              String   @id @default(cuid())
+  projectId       String?
+  projectName     String?
+  voteNumber      String?
+  prNumber        String
+  itemCode        String
+  itemName        String
+  unit            String
+  qty             Float    @default(0)
+  unitPrice       Float    @default(0)
+  fileCost        Float    @default(0)
+  supplier        String?
+  presentPosition String   @default("PR Raised")
+  fileCategory    String   @default("General")
+  createdBy       String?
+  authorizedBy    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  logs ProcurementLog[]
+
+  @@index([presentPosition])
+  @@index([supplier])
+}
+
+model ProcurementLog {
+  id          String   @id @default(cuid())
+  fileId      String
+  oldPosition String?
+  newPosition String
+  changedBy   String?
+  comment     String?
+  changedAt   DateTime @default(now())
+
+  file ProcurementFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+// ───────────────────────── MODULE 4: STORES ─────────────────────────
+model StoreZone {
+  id                String   @id @default(cuid())
+  name              String   @unique // Zone A, Ready-Use Stores, etc.
+  type              String   @default("Zone") // Zone | Ready-Use | Balance | Project
+  totalValue        Float    @default(0)
+  itemCount         Int      @default(0)
+  lowStockCount     Int      @default(0)
+  recentReceipts    Int      @default(0)
+  pendingCollection Int      @default(0)
+  nonMovingCount    Int      @default(0)
+  createdAt         DateTime @default(now())
+}
+
+model StoreItem {
+  id            String   @id @default(cuid())
+  zoneId        String?
+  zoneName      String
+  description   String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  qty           Float    @default(0)
+  unitCost      Float    @default(0)
+  totalCost     Float    @default(0)
+  location      String?
+  minStock      Float    @default(0)
+  maxStock      Float    @default(0)
+  lastMovement  String?
+  supplier      String?
+  itemCode      String?
+  ilmsCode      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([zoneName])
+  @@index([category])
+}
+
+// ───────────────────────── MODULE 5: RATE FINDER ─────────────────────────
+model RateContract {
+  id          String   @id @default(cuid())
+  itemCode    String
+  description String
+  unit        String
+  rcPrice     Float    @default(0)
+  supplier    String?
+  rcYear      String
+  validFrom   String?
+  validUntil  String?
+  category    String   @default("General")
+  uploadedAt  DateTime @default(now())
+
+  @@index([rcYear])
+  @@index([category])
+}
+
+model DiscontinuedItem {
+  id               String   @id @default(cuid())
+  itemCode         String
+  description      String
+  unit             String
+  lastRCPrice      Float    @default(0)
+  lastRCYear       String?
+  discontinuedDate String?
+  reason           String?
+  alternatives     String?  // comma separated item codes/names
+  createdAt        DateTime @default(now())
+}
+
+// ───────────────────────── MODULE 6: COLLECTION ─────────────────────────
+model CollectionItem {
+  id          String   @id @default(cuid())
+  name        String
+  expectedQty Float    @default(0)
+  status      String   @default("Pending") // Pending | In Progress | Collected
+  dueDate     String?
+  supplier    String?
+  createdAt   DateTime @default(now())
+}
+
+model PartSupplyOrder {
+  id              String   @id @default(cuid())
+  itemName        String
+  orderedQty      Float    @default(0)
+  receivedQty     Float    @default(0)
+  balance         Float    @default(0)
+  startDate       String?
+  expectedEndDate String?
+  status          String   @default("Active") // Active | Completed
+  supplier        String?
+  createdAt       DateTime @default(now())
+
+  entries PartSupplyEntry[]
+}
+
+model PartSupplyEntry {
+  id                 String  @id @default(cuid())
+  orderId            String
+  srNo               Int     @default(1)
+  date               String
+  vehicleNumber      String?
+  qty                Float   @default(0)
+  qcCheckedBy        String?
+  sailorCount        Int     @default(0)
+  driverName         String?
+  driverLicense      String?
+  driverPhone        String?
+  cumulativeBalance  Float   @default(0)
+  createdAt          DateTime @default(now())
+
+  order PartSupplyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model DailyCollection {
+  id           String   @id @default(cuid())
+  date         String
+  itemName     String
+  qty          Float    @default(0)
+  receivedFrom String?
+  recordedBy   String?
+  recordedAt   DateTime @default(now())
+
+  @@index([date])
+}

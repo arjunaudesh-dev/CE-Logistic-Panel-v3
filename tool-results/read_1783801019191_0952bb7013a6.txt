@@ -1,0 +1,686 @@
+     1→     1→"use client";
+     2→     2→import { useState, useMemo } from "react";
+     3→     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→     4→import { Button } from "@/components/ui/button";
+     5→     5→import { Input } from "@/components/ui/input";
+     6→     6→import { Label } from "@/components/ui/label";
+     7→     7→import {
+     8→     8→  Dialog,
+     9→     9→  DialogContent,
+    10→    10→  DialogHeader,
+    11→    11→  DialogTitle,
+    12→    12→  DialogFooter,
+    13→    13→} from "@/components/ui/dialog";
+    14→    14→import {
+    15→    15→  Select,
+    16→    16→  SelectContent,
+    17→    17→  SelectItem,
+    18→    18→  SelectTrigger,
+    19→    19→  SelectValue,
+    20→    20→} from "@/components/ui/select";
+    21→    21→import {
+    22→    22→  Table,
+    23→    23→  TableBody,
+    24→    24→  TableCell,
+    25→    25→  TableHead,
+    26→    26→  TableHeader,
+    27→    27→  TableRow,
+    28→    28→} from "@/components/ui/table";
+    29→    29→import { ScrollArea } from "@/components/ui/scroll-area";
+    30→    30→import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
+    31→    31→import { FileLogDialog, ProjectFile } from "./file-log";
+    32→    32→import {
+    33→    33→  formatCurrency,
+    34→    34→  PRESENT_POSITIONS,
+    35→    35→  FILE_CATEGORIES,
+    36→    36→  positionColor,
+    37→    37→} from "@/lib/constants";
+    38→    38→import { useToast } from "@/hooks/use-toast";
+    39→    39→import {
+    40→    40→  Plus,
+    41→    41→  Search,
+    42→    42→  History,
+    43→    43→  Pencil,
+    44→    44→  ChevronDown,
+    45→    45→  ChevronUp,
+    46→    46→  FileText,
+    47→    47→  Trash2,
+    48→    48→  Loader2,
+    49→    49→  Download,
+    50→    50→} from "lucide-react";
+    51→    51→import { cn } from "@/lib/utils";
+    52→    52→
+    53→    53→interface Project {
+    54→    54→  id: string;
+    55→    55→  name: string;
+    56→    56→  voteNumber: string;
+    57→    57→  voteAllocation: number;
+    58→    58→  committed: number;
+    59→    59→  actualSpent: number;
+    60→    60→}
+    61→    61→
+    62→    62→interface Allocation {
+    63→    63→  id: string;
+    64→    64→  date: string;
+    65→    65→  description: string;
+    66→    66→  amount: number;
+    67→    67→  type: string;
+    68→    68→  authorizedBy: string | null;
+    69→    69→}
+    70→    70→
+    71→    71→interface Props {
+    72→    72→  project: Project;
+    73→    73→  open: boolean;
+    74→    74→  onOpenChange: (o: boolean) => void;
+    75→    75→  onChanged: () => void;
+    76→    76→}
+    77→    77→
+    78→    78→export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
+    79→    79→  const { data: files, loading, refresh } = useFetch<ProjectFile[]>(
+    80→    80→    `/api/projects/${project.id}/files`
+    81→    81→  );
+    82→    82→  const [search, setSearch] = useState("");
+    83→    83→  const [positionFilter, setPositionFilter] = useState("all");
+    84→    84→  const [addOpen, setAddOpen] = useState(false);
+    85→    85→  const [editFile, setEditFile] = useState<ProjectFile | null>(null);
+    86→    86→  const [logFile, setLogFile] = useState<ProjectFile | null>(null);
+    87→    87→  const [allocOpen, setAllocOpen] = useState(false);
+    88→    88→  const [sortKey, setSortKey] = useState<"createdAt" | "fileCost" | "prNumber">("createdAt");
+    89→    89→  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+    90→    90→  const { toast } = useToast();
+    91→    91→
+    92→    92→  // Position summary
+    93→    93→  const positionSummary = useMemo(() => {
+    94→    94→    const map: Record<string, { count: number; cost: number }> = {};
+    95→    95→    files?.forEach((f) => {
+    96→    96→      if (!map[f.presentPosition]) map[f.presentPosition] = { count: 0, cost: 0 };
+    97→    97→      map[f.presentPosition].count++;
+    98→    98→      map[f.presentPosition].cost += f.fileCost;
+    99→    99→    });
+   100→   100→    return Object.entries(map).sort((a, b) => b[1].count - a[1].count);
+   101→   101→  }, [files]);
+   102→   102→
+   103→   103→  const totalFileCost = files?.reduce((s, f) => s + f.fileCost, 0) ?? 0;
+   104→   104→
+   105→   105→  const filteredFiles = useMemo(() => {
+   106→   106→    let list = files || [];
+   107→   107→    if (search) {
+   108→   108→      const q = search.toLowerCase();
+   109→   109→      list = list.filter(
+   110→   110→        (f) =>
+   111→   111→          f.prNumber.toLowerCase().includes(q) ||
+   112→   112→          f.itemCode.toLowerCase().includes(q) ||
+   113→   113→          f.itemName.toLowerCase().includes(q) ||
+   114→   114→          (f.supplier || "").toLowerCase().includes(q)
+   115→   115→      );
+   116→   116→    }
+   117→   117→    if (positionFilter !== "all") {
+   118→   118→      list = list.filter((f) => f.presentPosition === positionFilter);
+   119→   119→    }
+   120→   120→    list = [...list].sort((a, b) => {
+   121→   121→      let cmp = 0;
+   122→   122→      if (sortKey === "fileCost") cmp = a.fileCost - b.fileCost;
+   123→   123→      else if (sortKey === "prNumber") cmp = a.prNumber.localeCompare(b.prNumber);
+   124→   124→      else cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+   125→   125→      return sortDir === "asc" ? cmp : -cmp;
+   126→   126→    });
+   127→   127→    return list;
+   128→   128→  }, [files, search, positionFilter, sortKey, sortDir]);
+   129→   129→
+   130→   130→  const toggleSort = (key: typeof sortKey) => {
+   131→   131→    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   132→   132→    else {
+   133→   133→      setSortKey(key);
+   134→   134→      setSortDir("desc");
+   135→   135→    }
+   136→   136→  };
+   137→   137→
+   138→   138→  const handleDelete = async (file: ProjectFile) => {
+   139→   139→    if (!confirm(`Delete file ${file.prNumber} (${file.itemName})?`)) return;
+   140→   140→    const res = await apiRequest(`/api/projects/${project.id}/files/${file.id}`, "DELETE");
+   141→   141→    if (res.ok) {
+   142→   142→      toast({ title: "File deleted" });
+   143→   143→      refresh();
+   144→   144→      onChanged();
+   145→   145→    } else {
+   146→   146→      toast({ title: "Delete failed", description: res.error, variant: "destructive" });
+   147→   147→    }
+   148→   148→  };
+   149→   149→
+   150→   150→  const exportExcel = () => {
+   151→   151→    const rows = filteredFiles.map((f) => ({
+   152→   152→      "PR Number": f.prNumber,
+   153→   153→      "Item Code": f.itemCode,
+   154→   154→      "Item Name": f.itemName,
+   155→   155→      Unit: f.unit,
+   156→   156→      Qty: f.qty,
+   157→   157→      "Unit Price": f.unitPrice,
+   158→   158→      "File Cost": f.fileCost,
+   159→   159→      Supplier: f.supplier || "",
+   160→   160→      "Present Position": f.presentPosition,
+   161→   161→      Category: f.fileCategory,
+   162→   162→    }));
+   163→   163→    const headers = Object.keys(rows[0] || {});
+   164→   164→    const csv = [
+   165→   165→      headers.join(","),
+   166→   166→      ...rows.map((r) => headers.map((h) => `"${(r as Record<string, unknown>)[h]}"`).join(",")),
+   167→   167→    ].join("\n");
+   168→   168→    const blob = new Blob([csv], { type: "text/csv" });
+   169→   169→    const url = URL.createObjectURL(blob);
+   170→   170→    const a = document.createElement("a");
+   171→   171→    a.href = url;
+   172→   172→    a.download = `${project.name}-files.csv`;
+   173→   173→    a.click();
+   174→   174→    URL.revokeObjectURL(url);
+   175→   175→  };
+   176→   176→
+   177→   177→  return (
+   178→   178→    <Dialog open={open} onOpenChange={onOpenChange}>
+   179→   179→      <DialogContent className="max-w-7xl max-h-[92vh] bg-card border-border p-0 gap-0">
+   180→   180→        <DialogHeader className="px-6 py-4 border-b border-border">
+   181→   181→          <DialogTitle className="text-foreground flex items-center justify-between gap-4">
+   182→   182→            <span className="truncate">{project.name}</span>
+   183→   183→            <span className="text-xs font-normal text-muted-foreground">
+   184→   184→              {project.voteNumber}
+   185→   185→            </span>
+   186→   186→          </DialogTitle>
+   187→   187→        </DialogHeader>
+   188→   188→
+   189→   189→        <ScrollArea className="max-h-[80vh]">
+   190→   190→          <div className="p-6 space-y-5">
+   191→   191→            {/* Project financial summary */}
+   192→   192→            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+   193→   193→              <FinBox label="Vote Allocation" value={formatCurrency(project.voteAllocation)} tone="text-blue-400" />
+   194→   194→              <FinBox label="Committed" value={formatCurrency(project.committed)} tone="text-amber-400" />
+   195→   195→              <FinBox label="Actual Spent" value={formatCurrency(project.actualSpent)} tone="text-red-400" />
+   196→   196→              <FinBox label="File Cost (Total)" value={formatCurrency(totalFileCost)} tone="text-emerald-400" />
+   197→   197→            </div>
+   198→   198→
+   199→   199→            {/* Position summary bar */}
+   200→   200→            <div>
+   201→   201→              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+   202→   202→                Present Position Summary
+   203→   203→              </h4>
+   204→   204→              <div className="flex flex-wrap gap-2">
+   205→   205→                {positionSummary.length === 0 ? (
+   206→   206→                  <p className="text-sm text-muted-foreground">No files yet.</p>
+   207→   207→                ) : (
+   208→   208→                  positionSummary.map(([pos, info]) => (
+   209→   209→                    <div
+   210→   210→                      key={pos}
+   211→   211→                      className={cn(
+   212→   212→                        "flex items-center gap-2 rounded-lg border px-3 py-1.5",
+   213→   213→                        positionColor(pos)
+   214→   214→                      )}
+   215→   215→                    >
+   216→   216→                      <span className="text-sm font-medium">{pos}</span>
+   217→   217→                      <span className="text-xs opacity-80">
+   218→   218→                        {info.count} file{info.count > 1 ? "s" : ""} · {formatCurrency(info.cost)}
+   219→   219→                      </span>
+   220→   220→                    </div>
+   221→   221→                  ))
+   222→   222→                )}
+   223→   223→              </div>
+   224→   224→            </div>
+   225→   225→
+   226→   226→            {/* Toolbar */}
+   227→   227→            <div className="flex flex-wrap items-center gap-2">
+   228→   228→              <div className="relative flex-1 min-w-[200px]">
+   229→   229→                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   230→   230→                <Input
+   231→   231→                  value={search}
+   232→   232→                  onChange={(e) => setSearch(e.target.value)}
+   233→   233→                  placeholder="Search PR, item, supplier..."
+   234→   234→                  className="pl-9 bg-background border-border"
+   235→   235→                />
+   236→   236→              </div>
+   237→   237→              <Select value={positionFilter} onValueChange={setPositionFilter}>
+   238→   238→                <SelectTrigger className="w-[180px] bg-background border-border">
+   239→   239→                  <SelectValue placeholder="Position" />
+   240→   240→                </SelectTrigger>
+   241→   241→                <SelectContent>
+   242→   242→                  <SelectItem value="all">All Positions</SelectItem>
+   243→   243→                  {PRESENT_POSITIONS.map((p) => (
+   244→   244→                    <SelectItem key={p} value={p}>{p}</SelectItem>
+   245→   245→                  ))}
+   246→   246→                </SelectContent>
+   247→   247→              </Select>
+   248→   248→              <Button variant="outline" size="sm" onClick={() => setAllocOpen(true)} className="gap-1.5">
+   249→   249→                <History className="h-4 w-4" /> Allocations
+   250→   250→              </Button>
+   251→   251→              <Button variant="outline" size="sm" onClick={exportExcel} className="gap-1.5">
+   252→   252→                <Download className="h-4 w-4" /> Export
+   253→   253→              </Button>
+   254→   254→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
+   255→   255→                <Plus className="h-4 w-4" /> Add File
+   256→   256→              </Button>
+   257→   257→            </div>
+   258→   258→
+   259→   259→            {/* File register table */}
+   260→   260→            <div className="border border-border rounded-lg overflow-hidden">
+   261→   261→              <Table>
+   262→   262→                <TableHeader>
+   263→   263→                  <TableRow className="hover:bg-transparent border-border">
+   264→   264→                    <SortTh label="PR Number" onClick={() => toggleSort("prNumber")} active={sortKey === "prNumber"} dir={sortDir} />
+   265→   265→                    <TableHead className="text-muted-foreground">Item Code</TableHead>
+   266→   266→                    <TableHead className="text-muted-foreground">Item Name</TableHead>
+   267→   267→                    <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+   268→   268→                    <TableHead className="text-muted-foreground text-right">Unit Price</TableHead>
+   269→   269→                    <SortTh label="File Cost" onClick={() => toggleSort("fileCost")} active={sortKey === "fileCost"} dir={sortDir} align="right" />
+   270→   270→                    <TableHead className="text-muted-foreground">Supplier</TableHead>
+   271→   271→                    <TableHead className="text-muted-foreground">Position</TableHead>
+   272→   272→                    <TableHead className="text-muted-foreground">Category</TableHead>
+   273→   273→                    <TableHead className="text-muted-foreground text-right">Actions</TableHead>
+   274→   274→                  </TableRow>
+   275→   275→                </TableHeader>
+   276→   276→                <TableBody>
+   277→   277→                  {loading ? (
+   278→   278→                    <TableRow>
+   279→   279→                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+   280→   280→                        <Loader2 className="h-5 w-5 animate-spin mx-auto" />
+   281→   281→                      </TableCell>
+   282→   282→                    </TableRow>
+   283→   283→                  ) : filteredFiles.length === 0 ? (
+   284→   284→                    <TableRow>
+   285→   285→                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+   286→   286→                        No files found. Click "Add File" to create one.
+   287→   287→                      </TableCell>
+   288→   288→                    </TableRow>
+   289→   289→                  ) : (
+   290→   290→                    filteredFiles.map((f) => (
+   291→   291→                      <TableRow
+   292→   292→                        key={f.id}
+   293→   293→                        className="border-border cursor-pointer hover:bg-secondary/40"
+   294→   294→                        onClick={() => setLogFile(f)}
+   295→   295→                      >
+   296→   296→                        <TableCell className="font-mono text-xs text-foreground">{f.prNumber}</TableCell>
+   297→   297→                        <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
+   298→   298→                        <TableCell className="text-foreground">{f.itemName}</TableCell>
+   299→   299→                        <TableCell className="text-right">{f.qty} {f.unit}</TableCell>
+   300→   300→                        <TableCell className="text-right">{formatCurrency(f.unitPrice)}</TableCell>
+   301→   301→                        <TableCell className="text-right font-medium text-foreground">{formatCurrency(f.fileCost)}</TableCell>
+   302→   302→                        <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
+   303→   303→                        <TableCell><PositionBadge position={f.presentPosition} /></TableCell>
+   304→   304→                        <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
+   305→   305→                        <TableCell className="text-right">
+   306→   306→                          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+   307→   307→                            <Button
+   308→   308→                              variant="ghost"
+   309→   309→                              size="icon"
+   310→   310→                              className="h-7 w-7"
+   311→   311→                              onClick={() => setEditFile(f)}
+   312→   312→                            >
+   313→   313→                              <Pencil className="h-3.5 w-3.5" />
+   314→   314→                            </Button>
+   315→   315→                            <Button
+   316→   316→                              variant="ghost"
+   317→   317→                              size="icon"
+   318→   318→                              className="h-7 w-7 text-red-400 hover:text-red-500"
+   319→   319→                              onClick={() => handleDelete(f)}
+   320→   320→                            >
+   321→   321→                              <Trash2 className="h-3.5 w-3.5" />
+   322→   322→                            </Button>
+   323→   323→                          </div>
+   324→   324→                        </TableCell>
+   325→   325→                      </TableRow>
+   326→   326→                    ))
+   327→   327→                  )}
+   328→   328→                </TableBody>
+   329→   329→              </Table>
+   330→   330→            </div>
+   331→   331→            <p className="text-xs text-muted-foreground">
+   332→   332→              {filteredFiles.length} file(s) · Click any row to view full log
+   333→   333→            </p>
+   334→   334→          </div>
+   335→   335→        </ScrollArea>
+   336→   336→      </DialogContent>
+   337→   337→
+   338→   338→      {/* Add File */}
+   339→   339→      <FileFormDialog
+   340→   340→        projectId={project.id}
+   341→   341→        open={addOpen}
+   342→   342→        onOpenChange={setAddOpen}
+   343→   343→        onSaved={() => {
+   344→   344→          setAddOpen(false);
+   345→   345→          refresh();
+   346→   346→          onChanged();
+   347→   347→        }}
+   348→   348→      />
+   349→   349→
+   350→   350→      {/* Edit File / Update Position */}
+   351→   351→      {editFile && (
+   352→   352→        <FileFormDialog
+   353→   353→          projectId={project.id}
+   354→   354→          file={editFile}
+   355→   355→          open={!!editFile}
+   356→   356→          onOpenChange={(o) => !o && setEditFile(null)}
+   357→   357→          onSaved={() => {
+   358→   358→            setEditFile(null);
+   359→   359→            refresh();
+   360→   360→            onChanged();
+   361→   361→          }}
+   362→   362→        />
+   363→   363→      )}
+   364→   364→
+   365→   365→      {/* File Log */}
+   366→   366→      <FileLogDialog file={logFile} open={!!logFile} onOpenChange={(o) => !o && setLogFile(null)} />
+   367→   367→
+   368→   368→      {/* Allocation History */}
+   369→   369→      <AllocationHistoryDialog
+   370→   370→        project={project}
+   371→   371→        open={allocOpen}
+   372→   372→        onOpenChange={setAllocOpen}
+   373→   373→        onChanged={onChanged}
+   374→   374→      />
+   375→   375→    </Dialog>
+   376→   376→  );
+   377→   377→}
+   378→   378→
+   379→   379→function FinBox({ label, value, tone }: { label: string; value: string; tone: string }) {
+   380→   380→  return (
+   381→   381→    <div className="bg-secondary/40 rounded-lg p-3">
+   382→   382→      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+   383→   383→      <p className={`text-base font-semibold ${tone}`}>{value}</p>
+   384→   384→    </div>
+   385→   385→  );
+   386→   386→}
+   387→   387→
+   388→   388→function SortTh({
+   389→   389→  label,
+   390→   390→  onClick,
+   391→   391→  active,
+   392→   392→  dir,
+   393→   393→  align = "left",
+   394→   394→}: {
+   395→   395→  label: string;
+   396→   396→  onClick: () => void;
+   397→   397→  active: boolean;
+   398→   398→  dir: "asc" | "desc";
+   399→   399→  align?: "left" | "right";
+   400→   400→}) {
+   401→   401→  return (
+   402→   402→    <TableHead className={align === "right" ? "text-muted-foreground text-right" : "text-muted-foreground"}>
+   403→   403→      <button onClick={onClick} className="inline-flex items-center gap-1 hover:text-foreground">
+   404→   404→        {label}
+   405→   405→        {active && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+   406→   406→      </button>
+   407→   407→    </TableHead>
+   408→   408→  );
+   409→   409→}
+   410→   410→
+   411→   411→// ─── File Form (Add / Edit) ───
+   412→   412→function FileFormDialog({
+   413→   413→  projectId,
+   414→   414→  file,
+   415→   415→  open,
+   416→   416→  onOpenChange,
+   417→   417→  onSaved,
+   418→   418→}: {
+   419→   419→  projectId: string;
+   420→   420→  file?: ProjectFile;
+   421→   421→  open: boolean;
+   422→   422→  onOpenChange: (o: boolean) => void;
+   423→   423→  onSaved: () => void;
+   424→   424→}) {
+   425→   425→  const isEdit = !!file;
+   426→   426→  const [saving, setSaving] = useState(false);
+   427→   427→  const [form, setForm] = useState({
+   428→   428→    prNumber: file?.prNumber || "",
+   429→   429→    itemCode: file?.itemCode || "",
+   430→   430→    itemName: file?.itemName || "",
+   431→   431→    unit: file?.unit || "NOS",
+   432→   432→    qty: String(file?.qty ?? ""),
+   433→   433→    unitPrice: String(file?.unitPrice ?? ""),
+   434→   434→    fileCost: String(file?.fileCost ?? ""),
+   435→   435→    supplier: file?.supplier || "",
+   436→   436→    presentPosition: file?.presentPosition || "PR Raised",
+   437→   437→    fileCategory: file?.fileCategory || "General",
+   438→   438→    changedBy: "",
+   439→   439→    comment: "",
+   440→   440→  });
+   441→   441→  const { toast } = useToast();
+   442→   442→
+   443→   443→  const submit = async () => {
+   444→   444→    if (!form.prNumber || !form.itemCode || !form.itemName) {
+   445→   445→      toast({ title: "PR Number, Item Code and Item Name are required", variant: "destructive" });
+   446→   446→      return;
+   447→   447→    }
+   448→   448→    setSaving(true);
+   449→   449→    const url = isEdit
+   450→   450→      ? `/api/projects/${projectId}/files/${file!.id}`
+   451→   451→      : `/api/projects/${projectId}/files`;
+   452→   452→    const method = isEdit ? "PUT" : "POST";
+   453→   453→    const res = await apiRequest(url, method, form);
+   454→   454→    setSaving(false);
+   455→   455→    if (res.ok) {
+   456→   456→      toast({ title: isEdit ? "File updated" : "File added" });
+   457→   457→      onSaved();
+   458→   458→    } else {
+   459→   459→      toast({ title: "Failed", description: res.error, variant: "destructive" });
+   460→   460→    }
+   461→   461→  };
+   462→   462→
+   463→   463→  return (
+   464→   464→    <Dialog open={open} onOpenChange={onOpenChange}>
+   465→   465→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   466→   466→        <DialogHeader>
+   467→   467→          <DialogTitle className="text-foreground flex items-center gap-2">
+   468→   468→            <FileText className="h-5 w-5 text-primary" />
+   469→   469→            {isEdit ? `Edit File — ${file!.prNumber}` : "Add Processing File"}
+   470→   470→          </DialogTitle>
+   471→   471→        </DialogHeader>
+   472→   472→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+   473→   473→          <Field label="PR Number *">
+   474→   474→            <Input value={form.prNumber} onChange={(e) => setForm({ ...form, prNumber: e.target.value })} className="bg-background border-border" />
+   475→   475→          </Field>
+   476→   476→          <Field label="Item Code *">
+   477→   477→            <Input value={form.itemCode} onChange={(e) => setForm({ ...form, itemCode: e.target.value })} className="bg-background border-border" />
+   478→   478→          </Field>
+   479→   479→          <div className="sm:col-span-2">
+   480→   480→            <Field label="Item Name *">
+   481→   481→              <Input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} className="bg-background border-border" />
+   482→   482→            </Field>
+   483→   483→          </div>
+   484→   484→          <Field label="Unit">
+   485→   485→            <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="bg-background border-border" />
+   486→   486→          </Field>
+   487→   487→          <Field label="Qty">
+   488→   488→            <Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} className="bg-background border-border" />
+   489→   489→          </Field>
+   490→   490→          <Field label="Unit Price (Rs.)">
+   491→   491→            <Input type="number" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} className="bg-background border-border" />
+   492→   492→          </Field>
+   493→   493→          <Field label="File Cost (Rs.) — auto if empty">
+   494→   494→            <Input type="number" value={form.fileCost} onChange={(e) => setForm({ ...form, fileCost: e.target.value })} placeholder="auto" className="bg-background border-border" />
+   495→   495→          </Field>
+   496→   496→          <Field label="Supplier">
+   497→   497→            <Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="bg-background border-border" />
+   498→   498→          </Field>
+   499→   499→          <Field label="Present Position">
+   500→   500→            <Select value={form.presentPosition} onValueChange={(v) => setForm({ ...form, presentPosition: v })}>
+   501→   501→              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   502→   502→              <SelectContent>
+   503→   503→                {PRESENT_POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+   504→   504→              </SelectContent>
+   505→   505→            </Select>
+   506→   506→          </Field>
+   507→   507→          <Field label="File Category">
+   508→   508→            <Select value={form.fileCategory} onValueChange={(v) => setForm({ ...form, fileCategory: v })}>
+   509→   509→              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   510→   510→              <SelectContent>
+   511→   511→                {FILE_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+   512→   512→              </SelectContent>
+   513→   513→            </Select>
+   514→   514→          </Field>
+   515→   515→          {isEdit && (
+   516→   516→            <>
+   517→   517→              <Field label="Changed By">
+   518→   518→                <Input value={form.changedBy} onChange={(e) => setForm({ ...form, changedBy: e.target.value })} placeholder="Your name" className="bg-background border-border" />
+   519→   519→              </Field>
+   520→   520→              <div className="sm:col-span-2">
+   521→   521→                <Field label="Comment (for log)">
+   522→   522→                  <Input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} placeholder="Optional note" className="bg-background border-border" />
+   523→   523→                </Field>
+   524→   524→              </div>
+   525→   525→            </>
+   526→   526→          )}
+   527→   527→        </div>
+   528→   528→        <DialogFooter>
+   529→   529→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+   530→   530→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+   531→   531→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   532→   532→            {isEdit ? "Update File" : "Add File"}
+   533→   533→          </Button>
+   534→   534→        </DialogFooter>
+   535→   535→      </DialogContent>
+   536→   536→    </Dialog>
+   537→   537→  );
+   538→   538→}
+   539→   539→
+   540→   540→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+   541→   541→  return (
+   542→   542→    <div className="space-y-1.5">
+   543→   543→      <Label className="text-xs">{label}</Label>
+   544→   544→      {children}
+   545→   545→    </div>
+   546→   546→  );
+   547→   547→}
+   548→   548→
+   549→   549→// ─── Allocation History ───
+   550→   550→function AllocationHistoryDialog({
+   551→   551→  project,
+   552→   552→  open,
+   553→   553→  onOpenChange,
+   554→   554→  onChanged,
+   555→   555→}: {
+   556→   556→  project: Project;
+   557→   557→  open: boolean;
+   558→   558→  onOpenChange: (o: boolean) => void;
+   559→   559→  onChanged: () => void;
+   560→   560→}) {
+   561→   561→  const { data: allocations, refresh } = useFetch<Allocation[]>(
+   562→   562→    `/api/projects/${project.id}/allocations`
+   563→   563→  );
+   564→   564→  const [saving, setSaving] = useState(false);
+   565→   565→  const [form, setForm] = useState({
+   566→   566→    date: new Date().toISOString().slice(0, 10),
+   567→   567→    description: "",
+   568→   568→    amount: "",
+   569→   569→    type: "Commitment",
+   570→   570→    authorizedBy: "",
+   571→   571→  });
+   572→   572→  const { toast } = useToast();
+   573→   573→
+   574→   574→  const totalAllocated = allocations?.reduce((s, a) => s + a.amount, 0) ?? 0;
+   575→   575→  const committed = allocations?.filter((a) => a.type === "Commitment").reduce((s, a) => s + a.amount, 0) ?? 0;
+   576→   576→  const actual = allocations?.filter((a) => a.type === "Actual").reduce((s, a) => s + a.amount, 0) ?? 0;
+   577→   577→
+   578→   578→  const submit = async () => {
+   579→   579→    if (!form.description || !form.amount) {
+   580→   580→      toast({ title: "Description and amount required", variant: "destructive" });
+   581→   581→      return;
+   582→   582→    }
+   583→   583→    setSaving(true);
+   584→   584→    const res = await apiRequest(`/api/projects/${project.id}/allocations`, "POST", form);
+   585→   585→    setSaving(false);
+   586→   586→    if (res.ok) {
+   587→   587→      toast({ title: "Allocation added" });
+   588→   588→      setForm({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", type: "Commitment", authorizedBy: "" });
+   589→   589→      refresh();
+   590→   590→      onChanged();
+   591→   591→    } else {
+   592→   592→      toast({ title: "Failed", description: res.error, variant: "destructive" });
+   593→   593→    }
+   594→   594→  };
+   595→   595→
+   596→   596→  return (
+   597→   597→    <Dialog open={open} onOpenChange={onOpenChange}>
+   598→   598→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   599→   599→        <DialogHeader>
+   600→   600→          <DialogTitle className="text-foreground flex items-center gap-2">
+   601→   601→            <History className="h-5 w-5 text-primary" />
+   602→   602→            Allocation History — {project.name}
+   603→   603→          </DialogTitle>
+   604→   604→        </DialogHeader>
+   605→   605→
+   606→   606→        <div className="grid grid-cols-3 gap-3 mb-4">
+   607→   607→          <FinBox label="Total Allocated" value={formatCurrency(totalAllocated)} tone="text-blue-400" />
+   608→   608→          <FinBox label="Committed" value={formatCurrency(committed)} tone="text-amber-400" />
+   609→   609→          <FinBox label="Actual" value={formatCurrency(actual)} tone="text-red-400" />
+   610→   610→        </div>
+   611→   611→
+   612→   612→        {/* Add allocation form */}
+   613→   613→        <div className="bg-secondary/40 rounded-lg p-4 mb-4">
+   614→   614→          <h4 className="text-sm font-semibold text-foreground mb-3">Add Allocation</h4>
+   615→   615→          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+   616→   616→            <Field label="Date">
+   617→   617→              <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="bg-background border-border" />
+   618→   618→            </Field>
+   619→   619→            <Field label="Description">
+   620→   620→              <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="bg-background border-border" />
+   621→   621→            </Field>
+   622→   622→            <Field label="Amount (Rs.)">
+   623→   623→              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="bg-background border-border" />
+   624→   624→            </Field>
+   625→   625→            <Field label="Type">
+   626→   626→              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+   627→   627→                <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   628→   628→                <SelectContent>
+   629→   629→                  <SelectItem value="Commitment">Commitment</SelectItem>
+   630→   630→                  <SelectItem value="Actual">Actual</SelectItem>
+   631→   631→                  <SelectItem value="Release">Release</SelectItem>
+   632→   632→                </SelectContent>
+   633→   633→              </Select>
+   634→   634→            </Field>
+   635→   635→            <div className="flex items-end">
+   636→   636→              <Button onClick={submit} disabled={saving} className="w-full gap-1.5">
+   637→   637→                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Add
+   638→   638→              </Button>
+   639→   639→            </div>
+   640→   640→          </div>
+   641→   641→        </div>
+   642→   642→
+   643→   643→        {/* Allocations table */}
+   644→   644→        <div className="border border-border rounded-lg overflow-hidden">
+   645→   645→          <Table>
+   646→   646→            <TableHeader>
+   647→   647→              <TableRow className="hover:bg-transparent border-border">
+   648→   648→                <TableHead className="text-muted-foreground">Date</TableHead>
+   649→   649→                <TableHead className="text-muted-foreground">Description</TableHead>
+   650→   650→                <TableHead className="text-muted-foreground text-right">Amount</TableHead>
+   651→   651→                <TableHead className="text-muted-foreground">Type</TableHead>
+   652→   652→                <TableHead className="text-muted-foreground">Authorized By</TableHead>
+   653→   653→              </TableRow>
+   654→   654→            </TableHeader>
+   655→   655→            <TableBody>
+   656→   656→              {!allocations || allocations.length === 0 ? (
+   657→   657→                <TableRow>
+   658→   658→                  <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+   659→   659→                    No allocations recorded.
+   660→   660→                  </TableCell>
+   661→   661→                </TableRow>
+   662→   662→              ) : (
+   663→   663→                allocations.map((a) => (
+   664→   664→                  <TableRow key={a.id} className="border-border">
+   665→   665→                    <TableCell className="text-xs">{new Date(a.date).toLocaleDateString("en-GB")}</TableCell>
+   666→   666→                    <TableCell className="text-foreground">{a.description}</TableCell>
+   667→   667→                    <TableCell className="text-right font-medium">{formatCurrency(a.amount)}</TableCell>
+   668→   668→                    <TableCell>
+   669→   669→                      <CustomBadge className={
+   670→   670→                        a.type === "Actual" ? "border-0 bg-red-500/15 text-red-400"
+   671→   671→                        : a.type === "Commitment" ? "border-0 bg-amber-500/15 text-amber-400"
+   672→   672→                        : "border-0 bg-blue-500/15 text-blue-400"
+   673→   673→                      }>{a.type}</CustomBadge>
+   674→   674→                    </TableCell>
+   675→   675→                    <TableCell className="text-xs">{a.authorizedBy || "—"}</TableCell>
+   676→   676→                  </TableRow>
+   677→   677→                ))
+   678→   678→              )}
+   679→   679→            </TableBody>
+   680→   680→          </Table>
+   681→   681→        </div>
+   682→   682→      </DialogContent>
+   683→   683→    </Dialog>
+   684→   684→  );
+   685→   685→}
+   686→   686→
