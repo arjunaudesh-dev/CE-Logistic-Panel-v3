@@ -155,6 +155,106 @@ export function confidenceColor(conf: string): string {
   }
 }
 
+// ─── Stakeholders ───
+export const CSLOG_APPOINTMENTS = [
+  "CSLOG",
+  "CLOGD",
+  "ASO(E)",
+  "APO(E)",
+  "AAPO(PT)",
+  "LOGO",
+  "SO(Log)",
+] as const;
+
+export const CE_APPOINTMENTS = [
+  "CCED(E)",
+  "CCEO(E)",
+  "SCE(M)",
+  "SCE(P&P)",
+  "AOE",
+  "SO(CE)",
+] as const;
+
+export const STAKEHOLDER_DEPARTMENTS = ["CSLOG", "CE"] as const;
+
+export const STAKEHOLDER_ROLES = ["Officer", "Sailor"] as const;
+
+export const AVAILABILITY_STATUSES = [
+  "Available",
+  "On Leave",
+  "Busy",
+  "Off Duty",
+] as const;
+
+export function availabilityColor(status: string): string {
+  switch (status) {
+    case "Available":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "On Leave":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Busy":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    case "Off Duty":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export function departmentColor(dept: string): string {
+  switch (dept) {
+    case "CSLOG":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "CE":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Supplier ratings ───
+export function ratingColor(score: number): string {
+  if (score >= 4.5) return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+  if (score >= 3.5) return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+  if (score >= 2.5) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+  return "bg-red-500/15 text-red-400 border-red-500/30";
+}
+
+export function ratingLabel(score: number): string {
+  if (score >= 4.5) return "Excellent";
+  if (score >= 3.5) return "Good";
+  if (score >= 2.5) return "Satisfactory";
+  if (score >= 1.5) return "Below Average";
+  return "Fail";
+}
+
+// ─── Item Master ───
+export function itemMasterStatusColor(status: string): string {
+  switch (status) {
+    case "Active":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Merged":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Discontinued":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export function duplicateTypeColor(type: string): string {
+  switch (type) {
+    case "multi_code_one_item":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "same_code_diff_name":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    case "near_duplicate":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
 // Maps present positions to color classes for badges
 export function positionColor(position: string): string {
   const p = position.toLowerCase();

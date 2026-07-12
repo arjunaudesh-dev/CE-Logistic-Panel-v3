@@ -6,6 +6,7 @@ import {
   Warehouse,
   Search,
   PackageCheck,
+  Users,
   LucideIcon,
 } from "lucide-react";
 
@@ -15,7 +16,8 @@ export type ModuleId =
   | "procurement"
   | "stores"
   | "rate-finder"
-  | "collection";
+  | "collection"
+  | "stakeholders";
 
 export interface NavItem {
   id: ModuleId;
@@ -60,5 +62,11 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Collection",
     icon: PackageCheck,
     description: "Part supply & daily collection",
+  },
+  {
+    id: "stakeholders",
+    label: "Stakeholders",
+    icon: Users,
+    description: "Officers, sailors & supplier directory",
   },
 ];

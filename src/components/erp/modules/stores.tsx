@@ -71,6 +71,10 @@ import {
   Wand2,
   Check,
   RefreshCw,
+  Database,
+  GitMerge,
+  Sparkles,
+  Copy,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -79,7 +83,10 @@ import {
   FILE_CATEGORIES,
   ZONES,
   confidenceColor,
+  itemMasterStatusColor,
+  duplicateTypeColor,
 } from "@/lib/constants";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -155,6 +162,57 @@ interface FindCodeResult {
   existingCodes: string[];
   confidence: Confidence;
   recommendation: string;
+}
+
+// ─── Item Code Master & Deduplication types ───
+interface ItemMasterRecord {
+  id: string;
+  canonicalCode: string;
+  description: string;
+  category: string;
+  unit: string;
+  alternateCodes: string | null;
+  alternateNames: string | null;
+  status: string;
+  mergedInto: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DuplicateGroupItem {
+  id: string;
+  canonicalCode: string;
+  description: string;
+  category: string;
+  source: "item-master" | "store-item";
+  storeItemId?: string;
+  zoneName?: string;
+}
+
+interface DuplicateGroup {
+  type:
+    | "same_name_diff_code"
+    | "same_code_diff_name"
+    | "multi_code_one_item"
+    | "near_duplicate";
+  description: string;
+  canonicalCode: string | null;
+  items: DuplicateGroupItem[];
+  recommendation: string;
+}
+
+interface AnalyzeResponse {
+  totalScanned: number;
+  duplicatesFound: number;
+  groups: DuplicateGroup[];
+}
+
+interface MergeResponse {
+  ok: boolean;
+  canonicalCode: string;
+  mergedCount: number;
+  alternateCodes: string | null;
+  alternateNames: string | null;
 }
 
 type StockFilter = "all" | "in" | "low" | "out" | "over";
@@ -478,15 +536,10 @@ export function StoresModule() {
         onOpenChange={setEarmarkListOpen}
       />
 
-      {/* AI item code finder dialog */}
-      <FindItemCodeDialog
+      {/* Item Code Master & Deduplication full-window */}
+      <ItemCodeMasterWindow
         open={findCodeOpen}
         onOpenChange={setFindCodeOpen}
-        storeItems={items}
-        onApplied={() => {
-          refreshItems();
-          refreshZones();
-        }}
       />
     </div>
   );
@@ -2325,245 +2378,1410 @@ function EarmarkedItemsDialog({
 }
 
 // ────────────────────────────────────────────────────────────
-// AI Item Code Finder dialog — bulk find/assign item codes
+// Item Code Master & Deduplication — Full-Window overlay
+// Replaces the small "Find Item Codes (AI)" dialog with a
+// dedicated Item Master database view: browse, search, edit,
+// run AI duplicate analysis, consolidate duplicates, and bulk
+// upload new item codes.
 // ────────────────────────────────────────────────────────────
-interface FindItemCodeDialogProps {
+
+interface ItemCodeMasterWindowProps {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  storeItems: StoreItem[] | null;
-  onApplied: () => void;
 }
 
-const EMPTY_CANDIDATE: FindCodeCandidate = {
-  storeItemId: null,
+const DUPLICATE_TYPE_LABELS: Record<string, string> = {
+  multi_code_one_item: "Multiple Codes / One Item",
+  same_name_diff_code: "Multiple Codes / One Item",
+  same_code_diff_name: "Same Code / Different Items",
+  near_duplicate: "Near Duplicate (AI)",
+};
+
+function ItemCodeMasterWindow({ open, onOpenChange }: ItemCodeMasterWindowProps) {
+  const [activeTab, setActiveTab] = useState<
+    "database" | "analysis" | "upload"
+  >("database");
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+      {/* Header */}
+      <div className="border-b border-border bg-card shrink-0">
+        <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={() => onOpenChange(false)}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              title="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
+              <h2 className="font-semibold text-foreground text-base sm:text-lg truncate flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary shrink-0" />
+                Item Code Master &amp; Deduplication
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Identify duplicates &amp; consolidate to single canonical item codes
+              </p>
+            </div>
+          </div>
+        </div>
+        {/* Tabs */}
+        <div className="px-4 sm:px-6 flex items-center gap-1 border-t border-border overflow-x-auto scrollbar-thin">
+          <WindowTabButton
+            active={activeTab === "database"}
+            onClick={() => setActiveTab("database")}
+            icon={<Database className="h-3.5 w-3.5" />}
+            label="Item Master Database"
+          />
+          <WindowTabButton
+            active={activeTab === "analysis"}
+            onClick={() => setActiveTab("analysis")}
+            icon={<ScanSearch className="h-3.5 w-3.5" />}
+            label="Duplicate Analysis (AI)"
+            tone="amber"
+          />
+          <WindowTabButton
+            active={activeTab === "upload"}
+            onClick={() => setActiveTab("upload")}
+            icon={<Upload className="h-3.5 w-3.5" />}
+            label="Bulk Upload"
+          />
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="p-4 sm:p-6">
+          {activeTab === "database" && <ItemMasterDatabaseSection />}
+          {activeTab === "analysis" && <DuplicateAnalysisSection />}
+          {activeTab === "upload" && <BulkUploadItemMasterSection />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WindowTabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  tone,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  tone?: "amber";
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors",
+        active
+          ? tone === "amber"
+            ? "border-amber-500 text-amber-400"
+            : "border-primary text-primary"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  tone,
+  sub,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  sub?: string;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-lg p-3">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className={cn("text-lg font-semibold mt-1 tabular-nums", tone)}>
+        {value}
+      </p>
+      {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Section A — Item Master Database (browse, search, CRUD)
+// ────────────────────────────────────────────────────────────
+function ItemMasterDatabaseSection() {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [editTarget, setEditTarget] = useState<ItemMasterRecord | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Build query URL — empty params are omitted
+  const queryParams = new URLSearchParams();
+  if (search.trim()) queryParams.set("search", search.trim());
+  if (category !== "all") queryParams.set("category", category);
+  if (status !== "all") queryParams.set("status", status);
+  const qs = queryParams.toString();
+  const url = `/api/item-master${qs ? `?${qs}` : ""}`;
+
+  const { data: items, loading, error, refresh } = useFetch<ItemMasterRecord[]>(url);
+  const { toast } = useToast();
+
+  const handleDelete = async (item: ItemMasterRecord) => {
+    if (
+      !confirm(
+        `Delete "${item.canonicalCode}" — ${item.description}?\n\nThis cannot be undone.`
+      )
+    )
+      return;
+    setDeleting(item.id);
+    const res = await apiRequest(`/api/item-master/${item.id}`, "DELETE");
+    setDeleting(null);
+    if (res.ok) {
+      toast({
+        title: "Item deleted",
+        description: `${item.canonicalCode} removed from master`,
+      });
+      refresh();
+    } else {
+      toast({
+        title: "Delete failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openAdd = () => {
+    setEditTarget(null);
+    setFormOpen(true);
+  };
+  const openEdit = (item: ItemMasterRecord) => {
+    setEditTarget(item);
+    setFormOpen(true);
+  };
+  const handleSaved = () => {
+    setFormOpen(false);
+    setEditTarget(null);
+    refresh();
+    toast({
+      title: editTarget ? "Item updated" : "Item added",
+      description: editTarget
+        ? "Item master record has been updated."
+        : "New canonical item created in master.",
+    });
+  };
+
+  const activeCount = items?.filter((i) => i.status === "Active").length ?? 0;
+  const mergedCount = items?.filter((i) => i.status === "Merged").length ?? 0;
+  const discontinuedCount =
+    items?.filter((i) => i.status === "Discontinued").length ?? 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Stats summary */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <MiniStat
+          label="Total Items"
+          value={String(items?.length ?? 0)}
+          tone="text-blue-400"
+          sub="In current view"
+        />
+        <MiniStat
+          label="Active"
+          value={String(activeCount)}
+          tone="text-emerald-400"
+          sub="Canonical codes"
+        />
+        <MiniStat
+          label="Merged"
+          value={String(mergedCount)}
+          tone="text-amber-400"
+          sub="Consolidated"
+        />
+        <MiniStat
+          label="Discontinued"
+          value={String(discontinuedCount)}
+          tone="text-red-400"
+          sub="No longer in use"
+        />
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by code, description, alternate codes/names..."
+            className="pl-9 bg-card border-border"
+          />
+        </div>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className="w-[180px] bg-card border-border">
+            <SelectValue placeholder="Category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {STORE_CATEGORIES.filter((c) => c !== "All").map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="w-[150px] bg-card border-border">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Merged">Merged</SelectItem>
+            <SelectItem value="Discontinued">Discontinued</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          onClick={openAdd}
+          size="sm"
+          className="gap-1.5 ml-auto"
+        >
+          <Plus className="h-4 w-4" /> Add Item
+        </Button>
+      </div>
+
+      {/* Table */}
+      <div className="border border-border rounded-lg overflow-hidden bg-card">
+        {loading ? (
+          <LoadingState label="Loading item master..." />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : !items || items.length === 0 ? (
+          <EmptyState
+            icon={Database}
+            title="No item master entries"
+            description="Add a new item manually or use the Bulk Upload tab to populate the master database."
+            action={
+              <Button onClick={openAdd} size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" /> Add Item
+              </Button>
+            }
+          />
+        ) : (
+          <div className="max-h-[62vh] overflow-auto scrollbar-thin">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="min-w-[130px]">Canonical Code</TableHead>
+                  <TableHead className="min-w-[220px]">Description</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead className="min-w-[140px]">Alternate Codes</TableHead>
+                  <TableHead className="min-w-[140px]">Alternate Names</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((item) => (
+                  <TableRow key={item.id} className="border-border">
+                    <TableCell>
+                      <span className="font-mono text-xs px-2 py-1 rounded bg-primary/10 text-primary border border-primary/30">
+                        {item.canonicalCode}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-foreground font-medium">
+                        {item.description}
+                      </div>
+                      {item.mergedInto && (
+                        <div className="text-[10px] text-amber-400 mt-0.5">
+                          → merged into {item.mergedInto}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <CategoryBadge category={item.category} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.unit}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {item.alternateCodes || "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[220px]">
+                      <div className="truncate" title={item.alternateNames || ""}>
+                        {item.alternateNames || "—"}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge className={itemMasterStatusColor(item.status)}>
+                        {item.status}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openEdit(item)}
+                          title="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                          disabled={deleting === item.id}
+                          onClick={() => handleDelete(item)}
+                          title="Delete"
+                        >
+                          {deleting === item.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+      {items && items.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {items.length} item(s) in master · Click edit to update canonical code,
+          alternates or status.
+        </p>
+      )}
+
+      <ItemMasterFormDialog
+        key={editTarget ? `edit-${editTarget.id}` : "new"}
+        open={formOpen}
+        onOpenChange={(o) => {
+          setFormOpen(o);
+          if (!o) setEditTarget(null);
+        }}
+        editing={editTarget}
+        onSaved={handleSaved}
+      />
+    </div>
+  );
+}
+
+// ─── Add / Edit Item Master dialog ───
+interface ItemMasterFormDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  editing: ItemMasterRecord | null;
+  onSaved: () => void;
+}
+
+interface ItemMasterForm {
+  canonicalCode: string;
+  description: string;
+  category: string;
+  unit: string;
+  alternateCodes: string;
+  alternateNames: string;
+  status: string;
+}
+
+const DEFAULT_ITEM_MASTER_FORM: ItemMasterForm = {
+  canonicalCode: "",
   description: "",
   category: "General",
   unit: "NOS",
-  cost: 0,
+  alternateCodes: "",
+  alternateNames: "",
+  status: "Active",
 };
 
-function FindItemCodeDialog({
+function ItemMasterFormDialog({
   open,
   onOpenChange,
-  storeItems,
-  onApplied,
-}: FindItemCodeDialogProps) {
-  const [rows, setRows] = useState<FindCodeCandidate[]>([
-    { ...EMPTY_CANDIDATE },
+  editing,
+  onSaved,
+}: ItemMasterFormDialogProps) {
+  const [form, setForm] = useState<ItemMasterForm>(() =>
+    editing
+      ? {
+          canonicalCode: editing.canonicalCode,
+          description: editing.description,
+          category: editing.category || "General",
+          unit: editing.unit || "NOS",
+          alternateCodes: editing.alternateCodes ?? "",
+          alternateNames: editing.alternateNames ?? "",
+          status: editing.status || "Active",
+        }
+      : DEFAULT_ITEM_MASTER_FORM
+  );
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const set = (k: keyof ItemMasterForm, v: string) =>
+    setForm((prev) => ({ ...prev, [k]: v }));
+
+  const submit = async () => {
+    if (!form.canonicalCode.trim()) {
+      toast({ title: "Canonical code is required", variant: "destructive" });
+      return;
+    }
+    if (!form.description.trim()) {
+      toast({ title: "Description is required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      canonicalCode: form.canonicalCode.trim(),
+      description: form.description.trim(),
+      category: form.category,
+      unit: form.unit || "NOS",
+      alternateCodes: form.alternateCodes.trim() || null,
+      alternateNames: form.alternateNames.trim() || null,
+      status: form.status,
+    };
+    const res = editing
+      ? await apiRequest(`/api/item-master/${editing.id}`, "PUT", payload)
+      : await apiRequest("/api/item-master", "POST", payload);
+    setSaving(false);
+    if (res.ok) {
+      onSaved();
+    } else {
+      toast({
+        title: editing ? "Failed to update item" : "Failed to add item",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <Database className="h-5 w-5 text-primary" />
+            {editing ? "Edit Item Master" : "Add Item Master"}
+          </DialogTitle>
+          <DialogDescription>
+            {editing
+              ? "Update the canonical item record, alternate codes/names, or status."
+              : "Create a new canonical item in the master database."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+          <div className="space-y-1.5">
+            <Label>
+              Canonical Code <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              value={form.canonicalCode}
+              onChange={(e) => set("canonicalCode", e.target.value)}
+              placeholder="e.g. ITM-0001"
+              className="bg-background border-border font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Status</Label>
+            <Select value={form.status} onValueChange={(v) => set("status", v)}>
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Active">Active</SelectItem>
+                <SelectItem value="Merged">Merged</SelectItem>
+                <SelectItem value="Discontinued">Discontinued</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>
+              Description <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="e.g. Stainless Steel Bolt M12"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Category</Label>
+            <Select value={form.category} onValueChange={(v) => set("category", v)}>
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FILE_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Unit</Label>
+            <Input
+              value={form.unit}
+              onChange={(e) => set("unit", e.target.value)}
+              placeholder="NOS, KG, MTR, SET..."
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Alternate Codes (comma separated)</Label>
+            <Input
+              value={form.alternateCodes}
+              onChange={(e) => set("alternateCodes", e.target.value)}
+              placeholder="e.g. BMS-220A, BMS-220-OLD"
+              className="bg-background border-border font-mono text-xs"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Other codes that refer to this same item (useful after merging).
+            </p>
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Alternate Names (comma separated)</Label>
+            <Textarea
+              value={form.alternateNames}
+              onChange={(e) => set("alternateNames", e.target.value)}
+              placeholder="e.g. SS Bolt M12, Stainless Bolt 12mm"
+              className="bg-background border-border min-h-16"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Other descriptions / names used for this same item.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={saving} className="gap-1.5">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {editing ? "Save Changes" : "Add Item"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Section B — Duplicate Analysis (AI)
+// ────────────────────────────────────────────────────────────
+function DuplicateAnalysisSection() {
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [mergingKey, setMergingKey] = useState<string | null>(null);
+  // Per-group selection state keyed by stable group identifier
+  const [selections, setSelections] = useState<
+    Record<string, { canonicalId: string; mergeIds: Set<string> }>
+  >({});
+  const { toast } = useToast();
+
+  const runAnalysis = async () => {
+    setAnalyzing(true);
+    setError(null);
+    setResult(null);
+    setSelections({});
+    const res = await apiRequest("/api/item-master/analyze", "POST");
+    setAnalyzing(false);
+    if (res.ok && res.data) {
+      const data = res.data as AnalyzeResponse;
+      setResult(data);
+      // Auto-initialise selections for each group: first item-master item
+      // becomes canonical; remaining item-master items default to merge targets
+      const initSels: Record<string, { canonicalId: string; mergeIds: Set<string> }> = {};
+      data.groups.forEach((g) => {
+        const masterItems = g.items.filter((i) => i.source === "item-master");
+        if (masterItems.length > 0) {
+          const canonical = masterItems[0];
+          const mergeIds = new Set<string>(
+            masterItems
+              .filter((i) => i.id !== canonical.id)
+              .map((i) => i.id)
+          );
+          initSels[groupKey(g)] = { canonicalId: canonical.id, mergeIds };
+        }
+      });
+      setSelections(initSels);
+      toast({
+        title: `Analysis complete — ${data.duplicatesFound} duplicate group(s)`,
+        description: `Scanned ${data.totalScanned} entries across Item Master + Store Items.`,
+      });
+    } else {
+      setError(res.error || "Analysis failed");
+      toast({
+        title: "Analysis failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const setCanonical = (key: string, canonicalId: string) => {
+    setSelections((prev) => {
+      const cur =
+        prev[key] ?? { canonicalId: "", mergeIds: new Set<string>() };
+      // Remove the new canonical from the merge set if present
+      const next = new Set(cur.mergeIds);
+      next.delete(canonicalId);
+      return { ...prev, [key]: { canonicalId, mergeIds: next } };
+    });
+  };
+
+  const toggleMerge = (key: string, itemId: string) => {
+    setSelections((prev) => {
+      const cur =
+        prev[key] ?? { canonicalId: "", mergeIds: new Set<string>() };
+      if (cur.canonicalId === itemId) return prev; // can't merge the canonical
+      const next = new Set(cur.mergeIds);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return { ...prev, [key]: { canonicalId: cur.canonicalId, mergeIds: next } };
+    });
+  };
+
+  const handleMerge = async (group: DuplicateGroup) => {
+    const key = groupKey(group);
+    const sel = selections[key];
+    if (!sel || !sel.canonicalId) {
+      toast({
+        title: "Select a canonical item first",
+        description: "Pick one row (radio) to keep as the canonical code.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const mergeIds = Array.from(sel.mergeIds).filter(
+      (id) => id !== sel.canonicalId
+    );
+    if (mergeIds.length === 0) {
+      toast({
+        title: "Select at least one item to merge",
+        description: "Tick the checkbox beside the rows you want to consolidate.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setMergingKey(key);
+    const res = await apiRequest(
+      `/api/item-master/${sel.canonicalId}/merge`,
+      "POST",
+      { canonicalId: sel.canonicalId, mergeIds }
+    );
+    setMergingKey(null);
+    if (res.ok && res.data) {
+      const data = res.data as MergeResponse;
+      toast({
+        title: `Merged ${data.mergedCount} item(s) into ${data.canonicalCode}`,
+        description:
+          "Merged records marked as Merged. Store items repointed to canonical code.",
+      });
+      // Remove this group from the result + clear its selection
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              groups: prev.groups.filter((g) => groupKey(g) !== key),
+              duplicatesFound: Math.max(0, prev.duplicatesFound - 1),
+            }
+          : prev
+      );
+      setSelections((prev) => {
+        const n = { ...prev };
+        delete n[key];
+        return n;
+      });
+    } else {
+      toast({
+        title: "Merge failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const multiCodeCount =
+    result?.groups.filter(
+      (g) =>
+        g.type === "multi_code_one_item" || g.type === "same_name_diff_code"
+    ).length ?? 0;
+  const sameCodeCount =
+    result?.groups.filter((g) => g.type === "same_code_diff_name").length ?? 0;
+  const nearDupCount =
+    result?.groups.filter((g) => g.type === "near_duplicate").length ?? 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Top action card */}
+      <div className="bg-card border border-border rounded-xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-[240px]">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-400" /> AI Duplicate Analysis
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Scans both the Item Master and Store Items tables to detect:
+              <span className="text-amber-400 font-medium"> multiple codes / one item</span>,
+              <span className="text-red-400 font-medium"> same code / different items</span>, and
+              <span className="text-violet-400 font-medium"> near-duplicates (AI)</span>.
+              Then consolidate them into a single canonical code.
+            </p>
+          </div>
+          <Button
+            onClick={runAnalysis}
+            disabled={analyzing}
+            className="gap-1.5 shrink-0"
+          >
+            {analyzing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ScanSearch className="h-4 w-4" />
+            )}
+            {analyzing ? "Analyzing..." : "Run Duplicate Analysis (AI)"}
+          </Button>
+        </div>
+
+        {analyzing && (
+          <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground bg-secondary/40 border border-border rounded-lg p-3">
+            <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+            <span>
+              Scanning database &amp; calling AI for near-duplicate detection —
+              this can take 10–25 seconds...
+            </span>
+          </div>
+        )}
+
+        {error && !analyzing && (
+          <div className="mt-4 flex items-start gap-2 text-sm bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg p-3">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">Analysis failed</p>
+              <p className="text-xs opacity-90">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {result && !analyzing && (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <MiniStat
+              label="Entries Scanned"
+              value={String(result.totalScanned)}
+              tone="text-blue-400"
+              sub="Master + Store"
+            />
+            <MiniStat
+              label="Duplicate Groups"
+              value={String(result.duplicatesFound)}
+              tone="text-amber-400"
+              sub="To review"
+            />
+            <MiniStat
+              label="Multi-Code / One Item"
+              value={String(multiCodeCount)}
+              tone="text-amber-400"
+              sub="Consolidate codes"
+            />
+            <MiniStat
+              label="Same-Code / Near-Dup"
+              value={String(sameCodeCount + nearDupCount)}
+              tone="text-red-400"
+              sub="Resolve conflicts"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Groups list */}
+      {result && !analyzing && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-foreground">
+              Scanned {result.totalScanned} entries — found{" "}
+              <span className="text-amber-400">{result.duplicatesFound}</span>{" "}
+              duplicate group{result.duplicatesFound === 1 ? "" : "s"}
+            </h4>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runAnalysis}
+              disabled={analyzing}
+              className="gap-1.5"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Re-run Analysis
+            </Button>
+          </div>
+
+          {result.groups.length === 0 ? (
+            <EmptyState
+              icon={Check}
+              title="No duplicates found"
+              description="The Item Master and Store Items are clean — no consolidation needed."
+            />
+          ) : (
+            result.groups.map((group) => {
+              const key = groupKey(group);
+              const sel =
+                selections[key] ?? {
+                  canonicalId: "",
+                  mergeIds: new Set<string>(),
+                };
+              const selectedMergeCount = Array.from(sel.mergeIds).filter(
+                (id) => id !== sel.canonicalId
+              ).length;
+              const isMerging = mergingKey === key;
+              const typeLabel =
+                DUPLICATE_TYPE_LABELS[group.type] || group.type;
+              const masterItems = group.items.filter(
+                (i) => i.source === "item-master"
+              );
+              const canMerge =
+                !!sel.canonicalId && selectedMergeCount > 0 && !isMerging;
+              return (
+                <div
+                  key={key}
+                  className="bg-card border border-border rounded-xl p-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <CustomBadge className={duplicateTypeColor(group.type)}>
+                          {typeLabel}
+                        </CustomBadge>
+                        {group.canonicalCode && (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            code: {group.canonicalCode}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-muted-foreground">
+                          {group.items.length} item(s) · {masterItems.length} in master
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground font-medium mt-1.5">
+                        {group.description}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <span className="text-amber-400 font-medium">
+                          Recommendation:
+                        </span>{" "}
+                        {group.recommendation}
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => handleMerge(group)}
+                      disabled={!canMerge}
+                      size="sm"
+                      className="gap-1.5 shrink-0"
+                    >
+                      {isMerging ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <GitMerge className="h-3.5 w-3.5" />
+                      )}
+                      Merge Selected
+                      {selectedMergeCount > 0 && ` (${selectedMergeCount})`}
+                    </Button>
+                  </div>
+
+                  {/* Items list with radio + checkboxes */}
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <div className="max-h-[40vh] overflow-auto scrollbar-thin">
+                      <Table>
+                        <TableHeader className="sticky top-0 z-10 bg-card">
+                          <TableRow className="border-border hover:bg-transparent">
+                            <TableHead className="w-12 text-center">Keep</TableHead>
+                            <TableHead className="w-12 text-center">Merge</TableHead>
+                            <TableHead className="min-w-[130px]">Code</TableHead>
+                            <TableHead className="min-w-[200px]">Description</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Zone</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {group.items.map((it) => {
+                            const isCanonical = sel.canonicalId === it.id;
+                            const isMerge = sel.mergeIds.has(it.id);
+                            const isMaster = it.source === "item-master";
+                            return (
+                              <TableRow
+                                key={`${it.source}-${it.id}`}
+                                className={cn(
+                                  "border-border",
+                                  isCanonical && "bg-primary/[0.06]",
+                                  !isMaster && "opacity-80"
+                                )}
+                              >
+                                <TableCell className="text-center">
+                                  <input
+                                    type="radio"
+                                    name={`canonical-${key}`}
+                                    checked={isCanonical}
+                                    onChange={() => setCanonical(key, it.id)}
+                                    disabled={!isMaster}
+                                    className="h-4 w-4 accent-primary cursor-pointer disabled:cursor-not-allowed"
+                                    title={
+                                      isMaster
+                                        ? "Set as canonical (kept)"
+                                        : "Store items cannot be canonical — create a master record first"
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <Checkbox
+                                    checked={isMerge}
+                                    onCheckedChange={() =>
+                                      toggleMerge(key, it.id)
+                                    }
+                                    disabled={!isMaster || isCanonical}
+                                    className="cursor-pointer"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/30">
+                                    {it.canonicalCode}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-foreground">
+                                  {it.description}
+                                </TableCell>
+                                <TableCell>
+                                  <CategoryBadge category={it.category} />
+                                </TableCell>
+                                <TableCell>
+                                  <CustomBadge
+                                    className={
+                                      it.source === "item-master"
+                                        ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                        : "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                                    }
+                                  >
+                                    {it.source === "item-master"
+                                      ? "Master"
+                                      : "Store"}
+                                  </CustomBadge>
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {it.zoneName || "—"}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    Pick one row as{" "}
+                    <span className="text-primary font-medium">canonical</span>{" "}
+                    (radio — only item-master rows can be canonical), then tick
+                    the rows to{" "}
+                    <span className="text-amber-400 font-medium">merge</span>{" "}
+                    into it. Merged records get{" "}
+                    <code className="font-mono">status=Merged</code> and store
+                    items referencing the merged codes are auto-repointed to the
+                    canonical code.
+                  </p>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {!result && !analyzing && !error && (
+        <EmptyState
+          icon={ScanSearch}
+          title="No analysis yet"
+          description="Click 'Run Duplicate Analysis (AI)' above to scan the Item Master and Store Items for duplicates and consolidate them."
+        />
+      )}
+    </div>
+  );
+}
+
+// Stable identifier for a duplicate group (concatenation of all item IDs)
+function groupKey(g: DuplicateGroup): string {
+  return g.items
+    .map((i) => `${i.source}-${i.id}`)
+    .sort()
+    .join("|");
+}
+
+// ────────────────────────────────────────────────────────────
+// Section C — Bulk Upload (item code + description)
+// ────────────────────────────────────────────────────────────
+interface BulkUploadItemMasterRow {
+  canonicalCode: string;
+  description: string;
+  category: string;
+  unit: string;
+}
+
+const BULK_ITEM_MASTER_COLUMNS = [
+  "ItemCode",
+  "Description",
+  "Category",
+  "Unit",
+] as const;
+
+const EMPTY_BULK_ROW: BulkUploadItemMasterRow = {
+  canonicalCode: "",
+  description: "",
+  category: "General",
+  unit: "NOS",
+};
+
+function downloadItemMasterTemplate() {
+  const header = BULK_ITEM_MASTER_COLUMNS.join(",");
+  const sample1 = ["ITM-0001", "Stainless Steel Bolt M12", "Metal", "NOS"].join(
+    ","
+  );
+  const sample2 = ["PL-050", 'PVC Pipe 50mm 1"', "Plumbing", "MTR"].join(",");
+  const csv = `${header}\n${sample1}\n${sample2}\n`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "item-master-template.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function BulkUploadItemMasterSection() {
+  const [rows, setRows] = useState<BulkUploadItemMasterRow[]>([
+    { ...EMPTY_BULK_ROW },
   ]);
-  const [running, setRunning] = useState(false);
-  const [results, setResults] = useState<
-    { candidate: FindCodeCandidate; result: FindCodeResult }[] | null
-  >(null);
-  const [applying, setApplying] = useState<string | null>(null);
-  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{
+    done: number;
+    total: number;
+    successCount: number;
+    errors: string[];
+  }>({ done: 0, total: 0, successCount: 0, errors: [] });
+  const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const reset = () => {
-    setRows([{ ...EMPTY_CANDIDATE }]);
-    setResults(null);
-    setAppliedIds(new Set());
-    setApplying(null);
-    setRunning(false);
+    setRows([{ ...EMPTY_BULK_ROW }]);
+    setImporting(false);
+    setProgress({ done: 0, total: 0, successCount: 0, errors: [] });
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  const loadFromStore = () => {
-    if (!storeItems || storeItems.length === 0) {
+  const handleFile = async (file: File) => {
+    const text = await file.text();
+    const parsed = parseCSV(text);
+    if (parsed.length === 0) {
+      toast({ title: "CSV is empty", variant: "destructive" });
+      return;
+    }
+    const first = parsed[0].map((c) => c.trim().toLowerCase());
+    const hasHeader =
+      first.includes("itemcode") || first.includes("description");
+    const dataRows = hasHeader ? parsed.slice(1) : parsed;
+    if (dataRows.length === 0) {
       toast({
-        title: "No store items available",
-        description: "Add items to the store first.",
+        title: "No data rows found in CSV",
         variant: "destructive",
       });
       return;
     }
     setRows(
-      storeItems.map((it) => ({
-        storeItemId: it.id,
-        description: it.description,
-        category: it.category || "General",
-        unit: it.unit || "NOS",
-        cost: it.unitCost || 0,
+      dataRows.map((r) => ({
+        canonicalCode: (r[0] ?? "").trim(),
+        description: (r[1] ?? "").trim(),
+        category: (r[2] ?? "General").trim() || "General",
+        unit: (r[3] ?? "NOS").trim() || "NOS",
       }))
     );
-    setResults(null);
-    setAppliedIds(new Set());
     toast({
-      title: `Loaded ${storeItems.length} store items`,
-      description: "Review the rows and run AI matching.",
+      title: `Loaded ${dataRows.length} rows from CSV`,
+      description: "Review and edit before importing.",
     });
   };
 
   const addRow = () =>
-    setRows((r) => [...r, { ...EMPTY_CANDIDATE }]);
+    setRows((r) => [...r, { ...EMPTY_BULK_ROW }]);
 
   const removeRow = (i: number) =>
     setRows((r) => r.filter((_, idx) => idx !== i));
 
-  const updateRow = (i: number, patch: Partial<FindCodeCandidate>) =>
+  const updateRow = (i: number, patch: Partial<BulkUploadItemMasterRow>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
 
-  const hasValidRow = rows.some((r) => r.description.trim() !== "");
+  const validRows = rows.filter(
+    (r) => r.canonicalCode.trim() && r.description.trim()
+  );
 
-  const runAI = async () => {
-    const valid = rows.filter((r) => r.description.trim() !== "");
-    if (valid.length === 0) {
+  const doImport = async () => {
+    if (validRows.length === 0) {
       toast({
-        title: "Add at least one item with a description",
+        title: "No valid rows to import",
+        description: "Each row needs at least ItemCode + Description.",
         variant: "destructive",
       });
       return;
     }
-    setRunning(true);
-    setResults(null);
-    const payload = valid.map((r) => ({
+    setImporting(true);
+    setProgress({
+      done: 0,
+      total: validRows.length,
+      successCount: 0,
+      errors: [],
+    });
+
+    const payload = validRows.map((r) => ({
+      canonicalCode: r.canonicalCode.trim(),
       description: r.description.trim(),
       category: r.category || "General",
       unit: r.unit || "NOS",
-      cost: Number(r.cost) || 0,
     }));
-    const res = await apiRequest("/api/stores/find-code", "POST", payload);
-    setRunning(false);
-    if (res.ok && Array.isArray(res.data)) {
-      const out = (res.data as FindCodeResult[]).map((result, idx) => ({
-        candidate: valid[idx],
-        result,
-      }));
-      setResults(out);
-      const dupCount = out.filter((o) => o.result.isDuplicate).length;
-      toast({
-        title: `AI matched ${out.length} item(s)`,
-        description:
-          dupCount > 0
-            ? `${dupCount} duplicate(s) flagged — review recommendations.`
-            : "No duplicates detected.",
-      });
-    } else {
-      toast({
-        title: "AI matching failed",
-        description: res.error,
-        variant: "destructive",
-      });
-    }
-  };
+    const res = await apiRequest("/api/item-master", "POST", payload);
+    setImporting(false);
 
-  const apply = async (i: number) => {
-    const item = results?.[i];
-    if (!item || !item.result.suggestedItemCode || !item.candidate.storeItemId)
-      return;
-    const sid = item.candidate.storeItemId;
-    setApplying(sid);
-    const res = await apiRequest(`/api/stores/${sid}`, "PUT", {
-      itemCode: item.result.suggestedItemCode,
-    });
-    setApplying(null);
     if (res.ok) {
-      setAppliedIds((prev) => new Set(prev).add(sid));
-      toast({
-        title: "Item code applied",
-        description: `${item.candidate.description} → ${item.result.suggestedItemCode}`,
+      // createMany returns {count}; skipDuplicates → some rows may be skipped
+      const created =
+        typeof res.data?.count === "number"
+          ? res.data.count
+          : validRows.length;
+      const skipped = Math.max(0, validRows.length - created);
+      setProgress({
+        done: validRows.length,
+        total: validRows.length,
+        successCount: created,
+        errors:
+          skipped > 0
+            ? [`${skipped} duplicate code(s) skipped (already exist in master)`]
+            : [],
       });
-      onApplied();
-    } else {
       toast({
-        title: "Failed to apply code",
+        title: `Import complete — ${created} item(s) added`,
+        description:
+          skipped > 0
+            ? `${skipped} duplicate code(s) were skipped (skipDuplicates=true).`
+            : "All rows imported successfully.",
+      });
+      // Clear rows after successful import
+      setRows([{ ...EMPTY_BULK_ROW }]);
+      if (fileRef.current) fileRef.current.value = "";
+    } else {
+      setProgress({
+        done: 0,
+        total: validRows.length,
+        successCount: 0,
+        errors: [res.error || "Import failed"],
+      });
+      toast({
+        title: "Import failed",
         description: res.error,
         variant: "destructive",
       });
     }
   };
 
-  const dupCount = results?.filter((r) => r.result.isDuplicate).length ?? 0;
+  const pct =
+    progress.total > 0
+      ? Math.round((progress.done / progress.total) * 100)
+      : 0;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!running) {
-          onOpenChange(o);
-          if (!o) setTimeout(reset, 200);
-        }
-      }}
-    >
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
-        <DialogHeader>
-          <DialogTitle className="text-foreground flex items-center gap-2">
-            <ScanSearch className="h-5 w-5 text-primary" /> AI Item Code Finder
-          </DialogTitle>
-          <DialogDescription>
-            Bulk-assign item codes using AI with duplicate detection across the
-            store catalogue. Load current store items or enter rows manually,
-            then run matching and apply suggested codes one-by-one.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="space-y-4">
+      {/* Top intro card */}
+      <div className="bg-card border border-border rounded-xl p-4 sm:p-5">
+        <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+          <Upload className="h-5 w-5 text-primary" /> Bulk Upload Item Master
+        </h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Import item codes + descriptions in bulk. Download the CSV template,
+          fill it in (or add rows manually below), then click Import. Duplicate
+          codes already in the master are skipped automatically.
+        </p>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadFromStore}
-            className="gap-1.5"
-            disabled={running || !storeItems}
-          >
-            <Boxes className="h-3.5 w-3.5" /> Load from current store items
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={addRow}
-            disabled={running}
-            className="gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add Row
-          </Button>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {rows.length} row(s)
-            </span>
+        {/* Template format + download + file input */}
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-secondary/40 border border-border rounded-lg p-3">
+            <p className="text-sm font-medium text-foreground mb-1">
+              CSV Format
+            </p>
+            <p className="text-xs text-muted-foreground mb-2">
+              Columns (in this exact order, header row optional):
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {BULK_ITEM_MASTER_COLUMNS.map((col, i) => (
+                <span
+                  key={col}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-mono"
+                >
+                  <span className="text-muted-foreground">{i + 1}.</span>
+                  {col}
+                </span>
+              ))}
+            </div>
             <Button
-              onClick={runAI}
-              disabled={running || !hasValidRow}
-              className="gap-1.5"
-              size="sm"
+              variant="outline"
+              onClick={downloadItemMasterTemplate}
+              className="w-full mt-3 gap-1.5"
+              disabled={importing}
             >
-              {running ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Wand2 className="h-3.5 w-3.5" />
-              )}
-              {running ? "Matching..." : "Run AI Matching"}
+              <Download className="h-4 w-4" /> Download CSV Template
+            </Button>
+          </div>
+
+          <div className="bg-secondary/40 border border-border rounded-lg p-3 space-y-2">
+            <Label>Upload CSV file</Label>
+            <Input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importing}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }}
+              className="bg-background border-border"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              File will be parsed and previewed below — you can edit rows before
+              importing.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={addRow}
+              disabled={importing}
+              className="gap-1.5 w-full"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add Manual Row
             </Button>
           </div>
         </div>
+      </div>
 
-        {/* Candidate editing table */}
-        <div className="border border-border rounded-lg overflow-hidden">
-          <div className="max-h-[26vh] overflow-auto scrollbar-thin">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="w-10 text-center">#</TableHead>
-                  <TableHead>
-                    Description <span className="text-red-400">*</span>
-                  </TableHead>
-                  <TableHead className="w-36">Category</TableHead>
-                  <TableHead className="w-20">Unit</TableHead>
-                  <TableHead className="w-28 text-right">Cost</TableHead>
-                  <TableHead className="w-12 text-center">Del</TableHead>
+      {/* Preview / edit table */}
+      <div className="bg-card border border-border rounded-xl">
+        <div className="flex items-center justify-between p-3 border-b border-border flex-wrap gap-2">
+          <p className="text-xs text-muted-foreground">
+            <span className="text-foreground font-medium tabular-nums">
+              {rows.length}
+            </span>{" "}
+            row(s) ·{" "}
+            <span className="text-emerald-400 font-medium tabular-nums">
+              {validRows.length}
+            </span>{" "}
+            valid
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={reset}
+              disabled={importing}
+              className="gap-1.5 text-muted-foreground"
+            >
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+            <Button
+              onClick={doImport}
+              disabled={importing || validRows.length === 0}
+              size="sm"
+              className="gap-1.5"
+            >
+              {importing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Upload className="h-3.5 w-3.5" />
+              )}
+              Import
+              {validRows.length > 0 && ` (${validRows.length})`}
+            </Button>
+          </div>
+        </div>
+        <div className="max-h-[50vh] overflow-auto scrollbar-thin">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-card">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="w-10 text-center">#</TableHead>
+                <TableHead className="min-w-[150px]">
+                  Item Code <span className="text-red-400">*</span>
+                </TableHead>
+                <TableHead className="min-w-[240px]">
+                  Description <span className="text-red-400">*</span>
+                </TableHead>
+                <TableHead className="w-40">Category</TableHead>
+                <TableHead className="w-24">Unit</TableHead>
+                <TableHead className="w-12 text-center">Del</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 ? (
+                <TableRow className="border-border">
+                  <TableCell
+                    colSpan={6}
+                    className="text-center text-xs text-muted-foreground py-4"
+                  >
+                    No rows. Click &quot;Add Manual Row&quot; or upload a CSV.
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow className="border-border">
-                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-4">
-                      No rows. Click &quot;Add Row&quot; to begin.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((row, i) => (
-                    <TableRow key={i} className="border-border">
+              ) : (
+                rows.map((row, i) => {
+                  const valid =
+                    !!row.canonicalCode.trim() && !!row.description.trim();
+                  return (
+                    <TableRow
+                      key={i}
+                      className={cn(
+                        "border-border",
+                        !valid && "bg-red-500/[0.04]"
+                      )}
+                    >
                       <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
                         {i + 1}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={row.canonicalCode}
+                          onChange={(e) =>
+                            updateRow(i, { canonicalCode: e.target.value })
+                          }
+                          placeholder="ITM-0001"
+                          className="bg-background border-border h-8 font-mono text-xs"
+                          disabled={importing}
+                        />
                       </TableCell>
                       <TableCell>
                         <Input
@@ -2573,39 +3791,35 @@ function FindItemCodeDialog({
                           }
                           placeholder="Item description"
                           className="bg-background border-border h-8"
-                          disabled={running}
+                          disabled={importing}
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
+                        <Select
                           value={row.category}
-                          onChange={(e) =>
-                            updateRow(i, { category: e.target.value })
-                          }
-                          placeholder="Category"
-                          className="bg-background border-border h-8"
-                          disabled={running}
-                        />
+                          onValueChange={(v) => updateRow(i, { category: v })}
+                        >
+                          <SelectTrigger className="bg-background border-border h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {FILE_CATEGORIES.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <Input
                           value={row.unit}
-                          onChange={(e) => updateRow(i, { unit: e.target.value })}
-                          placeholder="NOS"
-                          className="bg-background border-border h-8"
-                          disabled={running}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          value={row.cost}
                           onChange={(e) =>
-                            updateRow(i, { cost: Number(e.target.value) || 0 })
+                            updateRow(i, { unit: e.target.value })
                           }
-                          className="bg-background border-border h-8 text-right tabular-nums"
-                          disabled={running}
+                          placeholder="NOS"
+                          className="bg-background border-border h-8 text-xs"
+                          disabled={importing}
                         />
                       </TableCell>
                       <TableCell className="text-center">
@@ -2614,194 +3828,59 @@ function FindItemCodeDialog({
                           size="icon"
                           className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                           onClick={() => removeRow(i)}
-                          disabled={running || rows.length === 1}
+                          disabled={importing || rows.length === 1}
                           title="Remove row"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-
-        {/* Results */}
-        {results && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-foreground">
-                AI Results
-              </h3>
-              <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
-                {results.length} matched
-              </CustomBadge>
-              {dupCount > 0 && (
-                <CustomBadge className="bg-red-500/15 text-red-400 border-red-500/30">
-                  {dupCount} duplicate(s)
-                </CustomBadge>
+                  );
+                })
               )}
-            </div>
+            </TableBody>
+          </Table>
+        </div>
+      </div>
 
-            {results.length === 0 ? (
-              <EmptyState
-                icon={ScanSearch}
-                title="No results"
-                description="Try running AI matching again with valid descriptions."
-              />
-            ) : (
-              <div className="border border-border rounded-lg overflow-hidden">
-                <div className="max-h-[40vh] overflow-auto scrollbar-thin">
-                  <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-card">
-                      <TableRow className="border-border hover:bg-transparent">
-                        <TableHead>Description</TableHead>
-                        <TableHead>Suggested Code</TableHead>
-                        <TableHead className="w-20">Duplicate</TableHead>
-                        <TableHead>Duplicate Of</TableHead>
-                        <TableHead>Existing Codes</TableHead>
-                        <TableHead className="w-24">Confidence</TableHead>
-                        <TableHead>Recommendation</TableHead>
-                        <TableHead className="w-24 text-right">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {results.map((r, i) => {
-                        const sid = r.candidate.storeItemId;
-                        const hasCode = !!r.result.suggestedItemCode;
-                        const isApplied = sid ? appliedIds.has(sid) : false;
-                        const isApplying = sid ? applying === sid : false;
-                        return (
-                          <TableRow
-                            key={i}
-                            className={cn(
-                              "border-border",
-                              r.result.isDuplicate &&
-                                "border-l-4 border-l-red-500/60 bg-red-500/[0.04]"
-                            )}
-                          >
-                            <TableCell className="font-medium text-foreground max-w-[220px]">
-                              <div
-                                className="truncate"
-                                title={r.candidate.description}
-                              >
-                                {r.candidate.description}
-                              </div>
-                              {!sid && (
-                                <span className="text-[10px] text-amber-400">
-                                  Manual entry
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {hasCode ? (
-                                <span className="font-mono text-xs px-2 py-1 rounded bg-primary/10 text-primary border border-primary/30">
-                                  {r.result.suggestedItemCode}
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">
-                                  —
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <CustomBadge
-                                className={
-                                  r.result.isDuplicate
-                                    ? "bg-red-500/15 text-red-400 border-red-500/30"
-                                    : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                }
-                              >
-                                {r.result.isDuplicate ? "Yes" : "No"}
-                              </CustomBadge>
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-muted-foreground">
-                              {r.result.duplicateOf || "—"}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground max-w-[180px]">
-                              {r.result.existingCodes.length > 0
-                                ? r.result.existingCodes.join(", ")
-                                : "—"}
-                            </TableCell>
-                            <TableCell>
-                              <CustomBadge
-                                className={confidenceColor(r.result.confidence)}
-                              >
-                                {r.result.confidence}
-                              </CustomBadge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground max-w-[260px]">
-                              <div className="leading-relaxed">
-                                {r.result.recommendation || "—"}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {isApplied ? (
-                                <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
-                                  <Check className="h-3.5 w-3.5" /> Applied
-                                </span>
-                              ) : !hasCode ? (
-                                <span className="text-xs text-muted-foreground">
-                                  No code
-                                </span>
-                              ) : !sid ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="inline-flex">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled
-                                        className="h-7 gap-1"
-                                      >
-                                        <Wand2 className="h-3 w-3" /> Apply
-                                      </Button>
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    Manual entry — create item first
-                                  </TooltipContent>
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 gap-1"
-                                  disabled={isApplying}
-                                  onClick={() => apply(i)}
-                                >
-                                  {isApplying ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <Wand2 className="h-3 w-3" />
-                                  )}
-                                  Apply
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+      {/* Progress / result */}
+      {(importing || progress.done > 0) && (
+        <div className="bg-card border border-border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {importing ? "Importing..." : "Import complete"}
+            </span>
+            <span className="font-medium text-foreground tabular-nums">
+              {progress.done} / {progress.total} ({pct}%)
+            </span>
+          </div>
+          <Progress value={pct} />
+          <div className="flex items-center gap-4 text-xs">
+            <span className="text-emerald-400">
+              ✓ {progress.successCount} added
+            </span>
+            {progress.errors.length > 0 && (
+              <span className="text-red-400">
+                ✗ {progress.errors.length} issue(s)
+              </span>
             )}
           </div>
-        )}
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={running}
-          >
-            Close
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {progress.errors.length > 0 && (
+            <div className="max-h-32 overflow-y-auto scrollbar-thin bg-background/50 border border-border rounded-md p-2 mt-2">
+              <ul className="space-y-0.5">
+                {progress.errors.map((err, i) => (
+                  <li
+                    key={i}
+                    className="text-[11px] text-red-400 font-mono leading-relaxed"
+                  >
+                    {err}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

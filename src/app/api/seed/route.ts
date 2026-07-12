@@ -344,6 +344,146 @@ export async function POST() {
       ],
     });
 
+    // ── Stakeholders (Officers & Sailors) ──
+    await db.stakeholder.createMany({
+      data: [
+        // CSLOG dept
+        { name: "Cdr. R. Perera", rankOrRate: "Commander", svcNumber: "SVC/1234", appointment: "CSLOG", department: "CSLOG", officeNumber: "Ext 2101", telephone: "011-2345678", whatsapp: "077-1234567", email: "rperera@navy.lk", availability: "Available", role: "Officer" },
+        { name: "Lt. M. Fernando", rankOrRate: "Lieutenant", svcNumber: "SVC/2345", appointment: "CLOGD", department: "CSLOG", officeNumber: "Ext 2102", telephone: "011-2345679", whatsapp: "077-2345678", email: "mfernando@navy.lk", availability: "Available", role: "Officer" },
+        { name: "Lt. Cdr. K. Silva", rankOrRate: "Lt. Commander", svcNumber: "SVC/3456", appointment: "ASO(E)", department: "CSLOG", officeNumber: "Ext 2103", telephone: "011-2345680", whatsapp: "077-3456789", email: "ksilva@navy.lk", availability: "On Leave", role: "Officer" },
+        { name: "PO Bandara", rankOrRate: "Petty Officer", svcNumber: "SVC/5678", appointment: "APO(E)", department: "CSLOG", officeNumber: "Ext 2104", telephone: "011-2345681", whatsapp: "077-4567890", email: "pbandara@navy.lk", availability: "Available", role: "Sailor" },
+        { name: "LS Silva", rankOrRate: "Leading Seaman", svcNumber: "SVC/6789", appointment: "AAPO(PT)", department: "CSLOG", officeNumber: "Ext 2105", telephone: "011-2345682", whatsapp: "077-5678901", email: "ssilva@navy.lk", availability: "Busy", role: "Sailor" },
+        // CE dept
+        { name: "Capt. T. Jayasuriya", rankOrRate: "Captain", svcNumber: "SVC/1111", appointment: "CCED(E)", department: "CE", officeNumber: "Ext 2201", telephone: "011-3456789", whatsapp: "077-1111111", email: "tjaya@navy.lk", availability: "Available", role: "Officer" },
+        { name: "Lt. Cdr. A. Wickrama", rankOrRate: "Lt. Commander", svcNumber: "SVC/2222", appointment: "CCEO(E)", department: "CE", officeNumber: "Ext 2202", telephone: "011-3456790", whatsapp: "077-2222222", email: "awick@navy.lk", availability: "Available", role: "Officer" },
+        { name: "Lt. D. Rajapaksa", rankOrRate: "Lieutenant", svcNumber: "SVC/3333", appointment: "SCE(M)", department: "CE", officeNumber: "Ext 2203", telephone: "011-3456791", whatsapp: "077-3333333", email: "draja@navy.lk", availability: "Off Duty", role: "Officer" },
+        { name: "Lt. N. Gunawardena", rankOrRate: "Lieutenant", svcNumber: "SVC/4444", appointment: "SCE(P&P)", department: "CE", officeNumber: "Ext 2204", telephone: "011-3456792", whatsapp: "077-4444444", email: "nguna@navy.lk", availability: "Available", role: "Officer" },
+      ],
+    });
+
+    // ── Suppliers with contacts, nominations, ratings ──
+    const sup1 = await db.supplier.create({
+      data: {
+        name: "Marine Pumps Ltd",
+        contactPerson: "Mr. Sunil Perera",
+        telephone: "011-2587411",
+        whatsapp: "077-9988776",
+        email: "sales@marinepumps.lk",
+        address: "No 45, Industrial Zone, Colombo 10",
+        contractDetails: "RC 2025 valid till 31 Dec 2025. Annual supply contract for BMS pumps.",
+        registrationNo: "PV-2001-1234",
+        vatNo: "VAT-1144556",
+        bankDetails: "BOC Colombo - 0012003456789",
+      },
+    });
+    await db.supplierContact.createMany({
+      data: [
+        { supplierId: sup1.id, name: "Sunil Perera", designation: "Sales Manager", telephone: "011-2587411", whatsapp: "077-9988776", email: "sunil@marinepumps.lk", isPrimary: true },
+        { supplierId: sup1.id, name: "Nimal Silva", designation: "Service Engineer", telephone: "011-2587412", whatsapp: "077-9988777", email: "nimal@marinepumps.lk", isPrimary: false },
+      ],
+    });
+    await db.supplierNomination.createMany({
+      data: [
+        { supplierId: sup1.id, itemCode: "BMS-220", itemName: "Centrifugal Pump 15kW", category: "BMS" },
+        { supplierId: sup1.id, itemCode: "BMS-220-SK", itemName: "Centrifugal Pump Seal Kit", category: "BMS" },
+        { supplierId: sup1.id, itemCode: "BMS-6204", itemName: "Bearing 6204 ZZ", category: "BMS" },
+      ],
+    });
+    await db.supplierRating.create({
+      data: { supplierId: sup1.id, qciScore: 5, loyalty: 4.5, professionalism: 5, activeEngagement: 4.5, values: 4.8, overallScore: 4.76, remarks: "Reliable supplier, consistent quality", ratedBy: "Cdr. R. Perera" },
+    });
+
+    const sup2 = await db.supplier.create({
+      data: {
+        name: "Steel Centre",
+        contactPerson: "Mr. Rohan De Silva",
+        telephone: "011-3698521",
+        whatsapp: "071-5566778",
+        email: "info@steelcentre.lk",
+        address: "No 120, Steel City, Colombo 15",
+        contractDetails: "RC 2025 for TMT bars & MS plates. Bulk supply agreement.",
+        registrationNo: "PV-2002-5678",
+        vatNo: "VAT-2233667",
+        bankDetails: "Commercial Bank - 8001200345678",
+      },
+    });
+    await db.supplierContact.createMany({
+      data: [
+        { supplierId: sup2.id, name: "Rohan De Silva", designation: "Director", telephone: "011-3698521", whatsapp: "071-5566778", email: "rohan@steelcentre.lk", isPrimary: true },
+        { supplierId: sup2.id, name: "Chamara", designation: "Delivery Coordinator", telephone: "011-3698522", whatsapp: "071-5566779", email: "chamara@steelcentre.lk", isPrimary: false },
+      ],
+    });
+    await db.supplierNomination.createMany({
+      data: [
+        { supplierId: sup2.id, itemCode: "MT-045", itemName: "Mild Steel Plate 6mm", category: "Metal" },
+        { supplierId: sup2.id, itemCode: "MT-110", itemName: "TMT Bars 16mm", category: "Metal" },
+        { supplierId: sup2.id, itemCode: "MT-201", itemName: "Welding Rod 3.2mm", category: "Metal" },
+      ],
+    });
+    await db.supplierRating.create({
+      data: { supplierId: sup2.id, qciScore: 3, loyalty: 4, professionalism: 3.5, activeEngagement: 4, values: 3.5, overallScore: 3.6, remarks: "Good but occasional delivery delays", ratedBy: "Lt. M. Fernando" },
+    });
+
+    const sup3 = await db.supplier.create({
+      data: {
+        name: "Tools & Co",
+        contactPerson: "Mr. Kasun Jay",
+        telephone: "011-4785963",
+        whatsapp: "076-7788990",
+        email: "sales@toolsco.lk",
+        address: "No 78, Tools Street, Colombo 11",
+        contractDetails: "Spot purchase supplier for hand tools.",
+      },
+    });
+    await db.supplierContact.createMany({
+      data: [
+        { supplierId: sup3.id, name: "Kasun Jay", designation: "Proprietor", telephone: "011-4785963", whatsapp: "076-7788990", email: "kasun@toolsco.lk", isPrimary: true },
+      ],
+    });
+    await db.supplierRating.create({
+      data: { supplierId: sup3.id, qciScore: 4, loyalty: 3.5, professionalism: 4, activeEngagement: 3.5, values: 4, overallScore: 3.8, remarks: "Decent quality tools", ratedBy: "PO Bandara" },
+    });
+
+    const sup4 = await db.supplier.create({
+      data: {
+        name: "Bearing House",
+        contactPerson: "Mr. Anura",
+        telephone: "011-5823697",
+        whatsapp: "075-6677889",
+        email: "anura@bearinghouse.lk",
+        address: "No 33, Bearing Lane, Colombo 02",
+        contractDetails: "Supplier for bearings and power transmission items.",
+      },
+    });
+    await db.supplierRating.create({
+      data: { supplierId: sup4.id, qciScore: 1, loyalty: 2.5, professionalism: 2, activeEngagement: 2, values: 2, overallScore: 1.9, remarks: "Failed QC — pitted bearings. Under review.", ratedBy: "PO Bandara" },
+    });
+
+    // ── Item Master (consolidated catalogue) — includes deliberate duplicates ──
+    await db.itemMaster.createMany({
+      data: [
+        { canonicalCode: "BMS-220", description: "Centrifugal Pump 15kW", category: "BMS", unit: "NOS", status: "Active" },
+        // deliberate duplicate: same item, different code
+        { canonicalCode: "BMS-220A", description: "Centrifugal Pump 15kW", category: "BMS", unit: "NOS", status: "Active" },
+        { canonicalCode: "BMS-220-SK", description: "Centrifugal Pump Seal Kit", category: "BMS", unit: "SET", status: "Active" },
+        { canonicalCode: "BMS-6204", description: "Bearing 6204 ZZ", category: "BMS", unit: "NOS", status: "Active" },
+        { canonicalCode: "MT-045", description: "Mild Steel Plate 6mm", category: "Metal", unit: "KG", status: "Active" },
+        // deliberate near-duplicate: different spelling
+        { canonicalCode: "MT-045-PL", description: "M.S. Plate 6mm", category: "Metal", unit: "KG", status: "Active" },
+        { canonicalCode: "MT-110", description: "TMT Bars 16mm", category: "Metal", unit: "KG", status: "Active" },
+        { canonicalCode: "MT-201", description: "Welding Rod 3.2mm", category: "Metal", unit: "KG", status: "Active" },
+        { canonicalCode: "EL-301", description: "LED Flood Light 200W", category: "Electrical", unit: "NOS", status: "Active" },
+        { canonicalCode: "EL-512", description: "Cable Tie 200mm", category: "Electrical", unit: "NOS", status: "Active" },
+        { canonicalCode: "PT-077", description: "Epoxy Primer Grey", category: "Paint", unit: "LTR", status: "Active" },
+        { canonicalCode: "PL-118", description: "GI Pipe 50mm", category: "Plumbing", unit: "MTR", status: "Active" },
+        // deliberate duplicate: same name different code
+        { canonicalCode: "PL-118-A", description: "GI Pipe 50mm", category: "Plumbing", unit: "MTR", status: "Active" },
+        { canonicalCode: "LO-008", description: "Hydraulic Oil ISO 68", category: "Lubricant Oil", unit: "LTR", status: "Active" },
+        { canonicalCode: "AL-015", description: "Aluminium Sheet 2mm", category: "Aluminium", unit: "SHT", status: "Active" },
+        { canonicalCode: "GN-205", description: "Portland Cement 50kg", category: "General", unit: "BAG", status: "Active" },
+      ],
+    });
+
     return NextResponse.json({ ok: true, message: "Seed data created" });
   } catch (e) {
     console.error("seed error", e);

@@ -210,6 +210,112 @@ model QCInspection {
   @@index([refType, refId])
 }
 
+// ───────────────────────── STAKEHOLDERS (Officers, Sailors, Suppliers) ─────────────────────────
+model Stakeholder {
+  id            String   @id @default(cuid())
+  name          String
+  rankOrRate    String?  // rank for officers (e.g. Cdr, Lt), rate for sailors
+  svcNumber     String?  // SVC number
+  appointment   String?  // CSLOG, CLOGD, ASO(E), APO(E), AAPO(PT), CCED(E), CCEO(E), SCE(M), SCE(P&P)
+  department    String   @default("CSLOG") // CSLOG | CE
+  officeNumber  String?
+  telephone     String?
+  whatsapp      String?
+  email         String?
+  availability  String   @default("Available") // Available | On Leave | Busy | Off Duty
+  role          String   @default("Officer") // Officer | Sailor
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([department])
+  @@index([appointment])
+}
+
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  contactPerson   String?
+  telephone       String?
+  whatsapp        String?
+  email           String?
+  address         String?
+  contractDetails String?  // general contract info / RC validity etc.
+  registrationNo  String?
+  vatNo           String?
+  bankDetails     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contacts    SupplierContact[]
+  nominations SupplierNomination[]
+  ratings     SupplierRating[]
+}
+
+model SupplierContact {
+  id          String   @id @default(cuid())
+  supplierId  String
+  name        String
+  designation String?
+  telephone   String?
+  whatsapp    String?
+  email       String?
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+model SupplierNomination {
+  id         String   @id @default(cuid())
+  supplierId String
+  itemCode   String?
+  itemName   String
+  category   String   @default("General")
+  createdAt  DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+model SupplierRating {
+  id               String   @id @default(cuid())
+  supplierId       String
+  qciScore         Float    @default(0)  // 1-5, from QC inspections
+  loyalty          Float    @default(0)  // 1-5
+  professionalism  Float    @default(0)  // 1-5
+  activeEngagement Float    @default(0)  // 1-5
+  values           Float    @default(0)  // 1-5
+  overallScore     Float    @default(0)  // computed average
+  remarks          String?
+  ratedBy          String?
+  ratedAt          DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+// ───────────────────────── ITEM MASTER (consolidated catalogue) ─────────────────────────
+model ItemMaster {
+  id            String   @id @default(cuid())
+  canonicalCode String   @unique  // the concluded single item code
+  description   String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  alternateCodes String?  // comma-separated duplicate/alternate codes consolidated
+  alternateNames String?  // comma-separated duplicate names
+  status        String   @default("Active") // Active | Merged | Discontinued
+  mergedInto    String?  // canonical code this was merged into
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([status])
+}
+
 // ───────────────────────── MODULE 4: STORES ─────────────────────────
 model StoreZone {
   id                String   @id @default(cuid())
