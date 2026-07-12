@@ -14,10 +14,29 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableHeader,
@@ -29,8 +48,12 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   formatNumber,
+  formatCurrency,
   COLLECTION_STATUSES,
   PART_SUPPLY_STATUSES,
+  FILE_CATEGORIES,
+  QC_LEVELS,
+  qcLevelColor,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -50,6 +73,15 @@ import {
   Boxes,
   BarChart3,
   User,
+  ShieldCheck,
+  ClipboardCheck,
+  Pencil,
+  Trash2,
+  Loader2,
+  Filter,
+  AlertCircle,
+  Star,
+  X,
 } from "lucide-react";
 import {
   LineChart,
@@ -114,6 +146,40 @@ interface DailyCollection {
   receivedFrom: string | null;
   recordedBy: string | null;
   recordedAt: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  voteNumber: string;
+  voteAllocation?: number;
+  status?: string;
+}
+
+interface StoreItem {
+  id: string;
+  description: string;
+  category: string;
+  unit?: string;
+  qty: number;
+  unitCost: number;
+  totalCost?: number;
+  supplier?: string | null;
+  itemCode?: string | null;
+}
+
+interface QCInspection {
+  id: string;
+  refType: string;
+  refId: string;
+  itemName: string;
+  supplier: string | null;
+  qty: number;
+  qcLevel: string;
+  qcOfficer: string | null;
+  qcOfficerDetails: string | null;
+  remarks: string | null;
+  inspectedAt: string;
 }
 
 interface Stats {
@@ -199,6 +265,128 @@ function statusColor(status: string): string {
   return "bg-slate-500/15 text-slate-300 border-slate-500/30";
 }
 
+// Loose case-insensitive partial match between a row's supplier/receivedFrom
+// and a project name. Used for project / vote filters on the dashboard.
+function looselyMatches(supplier: string | null | undefined, name: string): boolean {
+  if (!supplier || !name) return false;
+  const a = supplier.toLowerCase().trim();
+  const b = name.toLowerCase().trim();
+  if (!a || !b) return false;
+  return a.includes(b) || b.includes(a);
+}
+
+// Maps a QC level to a numeric score for supplier aggregation.
+function qcLevelToScore(level: string): number {
+  switch (level) {
+    case "Fail":
+      return 1;
+    case "Below Average":
+      return 2;
+    case "Satisfactory":
+      return 3;
+    case "Good":
+      return 4;
+    case "Excellent":
+      return 5;
+    default:
+      return 0;
+  }
+}
+
+function supplierRatingColor(avg: number): string {
+  if (avg >= 4.5)
+    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+  if (avg >= 3.5) return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+  if (avg >= 2.5) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+  if (avg >= 1.5)
+    return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+  return "bg-red-500/15 text-red-400 border-red-500/30";
+}
+
+function supplierRatingLabel(avg: number): string {
+  if (avg >= 4.5) return "Excellent";
+  if (avg >= 3.5) return "Good";
+  if (avg >= 2.5) return "Satisfactory";
+  if (avg >= 1.5) return "Below Average";
+  return "Fail";
+}
+
+// Reference Type options for QC Inspection dialog
+const QC_REF_TYPES = [
+  "Daily Collection",
+  "Part Supply Entry",
+  "Collection Item",
+] as const;
+type QCRefType = (typeof QC_REF_TYPES)[number];
+
+// Generic project/vote filter applied to any row that has a supplier-like field.
+// Pure helper (module-level) so the React Compiler can preserve manual memoization.
+function applyProjVoteFilter<
+  T extends { receivedFrom?: string | null; supplier?: string | null }
+>(
+  rows: T[],
+  refField: "receivedFrom" | "supplier",
+  projFilter: string,
+  voteFilt: string,
+  projectById: Map<string, Project>,
+  projectByVote: Map<string, Project>
+): T[] {
+  let out = rows;
+  if (projFilter !== "all") {
+    const p = projectById.get(projFilter);
+    if (p) {
+      const matches = out.filter((r) =>
+        looselyMatches(r[refField] ?? null, p.name)
+      );
+      if (matches.length > 0) out = matches;
+    }
+  }
+  if (voteFilt !== "all") {
+    const p = projectByVote.get(voteFilt);
+    if (p) {
+      const matches = out.filter((r) =>
+        looselyMatches(r[refField] ?? null, p.name)
+      );
+      if (matches.length > 0) out = matches;
+    }
+  }
+  return out;
+}
+
+// Type filter — looks up the item in stores by name; only includes rows whose
+// store category matches. Items not in stores are excluded when a type is set.
+function applyTypeFilter<
+  T extends { itemName?: string; name?: string }
+>(
+  rows: T[],
+  nameField: "itemName" | "name",
+  tFilter: string,
+  storeByName: Map<string, StoreItem>
+): T[] {
+  if (tFilter === "all") return rows;
+  return rows.filter((r) => {
+    const name = r[nameField];
+    const s = storeByName.get((name || "").toLowerCase().trim());
+    return s?.category === tFilter;
+  });
+}
+
+function unitCostFor(
+  itemName: string,
+  storeByName: Map<string, StoreItem>
+): number {
+  const s = storeByName.get((itemName || "").toLowerCase().trim());
+  return s?.unitCost ?? 0;
+}
+
+function valueFor(
+  qty: number,
+  itemName: string,
+  storeByName: Map<string, StoreItem>
+): number {
+  return (qty || 0) * unitCostFor(itemName, storeByName);
+}
+
 // ─────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────
@@ -211,7 +399,7 @@ export function CollectionModule() {
         icon={PackageCheck}
       />
       <Tabs defaultValue="dashboard" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+        <TabsList className="grid w-full grid-cols-4 max-w-2xl">
           <TabsTrigger value="dashboard" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Dashboard
           </TabsTrigger>
@@ -220,6 +408,9 @@ export function CollectionModule() {
           </TabsTrigger>
           <TabsTrigger value="daily" className="gap-1.5">
             <CalendarDays className="h-4 w-4" /> Daily Collection
+          </TabsTrigger>
+          <TabsTrigger value="qc" className="gap-1.5">
+            <ShieldCheck className="h-4 w-4" /> QC Inspection
           </TabsTrigger>
         </TabsList>
         <TabsContent value="dashboard">
@@ -230,6 +421,9 @@ export function CollectionModule() {
         </TabsContent>
         <TabsContent value="daily">
           <DailyCollectionTab />
+        </TabsContent>
+        <TabsContent value="qc">
+          <QCInspectionTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -252,90 +446,361 @@ function DashboardTab() {
   const { data: daily } = useFetch<DailyCollection[]>(
     "/api/collection/daily"
   );
+  const { data: projects } = useFetch<Project[]>("/api/projects");
+  const { data: stores } = useFetch<StoreItem[]>("/api/stores");
 
-  // Stat figures
-  const pendingItems = (items ?? []).filter(
+  // Filter state
+  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [voteFilter, setVoteFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"numbers" | "value">("numbers");
+
+  // Lookups
+  const storeByName = useMemo(() => {
+    const m = new Map<string, StoreItem>();
+    (stores ?? []).forEach((s) => {
+      const key = (s.description || "").toLowerCase().trim();
+      if (key && !m.has(key)) m.set(key, s);
+    });
+    return m;
+  }, [stores]);
+
+  const projectById = useMemo(
+    () => new Map((projects ?? []).map((p) => [p.id, p])),
+    [projects]
+  );
+  const projectByVote = useMemo(
+    () =>
+      new Map(
+        (projects ?? [])
+          .filter((p) => !!p.voteNumber)
+          .map((p) => [p.voteNumber, p])
+      ),
+    [projects]
+  );
+  const votes = useMemo(
+    () =>
+      Array.from(
+        new Set((projects ?? []).map((p) => p.voteNumber).filter(Boolean))
+      ).sort(),
+    [projects]
+  );
+
+  // Filtered datasets
+  const filteredDaily = useMemo(() => {
+    let rows = applyProjVoteFilter(
+      daily ?? [],
+      "receivedFrom",
+      projectFilter,
+      voteFilter,
+      projectById,
+      projectByVote
+    );
+    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+    return rows;
+  }, [
+    daily,
+    projectFilter,
+    voteFilter,
+    typeFilter,
+    projectById,
+    projectByVote,
+    storeByName,
+  ]);
+
+  const filteredItems = useMemo(() => {
+    let rows = applyProjVoteFilter(
+      items ?? [],
+      "supplier",
+      projectFilter,
+      voteFilter,
+      projectById,
+      projectByVote
+    );
+    rows = applyTypeFilter(rows, "name", typeFilter, storeByName);
+    return rows;
+  }, [
+    items,
+    projectFilter,
+    voteFilter,
+    typeFilter,
+    projectById,
+    projectByVote,
+    storeByName,
+  ]);
+
+  const filteredPartSupply = useMemo(() => {
+    let rows = applyProjVoteFilter(
+      partSupply ?? [],
+      "supplier",
+      projectFilter,
+      voteFilter,
+      projectById,
+      projectByVote
+    );
+    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+    return rows;
+  }, [
+    partSupply,
+    projectFilter,
+    voteFilter,
+    typeFilter,
+    projectById,
+    projectByVote,
+    storeByName,
+  ]);
+
+  // Stat figures (derived from filtered datasets)
+  const pendingItems = filteredItems.filter(
     (i) => i.status === "Pending" || i.status === "In Progress"
   );
-  const pendingValue = pendingItems.reduce(
+  const pendingQty = pendingItems.reduce(
     (s, i) => s + (i.expectedQty || 0),
     0
   );
-  const activePartSupply =
-    stats?.collection?.partSupplyActive ??
-    (partSupply ?? []).filter((o) => o.status === "Active").length;
-  const collectedItems = (items ?? []).filter(
+  const pendingValue = pendingItems.reduce(
+    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+    0
+  );
+
+  const activePartSupplyOrders = filteredPartSupply.filter(
+    (o) => o.status === "Active"
+  );
+  const activePartSupplyCount =
+    stats?.collection?.partSupplyActive != null &&
+    projectFilter === "all" &&
+    voteFilter === "all" &&
+    typeFilter === "all"
+      ? stats.collection.partSupplyActive
+      : activePartSupplyOrders.length;
+  const activePartSupplyValue = activePartSupplyOrders.reduce(
+    (s, o) => s + valueFor(o.receivedQty, o.itemName, storeByName),
+    0
+  );
+
+  const collectedItems = filteredItems.filter(
     (i) => i.status === "Collected"
   );
-  const todayStr = todayISO();
-  const todayDailyCount = (daily ?? []).filter(
-    (d) => d.date === todayStr
-  ).length;
+  const collectedValue = collectedItems.reduce(
+    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+    0
+  );
 
-  // Trend chart — last 7 days
+  const todayStr = todayISO();
+  const todayDaily = filteredDaily.filter((d) => d.date === todayStr);
+  const todayDailyCount = todayDaily.length;
+  const todayDailyValue = todayDaily.reduce(
+    (s, d) => s + valueFor(d.qty, d.itemName, storeByName),
+    0
+  );
+
+  // Trend chart — last 7 days (qty or value depending on viewMode)
   const trendData = useMemo(() => {
     const days = getLast7Days();
     const map = new Map<string, number>();
-    (daily ?? []).forEach((d) => {
-      map.set(d.date, (map.get(d.date) || 0) + (d.qty || 0));
+    filteredDaily.forEach((d) => {
+      const v =
+        viewMode === "value" ? valueFor(d.qty, d.itemName, storeByName) : d.qty || 0;
+      map.set(d.date, (map.get(d.date) || 0) + v);
     });
     return days.map((date) => ({
       name: formatDateLabel(date),
       qty: map.get(date) || 0,
     }));
-  }, [daily]);
+  }, [filteredDaily, viewMode, storeByName]);
 
-  // Status breakdown
+  // Status breakdown (counts or values depending on viewMode)
   const statusBreakdown = useMemo(() => {
     const counts: Record<string, number> = {};
-    (items ?? []).forEach((i) => {
-      counts[i.status] = (counts[i.status] || 0) + 1;
+    filteredItems.forEach((i) => {
+      const v =
+        viewMode === "value"
+          ? valueFor(i.expectedQty, i.name, storeByName)
+          : 1;
+      counts[i.status] = (counts[i.status] || 0) + v;
     });
-    // ensure stable order using COLLECTION_STATUSES
     return COLLECTION_STATUSES.filter((s) => counts[s] > 0).map((name) => ({
       name,
       value: counts[name],
     }));
-  }, [items]);
+  }, [filteredItems, viewMode, storeByName]);
 
-  const recentDaily = (daily ?? []).slice(0, 5);
+  const recentDaily = filteredDaily.slice(0, 5);
 
   if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
   if (itemsError) return <ErrorState message={itemsError} />;
 
+  const filtersActive =
+    projectFilter !== "all" ||
+    voteFilter !== "all" ||
+    typeFilter !== "all";
+
+  function clearFilters() {
+    setProjectFilter("all");
+    setVoteFilter("all");
+    setTypeFilter("all");
+  }
+
   return (
     <div className="space-y-5">
+      {/* Filter bar */}
+      <div className="bg-card border border-border rounded-xl p-4">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Filter className="h-4 w-4" /> Filters
+          </div>
+          {filtersActive && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs gap-1.5"
+              onClick={clearFilters}
+            >
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">By Project</Label>
+            <Select value={projectFilter} onValueChange={setProjectFilter}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="All Projects" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {(projects ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">By Vote</Label>
+            <Select value={voteFilter} onValueChange={setVoteFilter}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="All Votes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Votes</SelectItem>
+                {votes.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">By Type</Label>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {FILE_CATEGORIES.filter((c) => c !== "GEN").map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">View</Label>
+            <div className="flex rounded-md border border-border overflow-hidden h-9">
+              <button
+                type="button"
+                onClick={() => setViewMode("numbers")}
+                className={cn(
+                  "flex-1 text-xs font-medium transition-colors px-3",
+                  viewMode === "numbers"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+                )}
+              >
+                By Numbers
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("value")}
+                className={cn(
+                  "flex-1 text-xs font-medium transition-colors px-3 border-l border-border",
+                  viewMode === "value"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+                )}
+              >
+                By Value
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           label="Items to be Received"
-          value={pendingItems.length}
+          value={
+            viewMode === "value"
+              ? formatCurrency(pendingValue)
+              : pendingItems.length
+          }
           icon={PackageX}
           accent="blue"
-          sub={`${formatNumber(pendingValue)} qty expected`}
+          sub={
+            viewMode === "value"
+              ? `${formatCurrency(pendingValue)} expected value`
+              : `${formatNumber(pendingQty)} qty expected`
+          }
         />
         <StatCard
           label="Part Supply Items"
-          value={activePartSupply}
+          value={
+            viewMode === "value"
+              ? formatCurrency(activePartSupplyValue)
+              : activePartSupplyCount
+          }
           icon={Layers}
           accent="amber"
-          sub="Active part-supply orders"
+          sub={
+            viewMode === "value"
+              ? `${formatCurrency(activePartSupplyValue)} received value`
+              : "Active part-supply orders"
+          }
         />
         <StatCard
           label="Collected Items"
-          value={collectedItems.length}
+          value={
+            viewMode === "value"
+              ? formatCurrency(todayDailyValue)
+              : collectedItems.length
+          }
           icon={PackageCheck}
           accent="green"
-          sub={`${todayDailyCount} collected today`}
+          sub={
+            viewMode === "value"
+              ? `${formatCurrency(todayDailyValue)} collected today`
+              : `${todayDailyCount} collected today`
+          }
         />
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            Collection Trend — Last 7 Days
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-foreground">
+              Collection Trend — Last 7 Days
+            </h3>
+            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+              {viewMode === "value" ? "By Value" : "By Numbers"}
+            </CustomBadge>
+          </div>
           {trendData.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <LineChart
@@ -357,6 +822,14 @@ function DashboardTab() {
                   tick={{ fill: "#94a3b8", fontSize: 11 }}
                   axisLine={{ stroke: "#2d3548" }}
                   tickLine={{ stroke: "#2d3548" }}
+                  tickFormatter={(v: number) =>
+                    viewMode === "value"
+                      ? v >= 1000
+                        ? `${(v / 1000).toFixed(0)}k`
+                        : String(v)
+                      : formatNumber(v)
+                  }
+                  width={48}
                 />
                 <Tooltip
                   contentStyle={{
@@ -365,11 +838,17 @@ function DashboardTab() {
                     borderRadius: 8,
                     fontSize: 12,
                   }}
+                  formatter={(value: number) => [
+                    viewMode === "value"
+                      ? formatCurrency(value)
+                      : formatNumber(value),
+                    viewMode === "value" ? "Value" : "Qty",
+                  ]}
                 />
                 <Line
                   type="monotone"
                   dataKey="qty"
-                  name="Qty Collected"
+                  name={viewMode === "value" ? "Value Collected" : "Qty Collected"}
                   stroke="#3b82f6"
                   strokeWidth={2}
                   dot={{ fill: "#3b82f6", r: 3 }}
@@ -385,9 +864,14 @@ function DashboardTab() {
         </div>
 
         <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            Items by Status
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-foreground">
+              Items by Status
+            </h3>
+            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+              {viewMode === "value" ? "Value" : "Count"}
+            </CustomBadge>
+          </div>
           {statusBreakdown.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
@@ -417,6 +901,11 @@ function DashboardTab() {
                     borderRadius: 8,
                     fontSize: 12,
                   }}
+                  formatter={(value: number) =>
+                    viewMode === "value"
+                      ? formatCurrency(value)
+                      : formatNumber(value)
+                  }
                 />
                 <Legend wrapperStyle={{ fontSize: 10 }} />
               </PieChart>
@@ -436,14 +925,18 @@ function DashboardTab() {
             Recent Collection Activity
           </h3>
           <CustomBadge className="bg-secondary border-border text-muted-foreground">
-            Last 5
+            Last {recentDaily.length || 0}
           </CustomBadge>
         </div>
         {recentDaily.length === 0 ? (
           <EmptyState
             icon={CalendarDays}
             title="No recent collections"
-            description="Daily collections will appear here once recorded."
+            description={
+              filtersActive
+                ? "No collections match the current filters."
+                : "Daily collections will appear here once recorded."
+            }
           />
         ) : (
           <ul className="space-y-3">
@@ -460,8 +953,10 @@ function DashboardTab() {
                     {d.itemName}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatNumber(d.qty)} qty · {d.receivedFrom || "—"} ·{" "}
-                    {formatFullDate(d.date)}
+                    {viewMode === "value"
+                      ? `${formatCurrency(valueFor(d.qty, d.itemName, storeByName))} value`
+                      : `${formatNumber(d.qty)} qty`}{" "}
+                    · {d.receivedFrom || "—"} · {formatFullDate(d.date)}
                   </p>
                 </div>
                 <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
@@ -2047,6 +2542,716 @@ function BulkRecordDialog({
               : `Record ${selected.size || ""} Collection${
                   selected.size !== 1 ? "s" : ""
                 }`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// QC Inspection Tab
+// ─────────────────────────────────────────────────────────
+interface RefOption {
+  value: string;
+  label: string;
+  itemName: string;
+  supplier: string;
+  qty: number;
+}
+
+function QCInspectionTab() {
+  const {
+    data: inspections,
+    loading,
+    error,
+    refresh,
+  } = useFetch<QCInspection[]>("/api/qc");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<QCInspection | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const { toast } = useToast();
+
+  const total = inspections?.length ?? 0;
+  const passed = (inspections ?? []).filter((i) =>
+    ["Satisfactory", "Good", "Excellent"].includes(i.qcLevel)
+  ).length;
+  const failed = (inspections ?? []).filter((i) => i.qcLevel === "Fail").length;
+  const passRate = total > 0 ? (passed / total) * 100 : 0;
+
+  // Supplier rating aggregation
+  const supplierRatings = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+    (inspections ?? []).forEach((i) => {
+      const sup = (i.supplier || "Unknown Supplier").trim() || "Unknown Supplier";
+      const cur = map.get(sup) || { sum: 0, count: 0 };
+      cur.sum += qcLevelToScore(i.qcLevel);
+      cur.count += 1;
+      map.set(sup, cur);
+    });
+    return Array.from(map.entries())
+      .map(([name, v]) => ({
+        name,
+        avg: v.count > 0 ? v.sum / v.count : 0,
+        count: v.count,
+      }))
+      .sort((a, b) => b.avg - a.avg);
+  }, [inspections]);
+
+  function openCreate() {
+    setEditing(null);
+    setDialogOpen(true);
+  }
+  function openEdit(insp: QCInspection) {
+    setEditing(insp);
+    setDialogOpen(true);
+  }
+  function closeDialog() {
+    setDialogOpen(false);
+    setEditing(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteId) return;
+    setDeleting(true);
+    const res = await apiRequest(`/api/qc/${deleteId}`, "DELETE");
+    setDeleting(false);
+    if (!res.ok) {
+      toast({ title: res.error || "Failed to delete", variant: "destructive" });
+      return;
+    }
+    toast({ title: "Inspection deleted" });
+    setDeleteId(null);
+    refresh();
+  }
+
+  if (loading) return <LoadingState label="Loading QC inspections..." />;
+  if (error) return <ErrorState message={error} />;
+
+  return (
+    <div className="space-y-4">
+      {/* Top stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Inspections"
+          value={total}
+          icon={ClipboardCheck}
+          accent="blue"
+          sub="All QC records"
+        />
+        <StatCard
+          label="Passed"
+          value={passed}
+          icon={ShieldCheck}
+          accent="green"
+          sub="Satisfactory+Good+Excellent"
+        />
+        <StatCard
+          label="Failed"
+          value={failed}
+          icon={AlertCircle}
+          accent="red"
+          sub="Rejected items"
+        />
+        <StatCard
+          label="Pass Rate"
+          value={`${passRate.toFixed(1)}%`}
+          icon={BarChart3}
+          accent="amber"
+          sub={`${passed}/${total} passed`}
+        />
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          Quality Control Inspections evaluate &amp; rate suppliers for
+          collected and part-supplied items.
+        </p>
+        <Button
+          onClick={openCreate}
+          size="sm"
+          className="gap-1.5 shrink-0"
+        >
+          <Plus className="h-4 w-4" /> New QC Inspection
+        </Button>
+      </div>
+
+      {/* Inspections table */}
+      {!inspections || inspections.length === 0 ? (
+        <EmptyState
+          icon={ShieldCheck}
+          title="No QC inspections"
+          description="Record a QC inspection to start evaluating suppliers."
+          action={
+            <Button onClick={openCreate} size="sm" className="gap-1.5">
+              <Plus className="h-4 w-4" /> New QC Inspection
+            </Button>
+          }
+        />
+      ) : (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="overflow-x-auto [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground whitespace-nowrap">
+                    Inspected At
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">Item</TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Supplier
+                  </TableHead>
+                  <TableHead className="text-muted-foreground text-right">
+                    Qty
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    QC Level
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    QCI Officer
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Remarks
+                  </TableHead>
+                  <TableHead className="text-muted-foreground text-right">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {inspections.map((i) => (
+                  <TableRow key={i.id} className="border-border">
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      {formatDateTime(i.inspectedAt)}
+                    </TableCell>
+                    <TableCell className="text-foreground">
+                      <div className="text-[10px] uppercase text-muted-foreground tracking-wide">
+                        {i.refType}
+                      </div>
+                      <div className="font-medium truncate max-w-[220px]">
+                        {i.itemName}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-foreground whitespace-nowrap">
+                      {i.supplier || "—"}
+                    </TableCell>
+                    <TableCell className="text-foreground text-right whitespace-nowrap">
+                      {formatNumber(i.qty)}
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge
+                        className={cn("border", qcLevelColor(i.qcLevel))}
+                      >
+                        {i.qcLevel}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell className="text-foreground">
+                      <div className="text-sm">{i.qcOfficer || "—"}</div>
+                      {i.qcOfficerDetails && (
+                        <div className="text-xs text-muted-foreground">
+                          {i.qcOfficerDetails}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[260px]">
+                      <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
+                        {i.remarks || "—"}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => openEdit(i)}
+                          aria-label="Edit inspection"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 hover:text-red-400"
+                          onClick={() => setDeleteId(i.id)}
+                          aria-label="Delete inspection"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
+      {/* Supplier rating summary */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Star className="h-4 w-4 text-amber-400" />
+            <h3 className="text-sm font-semibold text-foreground">
+              Supplier Rating Summary
+            </h3>
+          </div>
+          <CustomBadge className="bg-secondary border-border text-muted-foreground">
+            {supplierRatings.length} supplier
+            {supplierRatings.length !== 1 ? "s" : ""}
+          </CustomBadge>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Aggregated from QC inspection results. Levels map to a 1–5 score
+          (Fail=1, Below Average=2, Satisfactory=3, Good=4, Excellent=5).
+        </p>
+        {supplierRatings.length === 0 ? (
+          <EmptyState
+            icon={Star}
+            title="No supplier ratings yet"
+            description="QC inspections will aggregate supplier ratings here."
+          />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {supplierRatings.map((s) => (
+              <div
+                key={s.name}
+                className="border border-border rounded-lg p-3 bg-secondary/10"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground truncate min-w-0">
+                    {s.name}
+                  </p>
+                  <CustomBadge
+                    className={cn(
+                      "border shrink-0",
+                      supplierRatingColor(s.avg)
+                    )}
+                  >
+                    {supplierRatingLabel(s.avg)}
+                  </CustomBadge>
+                </div>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-foreground">
+                    {s.avg.toFixed(2)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    / 5.00 · {s.count} inspection{s.count !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <Progress
+                  value={(s.avg / 5) * 100}
+                  className="mt-2 h-1.5"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Create / Edit dialog */}
+      {dialogOpen && (
+        <QCInspectionDialog
+          key={editing?.id || "new"}
+          open={dialogOpen}
+          onOpenChange={(o) => !o && closeDialog()}
+          editing={editing}
+          onSaved={() => {
+            closeDialog();
+            toast({
+              title: editing ? "Inspection updated" : "Inspection recorded",
+            });
+            refresh();
+          }}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteId}
+        onOpenChange={(o) => !o && setDeleteId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete QC inspection?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The inspection record will be
+              permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// QC Inspection Dialog (Create / Edit)
+// ─────────────────────────────────────────────────────────
+function QCInspectionDialog({
+  open,
+  onOpenChange,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  editing: QCInspection | null;
+  onSaved: () => void;
+}) {
+  const isEdit = !!editing;
+
+  const [refType, setRefType] = useState<QCRefType>(
+    (editing?.refType as QCRefType) || "Daily Collection"
+  );
+  const [refId, setRefId] = useState<string>(editing?.refId || "");
+  const [itemName, setItemName] = useState<string>(editing?.itemName || "");
+  const [supplier, setSupplier] = useState<string>(editing?.supplier || "");
+  const [qty, setQty] = useState<string>(
+    editing ? String(editing.qty ?? "") : ""
+  );
+  const [qcLevel, setQcLevel] = useState<string>(
+    editing?.qcLevel || "Satisfactory"
+  );
+  const [qcOfficer, setQcOfficer] = useState<string>(
+    editing?.qcOfficer || ""
+  );
+  const [qcOfficerDetails, setQcOfficerDetails] = useState<string>(
+    editing?.qcOfficerDetails || ""
+  );
+  const [remarks, setRemarks] = useState<string>(editing?.remarks || "");
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  // Fetch reference options based on refType (only in create mode)
+  const refUrl = useMemo<string | null>(() => {
+    if (!open || isEdit) return null;
+    if (refType === "Daily Collection") return "/api/collection/daily";
+    if (refType === "Part Supply Entry") return "/api/collection/part-supply";
+    if (refType === "Collection Item") return "/api/collection/items";
+    return null;
+  }, [open, isEdit, refType]);
+
+  const { data: refData, loading: refLoading } = useFetch<unknown[]>(refUrl);
+
+  // When the user changes refType (create mode), reset the dependent fields.
+  // Done in the change handler (not an effect) to avoid cascading renders.
+  function handleRefTypeChange(next: QCRefType) {
+    setRefType(next);
+    if (isEdit) return;
+    setRefId("");
+    setItemName("");
+    setSupplier("");
+    setQty("");
+  }
+
+  const refOptions = useMemo<RefOption[]>(() => {
+    if (!refData) return [];
+    if (refType === "Daily Collection") {
+      return (refData as DailyCollection[]).map((d) => ({
+        value: d.id,
+        label: `${d.itemName} — ${formatNumber(d.qty)} ${formatFullDate(
+          d.date
+        )} (${d.receivedFrom || "—"})`,
+        itemName: d.itemName,
+        supplier: d.receivedFrom || "",
+        qty: d.qty,
+      }));
+    }
+    if (refType === "Part Supply Entry") {
+      return (refData as PartSupplyOrder[]).flatMap((o) =>
+        o.entries.map((e) => ({
+          value: e.id,
+          label: `${o.itemName} — ${formatNumber(e.qty)} ${formatFullDate(
+            e.date
+          )} (entry ${e.srNo})`,
+          itemName: o.itemName,
+          supplier: o.supplier || "",
+          qty: e.qty,
+        }))
+      );
+    }
+    if (refType === "Collection Item") {
+      return (refData as CollectionItem[]).map((i) => ({
+        value: i.id,
+        label: `${i.name} — ${formatNumber(i.expectedQty)}`,
+        itemName: i.name,
+        supplier: i.supplier || "",
+        qty: i.expectedQty,
+      }));
+    }
+    return [];
+  }, [refData, refType]);
+
+  function handleRefChange(val: string) {
+    setRefId(val);
+    const opt = refOptions.find((o) => o.value === val);
+    if (opt) {
+      setItemName(opt.itemName);
+      setSupplier(opt.supplier);
+      setQty(String(opt.qty));
+    }
+  }
+
+  async function submit() {
+    if (!isEdit) {
+      if (!refType) {
+        toast({ title: "Reference type required", variant: "destructive" });
+        return;
+      }
+      if (!refId) {
+        toast({ title: "Reference required", variant: "destructive" });
+        return;
+      }
+      if (!itemName.trim()) {
+        toast({ title: "Item name required", variant: "destructive" });
+        return;
+      }
+    }
+    if (!qcOfficer.trim()) {
+      toast({ title: "QCI Officer name required", variant: "destructive" });
+      return;
+    }
+    if (qcLevel === "Fail" && !remarks.trim()) {
+      toast({
+        title: "Remarks required when QC Level is Fail",
+        description: "Please provide remarks explaining the failure.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    const url = isEdit ? `/api/qc/${editing!.id}` : "/api/qc";
+    const method = isEdit ? "PUT" : "POST";
+    const body = isEdit
+      ? {
+          qcLevel,
+          qcOfficer: qcOfficer.trim(),
+          qcOfficerDetails: qcOfficerDetails.trim() || undefined,
+          remarks: remarks.trim() || undefined,
+        }
+      : {
+          refType,
+          refId,
+          itemName: itemName.trim(),
+          supplier: supplier.trim() || undefined,
+          qty: Number(qty) || 0,
+          qcLevel,
+          qcOfficer: qcOfficer.trim(),
+          qcOfficerDetails: qcOfficerDetails.trim() || undefined,
+          remarks: remarks.trim() || undefined,
+        };
+    const res = await apiRequest(url, method, body);
+    setSubmitting(false);
+    if (!res.ok) {
+      toast({ title: res.error || "Failed to save", variant: "destructive" });
+      return;
+    }
+    onSaved();
+  }
+
+  const isFail = qcLevel === "Fail";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {isEdit ? "Edit QC Inspection" : "New QC Inspection"}
+          </DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? "Update QC level, officer & remarks for this inspection."
+              : "Evaluate and rate a collected or part-supplied item."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          {/* Reference type */}
+          <div className="space-y-1.5">
+            <Label>Reference Type</Label>
+            <Select
+              value={refType}
+              onValueChange={(v) => handleRefTypeChange(v as QCRefType)}
+              disabled={isEdit}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select reference type" />
+              </SelectTrigger>
+              <SelectContent>
+                {QC_REF_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Reference (create mode only) */}
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label>Reference</Label>
+              <Select value={refId} onValueChange={handleRefChange}>
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      refLoading
+                        ? "Loading..."
+                        : `Select a ${refType.toLowerCase()}`
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {refOptions.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No options
+                    </SelectItem>
+                  ) : (
+                    refOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Item Name */}
+          <div className="space-y-1.5">
+            <Label>Item Name</Label>
+            <Input
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              placeholder="Item name"
+              disabled={isEdit}
+            />
+          </div>
+
+          {/* Supplier + Qty */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Supplier</Label>
+              <Input
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                placeholder="Supplier"
+                disabled={isEdit}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Qty</Label>
+              <Input
+                type="number"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                placeholder="0"
+                disabled={isEdit}
+              />
+            </div>
+          </div>
+
+          {/* QC Level */}
+          <div className="space-y-1.5">
+            <Label>QC Level</Label>
+            <Select value={qcLevel} onValueChange={setQcLevel}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select QC level" />
+              </SelectTrigger>
+              <SelectContent>
+                {QC_LEVELS.map((l) => (
+                  <SelectItem key={l} value={l}>
+                    {l}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Officer */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>
+                QCI Officer Name <span className="text-red-400">*</span>
+              </Label>
+              <Input
+                value={qcOfficer}
+                onChange={(e) => setQcOfficer(e.target.value)}
+                placeholder="e.g. PO Bandara"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>QCI Officer Details</Label>
+              <Input
+                value={qcOfficerDetails}
+                onChange={(e) => setQcOfficerDetails(e.target.value)}
+                placeholder="e.g. QC Bay 2"
+              />
+            </div>
+          </div>
+
+          {/* Remarks */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center justify-between">
+              <span>
+                Remarks{" "}
+                {isFail && <span className="text-red-400">*</span>}
+              </span>
+              {isFail && (
+                <span className="text-xs text-red-400 font-normal">
+                  Remarks required when Fail
+                </span>
+              )}
+            </Label>
+            <Textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder={
+                isFail
+                  ? "Explain the reason for failure..."
+                  : "Optional notes about the inspection..."
+              }
+              rows={3}
+              className={cn(
+                isFail &&
+                  !remarks.trim() &&
+                  "border-red-500/50 focus-visible:border-red-500"
+              )}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={submitting} className="gap-1.5">
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {submitting
+              ? "Saving..."
+              : isEdit
+              ? "Update Inspection"
+              : "Record Inspection"}
           </Button>
         </DialogFooter>
       </DialogContent>

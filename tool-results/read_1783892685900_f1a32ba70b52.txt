@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import { Button } from "@/components/ui/button";
+    18→import { Input } from "@/components/ui/input";
+    19→import { Label } from "@/components/ui/label";
+    20→import { Checkbox } from "@/components/ui/checkbox";
+    21→import {
+    22→  Table,
+    23→  TableHeader,
+    24→  TableBody,
+    25→  TableHead,
+    26→  TableRow,
+    27→  TableCell,
+    28→} from "@/components/ui/table";
+    29→import { useToast } from "@/hooks/use-toast";
+    30→import {
+    31→  formatNumber,
+    32→  COLLECTION_STATUSES,
+    33→  PART_SUPPLY_STATUSES,
+    34→} from "@/lib/constants";
+    35→import { cn } from "@/lib/utils";
+    36→import {
+    37→  PackageCheck,
+    38→  PackageX,
+    39→  Layers,
+    40→  Plus,
+    41→  Calendar,
+    42→  Download,
+    43→  Truck,
+    44→  Printer,
+    45→  ChevronDown,
+    46→  ChevronRight,
+    47→  ClipboardList,
+    48→  CalendarDays,
+    49→  CalendarRange,
+    50→  Boxes,
+    51→  BarChart3,
+    52→  User,
+    53→} from "lucide-react";
+    54→import {
+    55→  LineChart,
+    56→  Line,
+    57→  XAxis,
+    58→  YAxis,
+    59→  Tooltip,
+    60→  ResponsiveContainer,
+    61→  PieChart,
+    62→  Pie,
+    63→  Cell,
+    64→  Legend,
+    65→  CartesianGrid,
+    66→} from "recharts";
+    67→
+    68→// ─────────────────────────────────────────────────────────
+    69→// Types
+    70→// ─────────────────────────────────────────────────────────
+    71→interface CollectionItem {
+    72→  id: string;
+    73→  name: string;
+    74→  expectedQty: number;
+    75→  status: string;
+    76→  dueDate: string | null;
+    77→  supplier: string | null;
+    78→  createdAt: string;
+    79→}
+    80→
+    81→interface PartSupplyEntry {
+    82→  id: string;
+    83→  srNo: number;
+    84→  date: string;
+    85→  vehicleNumber: string | null;
+    86→  qty: number;
+    87→  qcCheckedBy: string | null;
+    88→  sailorCount: number;
+    89→  driverName: string | null;
+    90→  driverLicense: string | null;
+    91→  driverPhone: string | null;
+    92→  cumulativeBalance: number;
+    93→}
+    94→
+    95→interface PartSupplyOrder {
+    96→  id: string;
+    97→  itemName: string;
+    98→  orderedQty: number;
+    99→  receivedQty: number;
+   100→  balance: number;
+   101→  startDate: string | null;
+   102→  expectedEndDate: string | null;
+   103→  status: string;
+   104→  supplier: string | null;
+   105→  createdAt: string;
+   106→  entries: PartSupplyEntry[];
+   107→}
+   108→
+   109→interface DailyCollection {
+   110→  id: string;
+   111→  date: string;
+   112→  itemName: string;
+   113→  qty: number;
+   114→  receivedFrom: string | null;
+   115→  recordedBy: string | null;
+   116→  recordedAt: string;
+   117→}
+   118→
+   119→interface Stats {
+   120→  collection: {
+   121→    partSupplyActive: number;
+   122→    dailyToday: number;
+   123→    dailyTotal: number;
+   124→  };
+   125→}
+   126→
+   127→// ─────────────────────────────────────────────────────────
+   128→// Helpers
+   129→// ─────────────────────────────────────────────────────────
+   130→const PIE_STATUS_COLORS: Record<string, string> = COLLECTION_STATUSES.reduce(
+   131→  (acc, status, i) => {
+   132→    acc[status] = ["#f59e0b", "#3b82f6", "#22c55e"][i] ?? "#64748b";
+   133→    return acc;
+   134→  },
+   135→  {} as Record<string, string>
+   136→);
+   137→const DEFAULT_PIE_COLOR = "#64748b";
+   138→
+   139→function todayISO(): string {
+   140→  return new Date().toISOString().slice(0, 10);
+   141→}
+   142→function yesterdayISO(): string {
+   143→  return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+   144→}
+   145→function getLast7Days(): string[] {
+   146→  const days: string[] = [];
+   147→  const t = new Date();
+   148→  for (let i = 6; i >= 0; i--) {
+   149→    const d = new Date(t);
+   150→    d.setDate(d.getDate() - i);
+   151→    days.push(d.toISOString().slice(0, 10));
+   152→  }
+   153→  return days;
+   154→}
+   155→function formatDateLabel(dateStr: string): string {
+   156→  const d = new Date(dateStr + "T00:00:00");
+   157→  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+   158→}
+   159→function formatFullDate(dateStr?: string | null): string {
+   160→  if (!dateStr) return "—";
+   161→  const d = new Date(dateStr + "T00:00:00");
+   162→  if (isNaN(d.getTime())) return dateStr;
+   163→  return d.toLocaleDateString("en-IN", {
+   164→    day: "2-digit",
+   165→    month: "short",
+   166→    year: "numeric",
+   167→  });
+   168→}
+   169→function formatDateTime(iso: string): string {
+   170→  const d = new Date(iso);
+   171→  if (isNaN(d.getTime())) return iso;
+   172→  return d.toLocaleString("en-IN", {
+   173→    day: "2-digit",
+   174→    month: "short",
+   175→    year: "numeric",
+   176→    hour: "2-digit",
+   177→    minute: "2-digit",
+   178→  });
+   179→}
+   180→function progressColor(pct: number): string {
+   181→  if (pct > 90) return "bg-emerald-500";
+   182→  if (pct >= 50) return "bg-amber-500";
+   183→  return "bg-red-500";
+   184→}
+   185→function statusColor(status: string): string {
+   186→  if (
+   187→    status === "Collected" ||
+   188→    (PART_SUPPLY_STATUSES as readonly string[]).includes(status) &&
+   189→      status === "Completed"
+   190→  ) {
+   191→    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   192→  }
+   193→  if (status === "In Progress" || status === "Active") {
+   194→    return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   195→  }
+   196→  if (status === "Pending") {
+   197→    return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   198→  }
+   199→  return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+   200→}
+   201→
+   202→// ─────────────────────────────────────────────────────────
+   203→// Main Component
+   204→// ─────────────────────────────────────────────────────────
+   205→export function CollectionModule() {
+   206→  return (
+   207→    <div>
+   208→      <PageHeader
+   209→        title="Collection"
+   210→        description="Track part-supply orders, daily collections & delivery receipts"
+   211→        icon={PackageCheck}
+   212→      />
+   213→      <Tabs defaultValue="dashboard" className="space-y-4">
+   214→        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+   215→          <TabsTrigger value="dashboard" className="gap-1.5">
+   216→            <BarChart3 className="h-4 w-4" /> Dashboard
+   217→          </TabsTrigger>
+   218→          <TabsTrigger value="part-supply" className="gap-1.5">
+   219→            <Layers className="h-4 w-4" /> Part Supply
+   220→          </TabsTrigger>
+   221→          <TabsTrigger value="daily" className="gap-1.5">
+   222→            <CalendarDays className="h-4 w-4" /> Daily Collection
+   223→          </TabsTrigger>
+   224→        </TabsList>
+   225→        <TabsContent value="dashboard">
+   226→          <DashboardTab />
+   227→        </TabsContent>
+   228→        <TabsContent value="part-supply">
+   229→          <PartSupplyTab />
+   230→        </TabsContent>
+   231→        <TabsContent value="daily">
+   232→          <DailyCollectionTab />
+   233→        </TabsContent>
+   234→      </Tabs>
+   235→    </div>
+   236→  );
+   237→}
+   238→
+   239→// ─────────────────────────────────────────────────────────
+   240→// Dashboard Tab
+   241→// ─────────────────────────────────────────────────────────
+   242→function DashboardTab() {
+   243→  const { data: stats } = useFetch<Stats>("/api/stats");
+   244→  const {
+   245→    data: items,
+   246→    loading: itemsLoading,
+   247→    error: itemsError,
+   248→  } = useFetch<CollectionItem[]>("/api/collection/items");
+   249→  const { data: partSupply } = useFetch<PartSupplyOrder[]>(
+   250→    "/api/collection/part-supply"
+   251→  );
+   252→  const { data: daily } = useFetch<DailyCollection[]>(
+   253→    "/api/collection/daily"
+   254→  );
+   255→
+   256→  // Stat figures
+   257→  const pendingItems = (items ?? []).filter(
+   258→    (i) => i.status === "Pending" || i.status === "In Progress"
+   259→  );
+   260→  const pendingValue = pendingItems.reduce(
+   261→    (s, i) => s + (i.expectedQty || 0),
+   262→    0
+   263→  );
+   264→  const activePartSupply =
+   265→    stats?.collection?.partSupplyActive ??
+   266→    (partSupply ?? []).filter((o) => o.status === "Active").length;
+   267→  const collectedItems = (items ?? []).filter(
+   268→    (i) => i.status === "Collected"
+   269→  );
+   270→  const todayStr = todayISO();
+   271→  const todayDailyCount = (daily ?? []).filter(
+   272→    (d) => d.date === todayStr
+   273→  ).length;
+   274→
+   275→  // Trend chart — last 7 days
+   276→  const trendData = useMemo(() => {
+   277→    const days = getLast7Days();
+   278→    const map = new Map<string, number>();
+   279→    (daily ?? []).forEach((d) => {
+   280→      map.set(d.date, (map.get(d.date) || 0) + (d.qty || 0));
+   281→    });
+   282→    return days.map((date) => ({
+   283→      name: formatDateLabel(date),
+   284→      qty: map.get(date) || 0,
+   285→    }));
+   286→  }, [daily]);
+   287→
+   288→  // Status breakdown
+   289→  const statusBreakdown = useMemo(() => {
+   290→    const counts: Record<string, number> = {};
+   291→    (items ?? []).forEach((i) => {
+   292→      counts[i.status] = (counts[i.status] || 0) + 1;
+   293→    });
+   294→    // ensure stable order using COLLECTION_STATUSES
+   295→    return COLLECTION_STATUSES.filter((s) => counts[s] > 0).map((name) => ({
+   296→      name,
+   297→      value: counts[name],
+   298→    }));
+   299→  }, [items]);
+   300→
+   301→  const recentDaily = (daily ?? []).slice(0, 5);
+   302→
+   303→  if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
+   304→  if (itemsError) return <ErrorState message={itemsError} />;
+   305→
+   306→  return (
+   307→    <div className="space-y-5">
+   308→      {/* Stat cards */}
+   309→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   310→        <StatCard
+   311→          label="Items to be Received"
+   312→          value={pendingItems.length}
+   313→          icon={PackageX}
+   314→          accent="blue"
+   315→          sub={`${formatNumber(pendingValue)} qty expected`}
+   316→        />
+   317→        <StatCard
+   318→          label="Part Supply Items"
+   319→          value={activePartSupply}
+   320→          icon={Layers}
+   321→          accent="amber"
+   322→          sub="Active part-supply orders"
+   323→        />
+   324→        <StatCard
+   325→          label="Collected Items"
+   326→          value={collectedItems.length}
+   327→          icon={PackageCheck}
+   328→          accent="green"
+   329→          sub={`${todayDailyCount} collected today`}
+   330→        />
+   331→      </div>
+   332→
+   333→      {/* Charts */}
+   334→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   335→        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
+   336→          <h3 className="text-sm font-semibold text-foreground mb-4">
+   337→            Collection Trend — Last 7 Days
+   338→          </h3>
+   339→          {trendData.length > 0 ? (
+   340→            <ResponsiveContainer width="100%" height={280}>
+   341→              <LineChart
+   342→                data={trendData}
+   343→                margin={{ top: 5, right: 16, left: 0, bottom: 5 }}
+   344→              >
+   345→                <CartesianGrid
+   346→                  strokeDasharray="3 3"
+   347→                  stroke="#2d3548"
+   348→                  vertical={false}
+   349→                />
+   350→                <XAxis
+   351→                  dataKey="name"
+   352→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+   353→                  axisLine={{ stroke: "#2d3548" }}
+   354→                  tickLine={{ stroke: "#2d3548" }}
+   355→                />
+   356→                <YAxis
+   357→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+   358→                  axisLine={{ stroke: "#2d3548" }}
+   359→                  tickLine={{ stroke: "#2d3548" }}
+   360→                />
+   361→                <Tooltip
+   362→                  contentStyle={{
+   363→                    background: "#1a1f2e",
+   364→                    border: "1px solid #2d3548",
+   365→                    borderRadius: 8,
+   366→                    fontSize: 12,
+   367→                  }}
+   368→                />
+   369→                <Line
+   370→                  type="monotone"
+   371→                  dataKey="qty"
+   372→                  name="Qty Collected"
+   373→                  stroke="#3b82f6"
+   374→                  strokeWidth={2}
+   375→                  dot={{ fill: "#3b82f6", r: 3 }}
+   376→                  activeDot={{ r: 5 }}
+   377→                />
+   378→              </LineChart>
+   379→            </ResponsiveContainer>
+   380→          ) : (
+   381→            <p className="text-sm text-muted-foreground py-10 text-center">
+   382→              No collection data
+   383→            </p>
+   384→          )}
+   385→        </div>
+   386→
+   387→        <div className="bg-card border border-border rounded-xl p-5">
+   388→          <h3 className="text-sm font-semibold text-foreground mb-4">
+   389→            Items by Status
+   390→          </h3>
+   391→          {statusBreakdown.length > 0 ? (
+   392→            <ResponsiveContainer width="100%" height={280}>
+   393→              <PieChart>
+   394→                <Pie
+   395→                  data={statusBreakdown}
+   396→                  dataKey="value"
+   397→                  nameKey="name"
+   398→                  cx="50%"
+   399→                  cy="50%"
+   400→                  outerRadius={90}
+   401→                  innerRadius={45}
+   402→                  paddingAngle={2}
+   403→                >
+   404→                  {statusBreakdown.map((entry, i) => (
+   405→                    <Cell
+   406→                      key={i}
+   407→                      fill={
+   408→                        PIE_STATUS_COLORS[entry.name] || DEFAULT_PIE_COLOR
+   409→                      }
+   410→                    />
+   411→                  ))}
+   412→                </Pie>
+   413→                <Tooltip
+   414→                  contentStyle={{
+   415→                    background: "#1a1f2e",
+   416→                    border: "1px solid #2d3548",
+   417→                    borderRadius: 8,
+   418→                    fontSize: 12,
+   419→                  }}
+   420→                />
+   421→                <Legend wrapperStyle={{ fontSize: 10 }} />
+   422→              </PieChart>
+   423→            </ResponsiveContainer>
+   424→          ) : (
+   425→            <p className="text-sm text-muted-foreground py-10 text-center">
+   426→              No items
+   427→            </p>
+   428→          )}
+   429→        </div>
+   430→      </div>
+   431→
+   432→      {/* Recent activity */}
+   433→      <div className="bg-card border border-border rounded-xl p-5">
+   434→        <div className="flex items-center justify-between mb-4">
+   435→          <h3 className="text-sm font-semibold text-foreground">
+   436→            Recent Collection Activity
+   437→          </h3>
+   438→          <CustomBadge className="bg-secondary border-border text-muted-foreground">
+   439→            Last 5
+   440→          </CustomBadge>
+   441→        </div>
+   442→        {recentDaily.length === 0 ? (
+   443→          <EmptyState
+   444→            icon={CalendarDays}
+   445→            title="No recent collections"
+   446→            description="Daily collections will appear here once recorded."
+   447→          />
+   448→        ) : (
+   449→          <ul className="space-y-3">
+   450→            {recentDaily.map((d) => (
+   451→              <li
+   452→                key={d.id}
+   453→                className="flex items-start gap-3 pb-3 border-b border-border last:border-0 last:pb-0"
+   454→              >
+   455→                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+   456→                  <PackageCheck className="h-4 w-4" />
+   457→                </div>
+   458→                <div className="min-w-0 flex-1">
+   459→                  <p className="text-sm font-medium text-foreground truncate">
+   460→                    {d.itemName}
+   461→                  </p>
+   462→                  <p className="text-xs text-muted-foreground">
+   463→                    {formatNumber(d.qty)} qty · {d.receivedFrom || "—"} ·{" "}
+   464→                    {formatFullDate(d.date)}
+   465→                  </p>
+   466→                </div>
+   467→                <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+   468→                  {formatDateTime(d.recordedAt)}
+   469→                </span>
+   470→              </li>
+   471→            ))}
+   472→          </ul>
+   473→        )}
+   474→      </div>
+   475→    </div>
+   476→  );
+   477→}
+   478→
+   479→// ─────────────────────────────────────────────────────────
+   480→// Part Supply Tab
+   481→// ─────────────────────────────────────────────────────────
+   482→function PartSupplyTab() {
+   483→  const { data: orders, loading, error, refresh } = useFetch<
+   484→    PartSupplyOrder[]
+   485→  >("/api/collection/part-supply");
+   486→  const [expandedId, setExpandedId] = useState<string | null>(null);
+   487→  const [addOpen, setAddOpen] = useState(false);
+   488→  const [entryDialogOrder, setEntryDialogOrder] =
+   489→    useState<PartSupplyOrder | null>(null);
+   490→  const [printOrder, setPrintOrder] = useState<PartSupplyOrder | null>(null);
+   491→  const { toast } = useToast();
+   492→
+   493→  function toggle(id: string) {
+   494→    setExpandedId((cur) => (cur === id ? null : id));
+   495→  }
+   496→
+   497→  if (loading) return <LoadingState label="Loading part-supply orders..." />;
+   498→  if (error) return <ErrorState message={error} />;
+   499→
+   500→  return (
+   501→    <div className="space-y-4">
+   502→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+   503→        <p className="text-sm text-muted-foreground">
+   504→          Track multi-day deliveries (Ready-mix concrete, Quarry items, TMT
+   505→          bars, etc.)
+   506→        </p>
+   507→        <Button
+   508→          onClick={() => setAddOpen(true)}
+   509→          size="sm"
+   510→          className="gap-1.5 shrink-0"
+   511→        >
+   512→          <Plus className="h-4 w-4" /> Add Part Supply Order
+   513→        </Button>
+   514→      </div>
+   515→
+   516→      {!orders || orders.length === 0 ? (
+   517→        <EmptyState
+   518→          icon={Layers}
+   519→          title="No part-supply orders"
+   520→          description="Create an order to start tracking multi-day deliveries."
+   521→          action={
+   522→            <Button
+   523→              onClick={() => setAddOpen(true)}
+   524→              size="sm"
+   525→              className="gap-1.5"
+   526→            >
+   527→              <Plus className="h-4 w-4" /> Add Part Supply Order
+   528→            </Button>
+   529→          }
+   530→        />
+   531→      ) : (
+   532→        <div className="space-y-3">
+   533→          {orders.map((order) => {
+   534→            const pct =
+   535→              order.orderedQty > 0
+   536→                ? Math.min(
+   537→                    (order.receivedQty / order.orderedQty) * 100,
+   538→                    100
+   539→                  )
+   540→                : 0;
+   541→            const expanded = expandedId === order.id;
+   542→            const isCompleted =
+   543→              order.status === "Completed" || order.balance <= 0;
+   544→            return (
+   545→              <div
+   546→                key={order.id}
+   547→                className={cn(
+   548→                  "bg-card border border-border rounded-xl overflow-hidden transition-all",
+   549→                  isCompleted && "opacity-70"
+   550→                )}
+   551→              >
+   552→                {/* Header (always visible) */}
+   553→                <button
+   554→                  onClick={() => toggle(order.id)}
+   555→                  className="w-full p-4 text-left hover:bg-secondary/30 transition-colors"
+   556→                  aria-expanded={expanded}
+   557→                >
+   558→                  <div className="flex items-start gap-3">
+   559→                    <div className="shrink-0 text-muted-foreground mt-0.5">
+   560→                      {expanded ? (
+   561→                        <ChevronDown className="h-4 w-4" />
+   562→                      ) : (
+   563→                        <ChevronRight className="h-4 w-4" />
+   564→                      )}
+   565→                    </div>
+   566→                    <div className="min-w-0 flex-1">
+   567→                      <div className="flex items-start justify-between gap-2">
+   568→                        <div className="min-w-0">
+   569→                          <p className="font-semibold text-foreground truncate">
+   570→                            {order.itemName}
+   571→                          </p>
+   572→                          <p className="text-xs text-muted-foreground truncate">
+   573→                            {order.supplier || "—"} · Started{" "}
+   574→                            {formatFullDate(order.startDate)}
+   575→                          </p>
+   576→                        </div>
+   577→                        <CustomBadge
+   578→                          className={cn(
+   579→                            "border-0 shrink-0",
+   580→                            statusColor(order.status)
+   581→                          )}
+   582→                        >
+   583→                          {order.status}
+   584→                        </CustomBadge>
+   585→                      </div>
+   586→                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+   587→                        <MiniStat
+   588→                          label="Ordered"
+   589→                          value={formatNumber(order.orderedQty)}
+   590→                        />
+   591→                        <MiniStat
+   592→                          label="Received"
+   593→                          value={formatNumber(order.receivedQty)}
+   594→                          valueClass="text-emerald-400"
+   595→                        />
+   596→                        <MiniStat
+   597→                          label="Balance"
+   598→                          value={formatNumber(order.balance)}
+   599→                          valueClass="text-amber-400"
+   600→                        />
+   601→                        <div className="col-span-2 sm:col-span-1">
+   602→                          <p className="text-[10px] uppercase text-muted-foreground">
+   603→                            Complete ({pct.toFixed(0)}%)
+   604→                          </p>
+   605→                          <div className="h-2 w-full bg-secondary rounded-full overflow-hidden mt-1">
+   606→                            <div
+   607→                              className={cn(
+   608→                                "h-full rounded-full transition-all",
+   609→                                progressColor(pct)
+   610→                              )}
+   611→                              style={{ width: `${pct}%` }}
+   612→                            />
+   613→                          </div>
+   614→                        </div>
+   615→                      </div>
+   616→                    </div>
+   617→                  </div>
+   618→                </button>
+   619→
+   620→                {/* Expanded body */}
+   621→                {expanded && (
+   622→                  <div className="border-t border-border p-4 space-y-4 bg-secondary/10">
+   623→                    {/* Order summary bar */}
+   624→                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 bg-card border border-border rounded-lg p-3">
+   625→                      <SummaryCell
+   626→                        label="Item"
+   627→                        value={order.itemName}
+   628→                      />
+   629→                      <SummaryCell
+   630→                        label="Ordered Qty"
+   631→                        value={formatNumber(order.orderedQty)}
+   632→                      />
+   633→                      <SummaryCell
+   634→                        label="Received Qty"
+   635→                        value={formatNumber(order.receivedQty)}
+   636→                        accent="text-emerald-400"
+   637→                      />
+   638→                      <SummaryCell
+   639→                        label="Balance"
+   640→                        value={formatNumber(order.balance)}
+   641→                        accent="text-amber-400"
+   642→                      />
+   643→                      <div className="col-span-2 sm:col-span-4 lg:col-span-1">
+   644→                        <p className="text-[10px] uppercase text-muted-foreground mb-1">
+   645→                          Complete ({pct.toFixed(0)}%)
+   646→                        </p>
+   647→                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+   648→                          <div
+   649→                            className={cn(
+   650→                              "h-full rounded-full transition-all",
+   651→                              progressColor(pct)
+   652→                            )}
+   653→                            style={{ width: `${pct}%` }}
+   654→                          />
+   655→                        </div>
+   656→                      </div>
+   657→                    </div>
+   658→
+   659→                    {/* Delivery entries table */}
+   660→                    <div>
+   661→                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+   662→                        <h4 className="text-sm font-semibold text-foreground">
+   663→                          Delivery Entries ({order.entries.length})
+   664→                        </h4>
+   665→                        <div className="flex items-center gap-2">
+   666→                          <Button
+   667→                            variant="outline"
+   668→                            size="sm"
+   669→                            className="gap-1.5"
+   670→                            onClick={() => setPrintOrder(order)}
+   671→                          >
+   672→                            <Printer className="h-4 w-4" /> Print Receipt
+   673→                          </Button>
+   674→                          {!isCompleted && (
+   675→                            <Button
+   676→                              size="sm"
+   677→                              className="gap-1.5"
+   678→                              onClick={() => setEntryDialogOrder(order)}
+   679→                            >
+   680→                              <Plus className="h-4 w-4" /> Add Entry
+   681→                            </Button>
+   682→                          )}
+   683→                        </div>
+   684→                      </div>
+   685→                      {order.entries.length === 0 ? (
+   686→                        <div className="py-6 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+   687→                          No deliveries recorded yet. Click “Add Entry” to
+   688→                          record the first delivery.
+   689→                        </div>
+   690→                      ) : (
+   691→                        <div className="overflow-x-auto rounded-lg border border-border [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+   692→                          <Table>
+   693→                            <TableHeader>
+   694→                              <TableRow className="border-border hover:bg-transparent">
+   695→                                <TableHead className="text-muted-foreground">
+   696→                                  Sr.
+   697→                                </TableHead>
+   698→                                <TableHead className="text-muted-foreground">
+   699→                                  Date
+   700→                                </TableHead>
+   701→                                <TableHead className="text-muted-foreground">
+   702→                                  Vehicle
+   703→                                </TableHead>
+   704→                                <TableHead className="text-muted-foreground text-right">
+   705→                                  Qty
+   706→                                </TableHead>
+   707→                                <TableHead className="text-muted-foreground">
+   708→                                  QC By
+   709→                                </TableHead>
+   710→                                <TableHead className="text-muted-foreground text-center">
+   711→                                  Sailors
+   712→                                </TableHead>
+   713→                                <TableHead className="text-muted-foreground">
+   714→                                  Driver
+   715→                                </TableHead>
+   716→                                <TableHead className="text-muted-foreground text-right">
+   717→                                  Cum. Bal.
+   718→                                </TableHead>
+   719→                              </TableRow>
+   720→                            </TableHeader>
+   721→                            <TableBody>
+   722→                              {order.entries.map((e) => (
+   723→                                <TableRow
+   724→                                  key={e.id}
+   725→                                  className="border-border"
+   726→                                >
+   727→                                  <TableCell className="font-medium text-foreground">
+   728→                                    {e.srNo}
+   729→                                  </TableCell>
+   730→                                  <TableCell className="text-foreground whitespace-nowrap">
+   731→                                    {formatFullDate(e.date)}
+   732→                                  </TableCell>
+   733→                                  <TableCell className="text-foreground">
+   734→                                    {e.vehicleNumber || "—"}
+   735→                                  </TableCell>
+   736→                                  <TableCell className="text-foreground text-right whitespace-nowrap">
+   737→                                    {formatNumber(e.qty)}
+   738→                                  </TableCell>
+   739→                                  <TableCell className="text-foreground">
+   740→                                    {e.qcCheckedBy || "—"}
+   741→                                  </TableCell>
+   742→                                  <TableCell className="text-foreground text-center">
+   743→                                    {e.sailorCount || 0}
+   744→                                  </TableCell>
+   745→                                  <TableCell className="text-foreground">
+   746→                                    <div className="text-xs leading-tight">
+   747→                                      <div>
+   748→                                        {e.driverName || "—"}
+   749→                                      </div>
+   750→                                      {e.driverLicense && (
+   751→                                        <div className="text-muted-foreground">
+   752→                                          {e.driverLicense}
+   753→                                        </div>
+   754→                                      )}
+   755→                                      {e.driverPhone && (
+   756→                                        <div className="text-muted-foreground">
+   757→                                          {e.driverPhone}
+   758→                                        </div>
+   759→                                      )}
+   760→                                    </div>
+   761→                                  </TableCell>
+   762→                                  <TableCell className="text-foreground text-right font-medium whitespace-nowrap">
+   763→                                    {formatNumber(e.cumulativeBalance)}
+   764→                                  </TableCell>
+   765→                                </TableRow>
+   766→                              ))}
+   767→                            </TableBody>
+   768→                          </Table>
+   769→                        </div>
+   770→                      )}
+   771→                    </div>
+   772→                  </div>
+   773→                )}
+   774→              </div>
+   775→            );
+   776→          })}
+   777→        </div>
+   778→      )}
+   779→
+   780→      {/* Add Order Dialog */}
+   781→      <AddPartSupplyDialog
+   782→        open={addOpen}
+   783→        onOpenChange={setAddOpen}
+   784→        onCreated={() => {
+   785→          setAddOpen(false);
+   786→          toast({ title: "Part supply order created" });
+   787→          refresh();
+   788→        }}
+   789→      />
+   790→
+   791→      {/* Add Entry Dialog */}
+   792→      {entryDialogOrder && (
+   793→        <AddEntryDialog
+   794→          order={entryDialogOrder}
+   795→          open={!!entryDialogOrder}
+   796→          onOpenChange={(o) => !o && setEntryDialogOrder(null)}
+   797→          onCreated={() => {
+   798→            setEntryDialogOrder(null);
+   799→            toast({ title: "Delivery entry added" });
+   800→            refresh();
+   801→          }}
+   802→        />
+   803→      )}
+   804→
+   805→      {/* Print Receipt Dialog */}
+   806→      {printOrder && (
+   807→        <PrintReceiptDialog
+   808→          order={printOrder}
+   809→          open={!!printOrder}
+   810→          onOpenChange={(o) => !o && setPrintOrder(null)}
+   811→        />
+   812→      )}
+   813→    </div>
+   814→  );
+   815→}
+   816→
+   817→function MiniStat({
+   818→  label,
+   819→  value,
+   820→  valueClass,
+   821→}: {
+   822→  label: string;
+   823→  value: string;
+   824→  valueClass?: string;
+   825→}) {
+   826→  return (
+   827→    <div>
+   828→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+   829→      <p
+   830→        className={cn(
+   831→          "text-sm font-medium text-foreground",
+   832→          valueClass
+   833→        )}
+   834→      >
+   835→        {value}
+   836→      </p>
+   837→    </div>
+   838→  );
+   839→}
+   840→
+   841→function SummaryCell({
+   842→  label,
+   843→  value,
+   844→  accent,
+   845→}: {
+   846→  label: string;
+   847→  value: string;
+   848→  accent?: string;
+   849→}) {
+   850→  return (
+   851→    <div>
+   852→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+   853→      <p
+   854→        className={cn(
+   855→          "text-sm font-medium truncate",
+   856→          accent ?? "text-foreground"
+   857→        )}
+   858→      >
+   859→        {value}
+   860→      </p>
+   861→    </div>
+   862→  );
+   863→}
+   864→
+   865→// ─────────────────────────────────────────────────────────
+   866→// Add Part Supply Order Dialog
+   867→// ─────────────────────────────────────────────────────────
+   868→function AddPartSupplyDialog({
+   869→  open,
+   870→  onOpenChange,
+   871→  onCreated,
+   872→}: {
+   873→  open: boolean;
+   874→  onOpenChange: (o: boolean) => void;
+   875→  onCreated: () => void;
+   876→}) {
+   877→  const [itemName, setItemName] = useState("");
+   878→  const [orderedQty, setOrderedQty] = useState("");
+   879→  const [startDate, setStartDate] = useState(todayISO());
+   880→  const [expectedEndDate, setExpectedEndDate] = useState("");
+   881→  const [supplier, setSupplier] = useState("");
+   882→  const [submitting, setSubmitting] = useState(false);
+   883→  const { toast } = useToast();
+   884→
+   885→  async function submit() {
+   886→    if (!itemName.trim()) {
+   887→      toast({ title: "Item name required", variant: "destructive" });
+   888→      return;
+   889→    }
+   890→    if (!orderedQty || Number(orderedQty) <= 0) {
+   891→      toast({ title: "Valid ordered qty required", variant: "destructive" });
+   892→      return;
+   893→    }
+   894→    setSubmitting(true);
+   895→    const res = await apiRequest("/api/collection/part-supply", "POST", {
+   896→      itemName: itemName.trim(),
+   897→      orderedQty: Number(orderedQty),
+   898→      startDate: startDate || undefined,
+   899→      expectedEndDate: expectedEndDate || undefined,
+   900→      supplier: supplier.trim() || undefined,
+   901→    });
+   902→    setSubmitting(false);
+   903→    if (!res.ok) {
+   904→      toast({ title: res.error || "Failed", variant: "destructive" });
+   905→      return;
+   906→    }
+   907→    setItemName("");
+   908→    setOrderedQty("");
+   909→    setExpectedEndDate("");
+   910→    setSupplier("");
+   911→    onCreated();
+   912→  }
+   913→
+   914→  return (
+   915→    <Dialog open={open} onOpenChange={onOpenChange}>
+   916→      <DialogContent className="sm:max-w-md">
+   917→        <DialogHeader>
+   918→          <DialogTitle>Add Part Supply Order</DialogTitle>
+   919→          <DialogDescription>
+   920→            Create a new multi-day delivery order to track partial receipts.
+   921→          </DialogDescription>
+   922→        </DialogHeader>
+   923→        <div className="space-y-3 py-1">
+   924→          <div className="space-y-1.5">
+   925→            <Label>Item Name</Label>
+   926→            <Input
+   927→              value={itemName}
+   928→              onChange={(e) => setItemName(e.target.value)}
+   929→              placeholder="e.g. Ready-mix concrete M25"
+   930→            />
+   931→          </div>
+   932→          <div className="grid grid-cols-2 gap-3">
+   933→            <div className="space-y-1.5">
+   934→              <Label>Ordered Qty</Label>
+   935→              <Input
+   936→                type="number"
+   937→                value={orderedQty}
+   938→                onChange={(e) => setOrderedQty(e.target.value)}
+   939→                placeholder="0"
+   940→              />
+   941→            </div>
+   942→            <div className="space-y-1.5">
+   943→              <Label>Supplier</Label>
+   944→              <Input
+   945→                value={supplier}
+   946→                onChange={(e) => setSupplier(e.target.value)}
+   947→                placeholder="Supplier name"
+   948→              />
+   949→            </div>
+   950→          </div>
+   951→          <div className="grid grid-cols-2 gap-3">
+   952→            <div className="space-y-1.5">
+   953→              <Label>Start Date</Label>
+   954→              <Input
+   955→                type="date"
+   956→                value={startDate}
+   957→                onChange={(e) => setStartDate(e.target.value)}
+   958→              />
+   959→            </div>
+   960→            <div className="space-y-1.5">
+   961→              <Label>Expected End Date</Label>
+   962→              <Input
+   963→                type="date"
+   964→                value={expectedEndDate}
+   965→                onChange={(e) => setExpectedEndDate(e.target.value)}
+   966→              />
+   967→            </div>
+   968→          </div>
+   969→        </div>
+   970→        <DialogFooter>
+   971→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   972→            Cancel
+   973→          </Button>
+   974→          <Button onClick={submit} disabled={submitting}>
+   975→            {submitting ? "Saving..." : "Create Order"}
+   976→          </Button>
+   977→        </DialogFooter>
+   978→      </DialogContent>
+   979→    </Dialog>
+   980→  );
+   981→}
+   982→
+   983→// ─────────────────────────────────────────────────────────
+   984→// Add Entry Dialog
+   985→// ─────────────────────────────────────────────────────────
+   986→function AddEntryDialog({
+   987→  order,
+   988→  open,
+   989→  onOpenChange,
+   990→  onCreated,
+   991→}: {
+   992→  order: PartSupplyOrder;
+   993→  open: boolean;
+   994→  onOpenChange: (o: boolean) => void;
+   995→  onCreated: () => void;
+   996→}) {
+   997→  const [date, setDate] = useState(todayISO());
+   998→  const [vehicleNumber, setVehicleNumber] = useState("");
+   999→  const [qty, setQty] = useState("");
+  1000→  const [qcCheckedBy, setQcCheckedBy] = useState("");
+  1001→  const [sailorCount, setSailorCount] = useState("");
+  1002→  const [driverName, setDriverName] = useState("");
+  1003→  const [driverLicense, setDriverLicense] = useState("");
+  1004→  const [driverPhone, setDriverPhone] = useState("");
+  1005→  const [submitting, setSubmitting] = useState(false);
+  1006→  const { toast } = useToast();
+  1007→
+  1008→  async function submit() {
+  1009→    if (!qty || Number(qty) <= 0) {
+  1010→      toast({ title: "Valid qty required", variant: "destructive" });
+  1011→      return;
+  1012→    }
+  1013→    setSubmitting(true);
+  1014→    const res = await apiRequest(
+  1015→      `/api/collection/part-supply/${order.id}/entries`,
+  1016→      "POST",
+  1017→      {
+  1018→        date,
+  1019→        vehicleNumber: vehicleNumber.trim() || undefined,
+  1020→        qty: Number(qty),
+  1021→        qcCheckedBy: qcCheckedBy.trim() || undefined,
+  1022→        sailorCount: Number(sailorCount) || 0,
+  1023→        driverName: driverName.trim() || undefined,
+  1024→        driverLicense: driverLicense.trim() || undefined,
+  1025→        driverPhone: driverPhone.trim() || undefined,
+  1026→      }
+  1027→    );
+  1028→    setSubmitting(false);
+  1029→    if (!res.ok) {
+  1030→      toast({ title: res.error || "Failed", variant: "destructive" });
+  1031→      return;
+  1032→    }
+  1033→    setVehicleNumber("");
+  1034→    setQty("");
+  1035→    setQcCheckedBy("");
+  1036→    setSailorCount("");
+  1037→    setDriverName("");
+  1038→    setDriverLicense("");
+  1039→    setDriverPhone("");
+  1040→    onCreated();
+  1041→  }
+  1042→
+  1043→  return (
+  1044→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1045→      <DialogContent className="sm:max-w-lg">
+  1046→        <DialogHeader>
+  1047→          <DialogTitle>Add Delivery Entry</DialogTitle>
+  1048→          <DialogDescription>
+  1049→            {order.itemName} · Ordered {formatNumber(order.orderedQty)} ·
+  1050→            Balance {formatNumber(order.balance)}
+  1051→          </DialogDescription>
+  1052→        </DialogHeader>
+  1053→        <div className="grid grid-cols-2 gap-3 py-1">
+  1054→          <div className="space-y-1.5">
+  1055→            <Label>Date</Label>
+  1056→            <Input
+  1057→              type="date"
+  1058→              value={date}
+  1059→              onChange={(e) => setDate(e.target.value)}
+  1060→            />
+  1061→          </div>
+  1062→          <div className="space-y-1.5">
+  1063→            <Label>Vehicle Number</Label>
+  1064→            <Input
+  1065→              value={vehicleNumber}
+  1066→              onChange={(e) => setVehicleNumber(e.target.value)}
+  1067→              placeholder="TN-01-AB-1234"
+  1068→            />
+  1069→          </div>
+  1070→          <div className="space-y-1.5">
+  1071→            <Label>Quantity</Label>
+  1072→            <Input
+  1073→              type="number"
+  1074→              value={qty}
+  1075→              onChange={(e) => setQty(e.target.value)}
+  1076→              placeholder="0"
+  1077→            />
+  1078→          </div>
+  1079→          <div className="space-y-1.5">
+  1080→            <Label>QC Checked By</Label>
+  1081→            <Input
+  1082→              value={qcCheckedBy}
+  1083→              onChange={(e) => setQcCheckedBy(e.target.value)}
+  1084→              placeholder="Inspector name"
+  1085→            />
+  1086→          </div>
+  1087→          <div className="space-y-1.5">
+  1088→            <Label>No. of Sailors</Label>
+  1089→            <Input
+  1090→              type="number"
+  1091→              value={sailorCount}
+  1092→              onChange={(e) => setSailorCount(e.target.value)}
+  1093→              placeholder="0"
+  1094→            />
+  1095→          </div>
+  1096→          <div className="space-y-1.5">
+  1097→            <Label>Driver Name</Label>
+  1098→            <Input
+  1099→              value={driverName}
+  1100→              onChange={(e) => setDriverName(e.target.value)}
+  1101→              placeholder="Driver name"
+  1102→            />
+  1103→          </div>
+  1104→          <div className="space-y-1.5">
+  1105→            <Label>Driver License</Label>
+  1106→            <Input
+  1107→              value={driverLicense}
+  1108→              onChange={(e) => setDriverLicense(e.target.value)}
+  1109→              placeholder="License no."
+  1110→            />
+  1111→          </div>
+  1112→          <div className="space-y-1.5">
+  1113→            <Label>Driver Phone</Label>
+  1114→            <Input
+  1115→              value={driverPhone}
+  1116→              onChange={(e) => setDriverPhone(e.target.value)}
+  1117→              placeholder="Phone no."
+  1118→            />
+  1119→          </div>
+  1120→        </div>
+  1121→        <DialogFooter>
+  1122→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1123→            Cancel
+  1124→          </Button>
+  1125→          <Button onClick={submit} disabled={submitting}>
+  1126→            {submitting ? "Saving..." : "Add Entry"}
+  1127→          </Button>
+  1128→        </DialogFooter>
+  1129→      </DialogContent>
+  1130→    </Dialog>
+  1131→  );
+  1132→}
+  1133→
+  1134→// ─────────────────────────────────────────────────────────
+  1135→// Print Receipt Dialog
+  1136→// ─────────────────────────────────────────────────────────
+  1137→function PrintReceiptDialog({
+  1138→  order,
+  1139→  open,
+  1140→  onOpenChange,
+  1141→}: {
+  1142→  order: PartSupplyOrder;
+  1143→  open: boolean;
+  1144→  onOpenChange: (o: boolean) => void;
+  1145→}) {
+  1146→  const pct =
+  1147→    order.orderedQty > 0
+  1148→      ? Math.min((order.receivedQty / order.orderedQty) * 100, 100)
+  1149→      : 0;
+  1150→
+  1151→  return (
+  1152→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1153→      <DialogContent
+  1154→        showCloseButton={false}
+  1155→        className="sm:max-w-3xl print-receipt"
+  1156→      >
+  1157→        <style>{`
+  1158→          @media print {
+  1159→            body * { visibility: hidden !important; }
+  1160→            .print-receipt, .print-receipt * { visibility: visible !important; }
+  1161→            .print-receipt {
+  1162→              position: absolute !important;
+  1163→              left: 0 !important;
+  1164→              top: 0 !important;
+  1165→              width: 100% !important;
+  1166→              max-width: 100% !important;
+  1167→              margin: 0 !important;
+  1168→              padding: 24px !important;
+  1169→              transform: none !important;
+  1170→              border: 0 !important;
+  1171→              box-shadow: none !important;
+  1172→            }
+  1173→            .no-print { display: none !important; }
+  1174→          }
+  1175→        `}</style>
+  1176→        <DialogHeader className="no-print">
+  1177→          <DialogTitle>Daily Receipt — {order.itemName}</DialogTitle>
+  1178→          <DialogDescription>
+  1179→            Review and print the delivery receipt for this part-supply order.
+  1180→          </DialogDescription>
+  1181→        </DialogHeader>
+  1182→        <div className="space-y-4">
+  1183→          {/* Receipt header */}
+  1184→          <div className="border-b border-border pb-3">
+  1185→            <h2 className="text-lg font-bold text-foreground">
+  1186→              CE Logistic Panel — Dockyard
+  1187→            </h2>
+  1188→            <p className="text-sm text-muted-foreground">
+  1189→              Part Supply Delivery Receipt
+  1190→            </p>
+  1191→          </div>
+  1192→          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+  1193→            <div>
+  1194→              <p className="text-[10px] uppercase text-muted-foreground">
+  1195→                Item
+  1196→              </p>
+  1197→              <p className="font-medium text-foreground">{order.itemName}</p>
+  1198→            </div>
+  1199→            <div>
+  1200→              <p className="text-[10px] uppercase text-muted-foreground">
+  1201→                Supplier
+  1202→              </p>
+  1203→              <p className="font-medium text-foreground">
+  1204→                {order.supplier || "—"}
+  1205→              </p>
+  1206→            </div>
+  1207→            <div>
+  1208→              <p className="text-[10px] uppercase text-muted-foreground">
+  1209→                Start Date
+  1210→              </p>
+  1211→              <p className="font-medium text-foreground">
+  1212→                {formatFullDate(order.startDate)}
+  1213→              </p>
+  1214→            </div>
+  1215→            <div>
+  1216→              <p className="text-[10px] uppercase text-muted-foreground">
+  1217→                Expected End
+  1218→              </p>
+  1219→              <p className="font-medium text-foreground">
+  1220→                {formatFullDate(order.expectedEndDate)}
+  1221→              </p>
+  1222→            </div>
+  1223→            <div>
+  1224→              <p className="text-[10px] uppercase text-muted-foreground">
+  1225→                Ordered Qty
+  1226→              </p>
+  1227→              <p className="font-medium text-foreground">
+  1228→                {formatNumber(order.orderedQty)}
+  1229→              </p>
+  1230→            </div>
+  1231→            <div>
+  1232→              <p className="text-[10px] uppercase text-muted-foreground">
+  1233→                Received Qty
+  1234→              </p>
+  1235→              <p className="font-medium text-emerald-600">
+  1236→                {formatNumber(order.receivedQty)}
+  1237→              </p>
+  1238→            </div>
+  1239→            <div>
+  1240→              <p className="text-[10px] uppercase text-muted-foreground">
+  1241→                Balance
+  1242→              </p>
+  1243→              <p className="font-medium text-amber-600">
+  1244→                {formatNumber(order.balance)}
+  1245→              </p>
+  1246→            </div>
+  1247→            <div>
+  1248→              <p className="text-[10px] uppercase text-muted-foreground">
+  1249→                Complete
+  1250→              </p>
+  1251→              <p className="font-medium text-foreground">
+  1252→                {pct.toFixed(0)}%
+  1253→              </p>
+  1254→            </div>
+  1255→          </div>
+  1256→
+  1257→          <div className="overflow-x-auto rounded-lg border border-border">
+  1258→            <Table>
+  1259→              <TableHeader>
+  1260→                <TableRow className="border-border">
+  1261→                  <TableHead className="text-muted-foreground">Sr.</TableHead>
+  1262→                  <TableHead className="text-muted-foreground">
+  1263→                    Date
+  1264→                  </TableHead>
+  1265→                  <TableHead className="text-muted-foreground">
+  1266→                    Vehicle
+  1267→                  </TableHead>
+  1268→                  <TableHead className="text-muted-foreground text-right">
+  1269→                    Qty
+  1270→                  </TableHead>
+  1271→                  <TableHead className="text-muted-foreground">
+  1272→                    QC By
+  1273→                  </TableHead>
+  1274→                  <TableHead className="text-muted-foreground text-center">
+  1275→                    Sailors
+  1276→                  </TableHead>
+  1277→                  <TableHead className="text-muted-foreground">
+  1278→                    Driver
+  1279→                  </TableHead>
+  1280→                  <TableHead className="text-muted-foreground text-right">
+  1281→                    Cum. Bal.
+  1282→                  </TableHead>
+  1283→                </TableRow>
+  1284→              </TableHeader>
+  1285→              <TableBody>
+  1286→                {order.entries.length === 0 ? (
+  1287→                  <TableRow>
+  1288→                    <TableCell
+  1289→                      colSpan={8}
+  1290→                      className="text-center text-muted-foreground"
+  1291→                    >
+  1292→                      No entries
+  1293→                    </TableCell>
+  1294→                  </TableRow>
+  1295→                ) : (
+  1296→                  order.entries.map((e) => (
+  1297→                    <TableRow key={e.id} className="border-border">
+  1298→                      <TableCell>{e.srNo}</TableCell>
+  1299→                      <TableCell className="whitespace-nowrap">
+  1300→                        {formatFullDate(e.date)}
+  1301→                      </TableCell>
+  1302→                      <TableCell>{e.vehicleNumber || "—"}</TableCell>
+  1303→                      <TableCell className="text-right">
+  1304→                        {formatNumber(e.qty)}
+  1305→                      </TableCell>
+  1306→                      <TableCell>{e.qcCheckedBy || "—"}</TableCell>
+  1307→                      <TableCell className="text-center">
+  1308→                        {e.sailorCount || 0}
+  1309→                      </TableCell>
+  1310→                      <TableCell>
+  1311→                        {[e.driverName, e.driverLicense, e.driverPhone]
+  1312→                          .filter(Boolean)
+  1313→                          .join(" / ") || "—"}
+  1314→                      </TableCell>
+  1315→                      <TableCell className="text-right">
+  1316→                        {formatNumber(e.cumulativeBalance)}
+  1317→                      </TableCell>
+  1318→                    </TableRow>
+  1319→                  ))
+  1320→                )}
+  1321→              </TableBody>
+  1322→            </Table>
+  1323→          </div>
+  1324→
+  1325→          <p className="text-xs text-muted-foreground">
+  1326→            Generated on {formatDateTime(new Date().toISOString())}
+  1327→          </p>
+  1328→        </div>
+  1329→        <DialogFooter className="no-print">
+  1330→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1331→            Close
+  1332→          </Button>
+  1333→          <Button onClick={() => window.print()} className="gap-1.5">
+  1334→            <Printer className="h-4 w-4" /> Print
+  1335→          </Button>
+  1336→        </DialogFooter>
+  1337→      </DialogContent>
+  1338→    </Dialog>
+  1339→  );
+  1340→}
+  1341→
+  1342→// ─────────────────────────────────────────────────────────
+  1343→// Daily Collection Tab
+  1344→// ─────────────────────────────────────────────────────────
+  1345→type FilterMode = "all" | "today" | "yesterday" | "custom" | "range";
+  1346→type ViewMode = "date" | "period" | "supplier";
+  1347→
+  1348→function DailyCollectionTab() {
+  1349→  const today = todayISO();
+  1350→  const yesterday = yesterdayISO();
+  1351→  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  1352→  const [customDate, setCustomDate] = useState("");
+  1353→  const [fromDate, setFromDate] = useState("");
+  1354→  const [toDate, setToDate] = useState("");
+  1355→  const [viewMode, setViewMode] = useState<ViewMode>("date");
+  1356→
+  1357→  const [recordOpen, setRecordOpen] = useState(false);
+  1358→  const [bulkOpen, setBulkOpen] = useState(false);
+  1359→  const { toast } = useToast();
+  1360→
+  1361→  const dailyUrl = useMemo(() => {
+  1362→    const base = "/api/collection/daily";
+  1363→    if (filterMode === "today") return `${base}?date=${today}`;
+  1364→    if (filterMode === "yesterday") return `${base}?date=${yesterday}`;
+  1365→    if (filterMode === "custom" && customDate)
+  1366→      return `${base}?date=${customDate}`;
+  1367→    if (filterMode === "range" && fromDate && toDate)
+  1368→      return `${base}?from=${fromDate}&to=${toDate}`;
+  1369→    return base;
+  1370→  }, [filterMode, customDate, fromDate, toDate, today, yesterday]);
+  1371→
+  1372→  const { data: daily, loading, error, refresh } =
+  1373→    useFetch<DailyCollection[]>(dailyUrl);
+  1374→
+  1375→  const grouped = useMemo(() => {
+  1376→    const rows = daily ?? [];
+  1377→    if (viewMode === "date") return groupByDate(rows);
+  1378→    if (viewMode === "period") return groupByPeriod(rows);
+  1379→    return groupBySupplier(rows);
+  1380→  }, [daily, viewMode]);
+  1381→
+  1382→  function exportCSV() {
+  1383→    const rows = daily ?? [];
+  1384→    if (rows.length === 0) {
+  1385→      toast({ title: "No data to export", variant: "destructive" });
+  1386→      return;
+  1387→    }
+  1388→    const header = [
+  1389→      "Date",
+  1390→      "Item Name",
+  1391→      "Qty",
+  1392→      "Received From",
+  1393→      "Recorded By",
+  1394→      "Recorded At",
+  1395→    ];
+  1396→    const csv = [
+  1397→      header.join(","),
+  1398→      ...rows.map((r) =>
+  1399→        [
+  1400→          r.date,
+  1401→          `"${(r.itemName || "").replace(/"/g, '""')}"`,
+  1402→          r.qty,
+  1403→          `"${(r.receivedFrom || "").replace(/"/g, '""')}"`,
+  1404→          `"${(r.recordedBy || "").replace(/"/g, '""')}"`,
+  1405→          `"${formatDateTime(r.recordedAt)}"`,
+  1406→        ].join(",")
+  1407→      ),
+  1408→    ].join("\n");
+  1409→    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  1410→    const url = URL.createObjectURL(blob);
+  1411→    const a = document.createElement("a");
+  1412→    a.href = url;
+  1413→    a.download = `daily-collection-${today}.csv`;
+  1414→    document.body.appendChild(a);
+  1415→    a.click();
+  1416→    document.body.removeChild(a);
+  1417→    URL.revokeObjectURL(url);
+  1418→    toast({ title: "CSV exported" });
+  1419→  }
+  1420→
+  1421→  if (loading) return <LoadingState label="Loading daily collections..." />;
+  1422→  if (error) return <ErrorState message={error} />;
+  1423→
+  1424→  const totalQty = (daily ?? []).reduce((s, d) => s + d.qty, 0);
+  1425→
+  1426→  return (
+  1427→    <div className="space-y-4">
+  1428→      {/* Filter controls */}
+  1429→      <div className="flex flex-col gap-3">
+  1430→        <div className="flex flex-wrap items-center gap-2">
+  1431→          <span className="text-xs text-muted-foreground mr-1">Filter:</span>
+  1432→          <Button
+  1433→            size="sm"
+  1434→            variant={filterMode === "all" ? "default" : "outline"}
+  1435→            onClick={() => setFilterMode("all")}
+  1436→            className="gap-1.5"
+  1437→          >
+  1438→            <Boxes className="h-3.5 w-3.5" /> All
+  1439→          </Button>
+  1440→          <Button
+  1441→            size="sm"
+  1442→            variant={filterMode === "today" ? "default" : "outline"}
+  1443→            onClick={() => setFilterMode("today")}
+  1444→            className="gap-1.5"
+  1445→          >
+  1446→            <CalendarDays className="h-3.5 w-3.5" /> Today
+  1447→          </Button>
+  1448→          <Button
+  1449→            size="sm"
+  1450→            variant={filterMode === "yesterday" ? "default" : "outline"}
+  1451→            onClick={() => setFilterMode("yesterday")}
+  1452→            className="gap-1.5"
+  1453→          >
+  1454→            <Calendar className="h-3.5 w-3.5" /> Yesterday
+  1455→          </Button>
+  1456→          <Button
+  1457→            size="sm"
+  1458→            variant={filterMode === "custom" ? "default" : "outline"}
+  1459→            onClick={() => setFilterMode("custom")}
+  1460→            className="gap-1.5"
+  1461→          >
+  1462→            <Calendar className="h-3.5 w-3.5" /> Custom
+  1463→          </Button>
+  1464→          <Button
+  1465→            size="sm"
+  1466→            variant={filterMode === "range" ? "default" : "outline"}
+  1467→            onClick={() => setFilterMode("range")}
+  1468→            className="gap-1.5"
+  1469→          >
+  1470→            <CalendarRange className="h-3.5 w-3.5" /> Range
+  1471→          </Button>
+  1472→          {filterMode === "custom" && (
+  1473→            <Input
+  1474→              type="date"
+  1475→              value={customDate}
+  1476→              onChange={(e) => setCustomDate(e.target.value)}
+  1477→              className="h-8 w-auto text-xs"
+  1478→            />
+  1479→          )}
+  1480→          {filterMode === "range" && (
+  1481→            <div className="flex items-center gap-1.5">
+  1482→              <Input
+  1483→                type="date"
+  1484→                value={fromDate}
+  1485→                onChange={(e) => setFromDate(e.target.value)}
+  1486→                className="h-8 w-auto text-xs"
+  1487→              />
+  1488→              <span className="text-xs text-muted-foreground">to</span>
+  1489→              <Input
+  1490→                type="date"
+  1491→                value={toDate}
+  1492→                onChange={(e) => setToDate(e.target.value)}
+  1493→                className="h-8 w-auto text-xs"
+  1494→              />
+  1495→            </div>
+  1496→          )}
+  1497→        </div>
+  1498→
+  1499→        <div className="flex flex-wrap items-center justify-between gap-2">
+  1500→          <div className="flex flex-wrap items-center gap-2">
+  1501→            <span className="text-xs text-muted-foreground mr-1">Group:</span>
+  1502→            <Button
+  1503→              size="sm"
+  1504→              variant={viewMode === "date" ? "default" : "outline"}
+  1505→              onClick={() => setViewMode("date")}
+  1506→            >
+  1507→              By Date
+  1508→            </Button>
+  1509→            <Button
+  1510→              size="sm"
+  1511→              variant={viewMode === "period" ? "default" : "outline"}
+  1512→              onClick={() => setViewMode("period")}
+  1513→            >
+  1514→              By Period
+  1515→            </Button>
+  1516→            <Button
+  1517→              size="sm"
+  1518→              variant={viewMode === "supplier" ? "default" : "outline"}
+  1519→              onClick={() => setViewMode("supplier")}
+  1520→            >
+  1521→              By Supplier
+  1522→            </Button>
+  1523→          </div>
+  1524→          <div className="flex items-center gap-2">
+  1525→            <Button
+  1526→              variant="outline"
+  1527→              size="sm"
+  1528→              onClick={exportCSV}
+  1529→              className="gap-1.5"
+  1530→            >
+  1531→              <Download className="h-4 w-4" /> Export CSV
+  1532→            </Button>
+  1533→            <Button
+  1534→              variant="outline"
+  1535→              size="sm"
+  1536→              onClick={() => setBulkOpen(true)}
+  1537→              className="gap-1.5"
+  1538→            >
+  1539→              <ClipboardList className="h-4 w-4" /> Bulk Record
+  1540→            </Button>
+  1541→            <Button
+  1542→              size="sm"
+  1543→              onClick={() => setRecordOpen(true)}
+  1544→              className="gap-1.5"
+  1545→            >
+  1546→              <Plus className="h-4 w-4" /> Record Collection
+  1547→            </Button>
+  1548→          </div>
+  1549→        </div>
+  1550→      </div>
+  1551→
+  1552→      {/* Summary badges */}
+  1553→      <div className="flex flex-wrap items-center gap-3 text-sm">
+  1554→        <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+  1555→          {daily?.length ?? 0} entries
+  1556→        </CustomBadge>
+  1557→        <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+  1558→          {formatNumber(totalQty)} total qty
+  1559→        </CustomBadge>
+  1560→        <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1561→          {grouped.length} groups
+  1562→        </CustomBadge>
+  1563→      </div>
+  1564→
+  1565→      {/* Grouped list */}
+  1566→      {!daily || daily.length === 0 ? (
+  1567→        <EmptyState
+  1568→          icon={CalendarDays}
+  1569→          title="No daily collections"
+  1570→          description="No collections match the current filter. Record a collection to get started."
+  1571→          action={
+  1572→            <Button
+  1573→              onClick={() => setRecordOpen(true)}
+  1574→              size="sm"
+  1575→              className="gap-1.5"
+  1576→            >
+  1577→              <Plus className="h-4 w-4" /> Record Collection
+  1578→            </Button>
+  1579→          }
+  1580→        />
+  1581→      ) : (
+  1582→        <div className="space-y-4">
+  1583→          {grouped.map(([groupKey, rows]) => (
+  1584→            <div
+  1585→              key={groupKey}
+  1586→              className="bg-card border border-border rounded-xl overflow-hidden"
+  1587→            >
+  1588→              <div className="px-4 py-2.5 bg-secondary/40 border-b border-border flex items-center justify-between gap-2">
+  1589→                <h4 className="text-sm font-semibold text-foreground truncate">
+  1590→                  {groupKey}
+  1591→                </h4>
+  1592→                <span className="text-xs text-muted-foreground shrink-0">
+  1593→                  {rows.length} entries ·{" "}
+  1594→                  {formatNumber(rows.reduce((s, r) => s + r.qty, 0))} qty
+  1595→                </span>
+  1596→              </div>
+  1597→              <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1598→                <ul className="divide-y divide-border">
+  1599→                  {rows.map((r) => (
+  1600→                    <li
+  1601→                      key={r.id}
+  1602→                      className="px-4 py-3 flex items-start gap-3 hover:bg-secondary/20 transition-colors"
+  1603→                    >
+  1604→                      <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+  1605→                        <PackageCheck className="h-4 w-4" />
+  1606→                      </div>
+  1607→                      <div className="min-w-0 flex-1">
+  1608→                        <div className="flex items-center justify-between gap-2">
+  1609→                          <p className="text-sm font-medium text-foreground truncate">
+  1610→                            {r.itemName}
+  1611→                          </p>
+  1612→                          <span className="text-sm font-semibold text-emerald-400 shrink-0">
+  1613→                            {formatNumber(r.qty)}
+  1614→                          </span>
+  1615→                        </div>
+  1616→                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
+  1617→                          <span className="flex items-center gap-1">
+  1618→                            <Truck className="h-3 w-3" />{" "}
+  1619→                            {r.receivedFrom || "—"}
+  1620→                          </span>
+  1621→                          <span className="flex items-center gap-1">
+  1622→                            <User className="h-3 w-3" /> {r.recordedBy || "—"}
+  1623→                          </span>
+  1624→                          <span className="flex items-center gap-1">
+  1625→                            <CalendarDays className="h-3 w-3" />{" "}
+  1626→                            {formatFullDate(r.date)}
+  1627→                          </span>
+  1628→                          <span>· {formatDateTime(r.recordedAt)}</span>
+  1629→                        </div>
+  1630→                      </div>
+  1631→                    </li>
+  1632→                  ))}
+  1633→                </ul>
+  1634→              </div>
+  1635→            </div>
+  1636→          ))}
+  1637→        </div>
+  1638→      )}
+  1639→
+  1640→      {/* Record Collection Dialog */}
+  1641→      <RecordCollectionDialog
+  1642→        open={recordOpen}
+  1643→        onOpenChange={setRecordOpen}
+  1644→        onCreated={() => {
+  1645→          setRecordOpen(false);
+  1646→          toast({ title: "Collection recorded" });
+  1647→          refresh();
+  1648→        }}
+  1649→      />
+  1650→
+  1651→      {/* Bulk Record Dialog */}
+  1652→      <BulkRecordDialog
+  1653→        open={bulkOpen}
+  1654→        onOpenChange={setBulkOpen}
+  1655→        onCreated={() => {
+  1656→          setBulkOpen(false);
+  1657→          toast({ title: "Bulk collections recorded" });
+  1658→          refresh();
+  1659→        }}
+  1660→      />
+  1661→    </div>
+  1662→  );
+  1663→}
+  1664→
+  1665→// Group helpers
+  1666→function groupByDate(
+  1667→  rows: DailyCollection[]
+  1668→): [string, DailyCollection[]][] {
+  1669→  const map = new Map<string, DailyCollection[]>();
+  1670→  rows.forEach((r) => {
+  1671→    if (!map.has(r.date)) map.set(r.date, []);
+  1672→    map.get(r.date)!.push(r);
+  1673→  });
+  1674→  return Array.from(map.entries()).sort(([a], [b]) => b.localeCompare(a));
+  1675→}
+  1676→
+  1677→function getISOWeek(dateStr: string): number {
+  1678→  const d = new Date(dateStr + "T00:00:00");
+  1679→  d.setHours(0, 0, 0, 0);
+  1680→  // Thursday in current week decides the year
+  1681→  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  1682→  // January 4 is always in week 1
+  1683→  const week1 = new Date(d.getFullYear(), 0, 4);
+  1684→  return (
+  1685→    1 +
+  1686→    Math.round(
+  1687→      ((d.getTime() - week1.getTime()) / 86400000 -
+  1688→        3 +
+  1689→        ((week1.getDay() + 6) % 7)) /
+  1690→        7
+  1691→    )
+  1692→  );
+  1693→}
+  1694→
+  1695→function getWeekRange(dateStr: string): { key: string; label: string } {
+  1696→  const d = new Date(dateStr + "T00:00:00");
+  1697→  const dayOfWeek = (d.getDay() + 6) % 7; // 0 = Monday
+  1698→  const monday = new Date(d);
+  1699→  monday.setDate(d.getDate() - dayOfWeek);
+  1700→  const sunday = new Date(monday);
+  1701→  sunday.setDate(monday.getDate() + 6);
+  1702→  const weekNum = getISOWeek(dateStr);
+  1703→  const year = monday.getFullYear();
+  1704→  const fmt = (dt: Date) =>
+  1705→    dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  1706→  return {
+  1707→    key: `${year}-W${String(weekNum).padStart(2, "0")}`,
+  1708→    label: `Week ${weekNum} · ${fmt(monday)} – ${fmt(sunday)}`,
+  1709→  };
+  1710→}
+  1711→
+  1712→function groupByPeriod(
+  1713→  rows: DailyCollection[]
+  1714→): [string, DailyCollection[]][] {
+  1715→  const map = new Map<string, DailyCollection[]>();
+  1716→  const labels = new Map<string, string>();
+  1717→  rows.forEach((r) => {
+  1718→    const { key, label } = getWeekRange(r.date);
+  1719→    if (!map.has(key)) {
+  1720→      map.set(key, []);
+  1721→      labels.set(key, label);
+  1722→    }
+  1723→    map.get(key)!.push(r);
+  1724→  });
+  1725→  return Array.from(map.entries())
+  1726→    .sort(([a], [b]) => b.localeCompare(a))
+  1727→    .map(
+  1728→      ([key, val]) => [labels.get(key) || key, val] as [string, DailyCollection[]]
+  1729→    );
+  1730→}
+  1731→
+  1732→function groupBySupplier(
+  1733→  rows: DailyCollection[]
+  1734→): [string, DailyCollection[]][] {
+  1735→  const map = new Map<string, DailyCollection[]>();
+  1736→  rows.forEach((r) => {
+  1737→    const k = r.receivedFrom || "Unknown Supplier";
+  1738→    if (!map.has(k)) map.set(k, []);
+  1739→    map.get(k)!.push(r);
+  1740→  });
+  1741→  return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  1742→}
+  1743→
+  1744→// ─────────────────────────────────────────────────────────
+  1745→// Record Collection Dialog
+  1746→// ─────────────────────────────────────────────────────────
+  1747→function RecordCollectionDialog({
+  1748→  open,
+  1749→  onOpenChange,
+  1750→  onCreated,
+  1751→}: {
+  1752→  open: boolean;
+  1753→  onOpenChange: (o: boolean) => void;
+  1754→  onCreated: () => void;
+  1755→}) {
+  1756→  const [date, setDate] = useState(todayISO());
+  1757→  const [itemName, setItemName] = useState("");
+  1758→  const [qty, setQty] = useState("");
+  1759→  const [receivedFrom, setReceivedFrom] = useState("");
+  1760→  const [recordedBy, setRecordedBy] = useState("");
+  1761→  const [submitting, setSubmitting] = useState(false);
+  1762→  const { toast } = useToast();
+  1763→
+  1764→  async function submit() {
+  1765→    if (!itemName.trim()) {
+  1766→      toast({ title: "Item name required", variant: "destructive" });
+  1767→      return;
+  1768→    }
+  1769→    if (!qty || Number(qty) <= 0) {
+  1770→      toast({ title: "Valid qty required", variant: "destructive" });
+  1771→      return;
+  1772→    }
+  1773→    setSubmitting(true);
+  1774→    const res = await apiRequest("/api/collection/daily", "POST", {
+  1775→      date,
+  1776→      itemName: itemName.trim(),
+  1777→      qty: Number(qty),
+  1778→      receivedFrom: receivedFrom.trim() || undefined,
+  1779→      recordedBy: recordedBy.trim() || "Clerk",
+  1780→    });
+  1781→    setSubmitting(false);
+  1782→    if (!res.ok) {
+  1783→      toast({ title: res.error || "Failed", variant: "destructive" });
+  1784→      return;
+  1785→    }
+  1786→    setItemName("");
+  1787→    setQty("");
+  1788→    setReceivedFrom("");
+  1789→    setRecordedBy("");
+  1790→    onCreated();
+  1791→  }
+  1792→
+  1793→  return (
+  1794→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1795→      <DialogContent className="sm:max-w-md">
+  1796→        <DialogHeader>
+  1797→          <DialogTitle>Record Collection</DialogTitle>
+  1798→          <DialogDescription>
+  1799→            Record a single item collection event for today or any date.
+  1800→          </DialogDescription>
+  1801→        </DialogHeader>
+  1802→        <div className="space-y-3 py-1">
+  1803→          <div className="space-y-1.5">
+  1804→            <Label>Date</Label>
+  1805→            <Input
+  1806→              type="date"
+  1807→              value={date}
+  1808→              onChange={(e) => setDate(e.target.value)}
+  1809→            />
+  1810→          </div>
+  1811→          <div className="space-y-1.5">
+  1812→            <Label>Item Name</Label>
+  1813→            <Input
+  1814→              value={itemName}
+  1815→              onChange={(e) => setItemName(e.target.value)}
+  1816→              placeholder="e.g. TMT bars 16mm"
+  1817→            />
+  1818→          </div>
+  1819→          <div className="grid grid-cols-2 gap-3">
+  1820→            <div className="space-y-1.5">
+  1821→              <Label>Qty</Label>
+  1822→              <Input
+  1823→                type="number"
+  1824→                value={qty}
+  1825→                onChange={(e) => setQty(e.target.value)}
+  1826→                placeholder="0"
+  1827→              />
+  1828→            </div>
+  1829→            <div className="space-y-1.5">
+  1830→              <Label>Received From</Label>
+  1831→              <Input
+  1832→                value={receivedFrom}
+  1833→                onChange={(e) => setReceivedFrom(e.target.value)}
+  1834→                placeholder="Supplier"
+  1835→              />
+  1836→            </div>
+  1837→          </div>
+  1838→          <div className="space-y-1.5">
+  1839→            <Label>Recorded By</Label>
+  1840→            <Input
+  1841→              value={recordedBy}
+  1842→              onChange={(e) => setRecordedBy(e.target.value)}
+  1843→              placeholder="Your name"
+  1844→            />
+  1845→          </div>
+  1846→        </div>
+  1847→        <DialogFooter>
+  1848→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1849→            Cancel
+  1850→          </Button>
+  1851→          <Button onClick={submit} disabled={submitting}>
+  1852→            {submitting ? "Saving..." : "Record"}
+  1853→          </Button>
+  1854→        </DialogFooter>
+  1855→      </DialogContent>
+  1856→    </Dialog>
+  1857→  );
+  1858→}
+  1859→
+  1860→// ─────────────────────────────────────────────────────────
+  1861→// Bulk Record Dialog
+  1862→// ─────────────────────────────────────────────────────────
+  1863→function BulkRecordDialog({
+  1864→  open,
+  1865→  onOpenChange,
+  1866→  onCreated,
+  1867→}: {
+  1868→  open: boolean;
+  1869→  onOpenChange: (o: boolean) => void;
+  1870→  onCreated: () => void;
+  1871→}) {
+  1872→  const { data: items, loading } = useFetch<CollectionItem[]>(
+  1873→    open ? "/api/collection/items" : null
+  1874→  );
+  1875→  const [selected, setSelected] = useState<Set<string>>(new Set());
+  1876→  const [date, setDate] = useState(todayISO());
+  1877→  const [qty, setQty] = useState("");
+  1878→  const [recordedBy, setRecordedBy] = useState("");
+  1879→  const [submitting, setSubmitting] = useState(false);
+  1880→  const { toast } = useToast();
+  1881→
+  1882→  const pending = (items ?? []).filter((i) => i.status !== "Collected");
+  1883→
+  1884→  function toggle(id: string) {
+  1885→    setSelected((cur) => {
+  1886→      const next = new Set(cur);
+  1887→      if (next.has(id)) next.delete(id);
+  1888→      else next.add(id);
+  1889→      return next;
+  1890→    });
+  1891→  }
+  1892→  function toggleAll() {
+  1893→    if (selected.size === pending.length && pending.length > 0) {
+  1894→      setSelected(new Set());
+  1895→    } else {
+  1896→      setSelected(new Set(pending.map((p) => p.id)));
+  1897→    }
+  1898→  }
+  1899→
+  1900→  async function submit() {
+  1901→    if (selected.size === 0) {
+  1902→      toast({ title: "Select at least one item", variant: "destructive" });
+  1903→      return;
+  1904→    }
+  1905→    if (!qty || Number(qty) <= 0) {
+  1906→      toast({ title: "Valid qty required", variant: "destructive" });
+  1907→      return;
+  1908→    }
+  1909→    const payload = pending
+  1910→      .filter((p) => selected.has(p.id))
+  1911→      .map((p) => ({
+  1912→        date,
+  1913→        itemName: p.name,
+  1914→        qty: Number(qty),
+  1915→        receivedFrom: p.supplier || undefined,
+  1916→        recordedBy: recordedBy.trim() || "Clerk",
+  1917→      }));
+  1918→    setSubmitting(true);
+  1919→    const res = await apiRequest("/api/collection/daily", "POST", payload);
+  1920→    setSubmitting(false);
+  1921→    if (!res.ok) {
+  1922→      toast({ title: res.error || "Failed", variant: "destructive" });
+  1923→      return;
+  1924→    }
+  1925→    setSelected(new Set());
+  1926→    setQty("");
+  1927→    setRecordedBy("");
+  1928→    onCreated();
+  1929→  }
+  1930→
+  1931→  return (
+  1932→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1933→      <DialogContent className="sm:max-w-xl">
+  1934→        <DialogHeader>
+  1935→          <DialogTitle>Bulk Record Collections</DialogTitle>
+  1936→          <DialogDescription>
+  1937→            Select pending items, enter a single qty & date — submits all
+  1938→            selected as daily collection records.
+  1939→          </DialogDescription>
+  1940→        </DialogHeader>
+  1941→        <div className="space-y-3 py-1">
+  1942→          {/* Common fields */}
+  1943→          <div className="grid grid-cols-3 gap-3">
+  1944→            <div className="space-y-1.5">
+  1945→              <Label>Date</Label>
+  1946→              <Input
+  1947→                type="date"
+  1948→                value={date}
+  1949→                onChange={(e) => setDate(e.target.value)}
+  1950→              />
+  1951→            </div>
+  1952→            <div className="space-y-1.5">
+  1953→              <Label>Qty (all)</Label>
+  1954→              <Input
+  1955→                type="number"
+  1956→                value={qty}
+  1957→                onChange={(e) => setQty(e.target.value)}
+  1958→                placeholder="0"
+  1959→              />
+  1960→            </div>
+  1961→            <div className="space-y-1.5">
+  1962→              <Label>Recorded By</Label>
+  1963→              <Input
+  1964→                value={recordedBy}
+  1965→                onChange={(e) => setRecordedBy(e.target.value)}
+  1966→                placeholder="Clerk"
+  1967→              />
+  1968→            </div>
+  1969→          </div>
+  1970→
+  1971→          {/* Pending items list */}
+  1972→          <div className="border border-border rounded-lg">
+  1973→            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-secondary/30">
+  1974→              <span className="text-xs font-medium text-foreground">
+  1975→                Pending Items ({pending.length})
+  1976→              </span>
+  1977→              <Button
+  1978→                size="sm"
+  1979→                variant="ghost"
+  1980→                onClick={toggleAll}
+  1981→                className="h-6 text-xs"
+  1982→                disabled={pending.length === 0}
+  1983→              >
+  1984→                {selected.size === pending.length && pending.length > 0
+  1985→                  ? "Clear"
+  1986→                  : "Select All"}
+  1987→              </Button>
+  1988→            </div>
+  1989→            <div className="max-h-72 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1990→              {loading ? (
+  1991→                <div className="p-4 text-center text-sm text-muted-foreground">
+  1992→                  Loading items...
+  1993→                </div>
+  1994→              ) : pending.length === 0 ? (
+  1995→                <div className="p-4 text-center text-sm text-muted-foreground">
+  1996→                  No pending items. All collection items are marked as
+  1997→                  Collected.
+  1998→                </div>
+  1999→              ) : (
+  2000→                <ul className="divide-y divide-border">
+
+[showing lines 1-2000 of 2056; use offset=2001 with limit to continue reading]

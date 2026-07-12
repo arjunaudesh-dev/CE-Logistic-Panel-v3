@@ -10,13 +10,19 @@ export async function GET() {
       rateContracts,
       partSupply,
       dailyCollection,
+      estimates,
+      earmarks,
+      qcInspections,
     ] = await Promise.all([
-      db.project.findMany(),
+      db.project.findMany({ include: { files: { select: { id: true, fileCost: true } } } }),
       db.procurementFile.findMany(),
       db.storeItem.findMany(),
       db.rateContract.findMany(),
       db.partSupplyOrder.findMany(),
       db.dailyCollection.findMany(),
+      db.estimate.findMany({ include: { items: true } }),
+      db.earmarkedItem.findMany(),
+      db.qCInspection.findMany(),
     ]);
 
     const totalVoteAllocation = projects.reduce(
@@ -74,6 +80,42 @@ export async function GET() {
         ).length,
         dailyTotal: dailyCollection.length,
       },
+      estimates: {
+        total: estimates.length,
+        pendingItems: estimates.reduce(
+          (s, e) => s + e.items.filter((i) => i.status === "Pending").length,
+          0
+        ),
+        initiatedItems: estimates.reduce(
+          (s, e) => s + e.items.filter((i) => i.status === "Initiated").length,
+          0
+        ),
+      },
+      earmarks: earmarks.length,
+      qc: {
+        total: qcInspections.length,
+        passed: qcInspections.filter((q) =>
+          ["Satisfactory", "Good", "Excellent"].includes(q.qcLevel)
+        ).length,
+        failed: qcInspections.filter((q) => q.qcLevel === "Fail").length,
+      },
+      // Most active/valued projects (by actualSpent desc)
+      topProjects: projects
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          voteNumber: p.voteNumber,
+          voteAllocation: p.voteAllocation,
+          committed: p.committed,
+          actualSpent: p.actualSpent,
+          balance: p.voteAllocation - p.actualSpent,
+          utilization: p.voteAllocation > 0 ? (p.actualSpent / p.voteAllocation) * 100 : 0,
+          fileCount: p.files.length,
+          fileValue: p.files.reduce((s, f) => s + f.fileCost, 0),
+          status: p.status,
+        }))
+        .sort((a, b) => b.actualSpent - a.actualSpent)
+        .slice(0, 5),
       net: totalVoteAllocation,
       task: procurementFiles.length,
       avail: totalVoteAllocation - totalActualSpent,

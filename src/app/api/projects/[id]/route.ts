@@ -41,6 +41,8 @@ export async function PUT(
         startDate: body.startDate || null,
         endDate: body.endDate || null,
         department: body.department || null,
+        benefactor: body.benefactor || null,
+        reference: body.reference || null,
         projectOfficer: body.projectOfficer || null,
         status: body.status || "Active",
         description: body.description || null,

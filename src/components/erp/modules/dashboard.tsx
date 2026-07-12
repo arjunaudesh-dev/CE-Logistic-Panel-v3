@@ -1,8 +1,10 @@
 "use client";
+import { useState } from "react";
 import { useFetch } from "@/lib/use-fetch";
 import { StatCard } from "@/components/erp/stat-card";
 import { PageHeader } from "@/components/erp/page-header";
 import { LoadingState, ErrorState } from "@/components/erp/states";
+import { CustomBadge } from "@/components/erp/badges";
 import {
   LayoutDashboard,
   Wallet,
@@ -13,6 +15,10 @@ import {
   Warehouse,
   PackageCheck,
   ArrowRight,
+  Percent,
+  Coins,
+  Trophy,
+  FileBarChart,
 } from "lucide-react";
 import {
   BarChart,
@@ -26,9 +32,28 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { formatCurrency, positionColor } from "@/lib/constants";
+import {
+  formatCurrency,
+  formatNumber,
+  utilizationColor,
+  projectStatusColor,
+} from "@/lib/constants";
 import { ModuleId } from "../nav";
 import { cn } from "@/lib/utils";
+
+interface TopProject {
+  id: string;
+  name: string;
+  voteNumber: string;
+  voteAllocation: number;
+  committed: number;
+  actualSpent: number;
+  balance: number;
+  utilization: number;
+  fileCount: number;
+  fileValue: number;
+  status: string;
+}
 
 interface Stats {
   projects: { total: number; active: number; voteAllocation: number; committed: number; actualSpent: number; balance: number };
@@ -36,38 +61,36 @@ interface Stats {
   stores: { totalItems: number; stockValue: number; lowStock: number; zones: number };
   rateFinder: { rcCount: number };
   collection: { partSupplyActive: number; dailyToday: number; dailyTotal: number };
+  topProjects: TopProject[];
 }
 
 const PIE_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#64748b"];
 
 export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void }) {
   const { data: stats, loading, error } = useFetch<Stats>("/api/stats");
-  const { data: projects } = useFetch<
-    { name: string; voteAllocation: number; actualSpent: number; utilization: number }[]
-  >("/api/projects");
-  const { data: procurement } = useFetch<
-    { presentPosition: string }[]
-  >("/api/procurement");
+  const { data: procurement } = useFetch<{ presentPosition: string }[]>("/api/procurement");
+  // toggle for infographics: "value" shows currency, "percent" shows utilization %
+  const [viewMode, setViewMode] = useState<"value" | "percent">("value");
 
   if (loading) return <LoadingState label="Loading dashboard..." />;
   if (error || !stats) return <ErrorState message={error || "No data"} />;
 
-  const projectChart =
-    projects?.map((p) => ({
-      name: p.name.length > 16 ? p.name.slice(0, 14) + "…" : p.name,
-      Budget: Math.round(p.voteAllocation / 1000000),
-      Spent: Math.round(p.actualSpent / 1000000),
-    })) ?? [];
+  const topProjects = stats.topProjects || [];
+
+  // For the chart: in value mode show Rs. millions, in percent mode show utilization %
+  const projectChart = topProjects.map((p) => ({
+    name: p.name.length > 14 ? p.name.slice(0, 12) + "…" : p.name,
+    Allocation: viewMode === "value" ? Math.round(p.voteAllocation / 1000000) : Math.round(p.utilization),
+    Committed: viewMode === "value" ? Math.round(p.committed / 1000000) : p.voteAllocation > 0 ? Math.round((p.committed / p.voteAllocation) * 100) : 0,
+    Spent: viewMode === "value" ? Math.round(p.actualSpent / 1000000) : Math.round(p.utilization),
+  }));
 
   // position distribution for pie
   const posCounts: Record<string, number> = {};
   procurement?.forEach((f) => {
     posCounts[f.presentPosition] = (posCounts[f.presentPosition] || 0) + 1;
   });
-  const posChart = Object.entries(posCounts).map(([name, value]) => ({
-    name,
-    value,
-  }));
+  const posChart = Object.entries(posCounts).map(([name, value]) => ({ name, value }));
 
   return (
     <div>
@@ -75,10 +98,32 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
         title="Operational Dashboard"
         description="Real-time overview of dockyard operations, procurement & inventory"
         icon={LayoutDashboard}
+        actions={
+          <div className="flex items-center gap-1 bg-secondary/60 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode("value")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                viewMode === "value" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Coins className="h-3.5 w-3.5" /> By Value
+            </button>
+            <button
+              onClick={() => setViewMode("percent")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                viewMode === "percent" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Percent className="h-3.5 w-3.5" /> By Percentage
+            </button>
+          </div>
+        }
       />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
           label="Total Vote Allocation"
           value={formatCurrency(stats.projects.voteAllocation)}
@@ -109,80 +154,165 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
         />
       </div>
 
-      {/* Charts */}
+      {/* Most Active / Most Valued Projects */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-amber-400" />
+            Most Active / Valued Projects
+            <span className="text-xs text-muted-foreground font-normal">
+              ({viewMode === "value" ? "Rs. Millions" : "Utilization %"})
+            </span>
+          </h3>
+          <button
+            onClick={() => onNavigate("projects")}
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            View all projects <ArrowRight className="h-3 w-3" />
+          </button>
+        </div>
+
+        {topProjects.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No projects yet.</p>
+        ) : (
+          <>
+            {/* Chart */}
+            <div className="mb-5">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={projectChart} barGap={2}>
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fill: "#94a3b8", fontSize: 11 }}
+                    axisLine={{ stroke: "#2d3548" }}
+                  />
+                  <YAxis
+                    tick={{ fill: "#94a3b8", fontSize: 11 }}
+                    axisLine={{ stroke: "#2d3548" }}
+                    tickFormatter={(v) => (viewMode === "value" ? `${v}M` : `${v}%`)}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#1a1f2e",
+                      border: "1px solid #2d3548",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(value: number) =>
+                      viewMode === "value" ? [`Rs. ${value}M`, ""] : [`${value}%`, ""]
+                    }
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="Allocation" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Committed" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Spent" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Project detail cards (numerical) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {topProjects.map((p, idx) => {
+                const util = p.utilization;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => onNavigate("projects")}
+                    className="bg-secondary/40 rounded-lg p-3 cursor-pointer hover:bg-secondary/70 transition-colors border border-transparent hover:border-primary/30"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-mono text-muted-foreground">#{idx + 1}</span>
+                          <h4 className="font-medium text-sm text-foreground truncate">{p.name}</h4>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">{p.voteNumber} · {p.fileCount} files</p>
+                      </div>
+                      <CustomBadge className={cn("border-0 shrink-0", projectStatusColor(p.status))}>
+                        {p.status}
+                      </CustomBadge>
+                    </div>
+                    {/* numerical breakdown */}
+                    <div className="grid grid-cols-3 gap-1.5 text-center">
+                      <div>
+                        <p className="text-[9px] uppercase text-muted-foreground">Allocation</p>
+                        <p className="text-xs font-semibold text-blue-400">
+                          {viewMode === "value" ? formatCurrency(p.voteAllocation) : "100%"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase text-muted-foreground">Committed</p>
+                        <p className="text-xs font-semibold text-amber-400">
+                          {viewMode === "value"
+                            ? formatCurrency(p.committed)
+                            : p.voteAllocation > 0
+                            ? `${Math.round((p.committed / p.voteAllocation) * 100)}%`
+                            : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase text-muted-foreground">Spent</p>
+                        <p className="text-xs font-semibold text-red-400">
+                          {viewMode === "value" ? formatCurrency(p.actualSpent) : `${Math.round(util)}%`}
+                        </p>
+                      </div>
+                    </div>
+                    {/* utilization bar */}
+                    <div className="mt-2">
+                      <div className="h-1.5 w-full bg-background rounded-full overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", utilizationColor(util))}
+                          style={{ width: `${Math.min(util, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Secondary charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            Project Budget vs Actual Spent (Rs. Millions)
+          <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+            <FileBarChart className="h-4 w-4 text-primary" />
+            Project Financials {viewMode === "value" ? "(Rs. Millions)" : "(Utilization %)"}
           </h3>
           {projectChart.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={projectChart}>
-                <XAxis
-                  dataKey="name"
-                  tick={{ fill: "#94a3b8", fontSize: 11 }}
-                  axisLine={{ stroke: "#2d3548" }}
-                />
-                <YAxis
-                  tick={{ fill: "#94a3b8", fontSize: 11 }}
-                  axisLine={{ stroke: "#2d3548" }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "#1a1f2e",
-                    border: "1px solid #2d3548",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                />
+                <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={{ stroke: "#2d3548" }} />
+                <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={{ stroke: "#2d3548" }} tickFormatter={(v) => (viewMode === "value" ? `${v}M` : `${v}%`)} />
+                <Tooltip contentStyle={{ background: "#1a1f2e", border: "1px solid #2d3548", borderRadius: 8, fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Budget" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Spent" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Allocation" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Committed" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Spent" fill="#ef4444" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-muted-foreground py-10 text-center">
-              No project data
-            </p>
+            <p className="text-sm text-muted-foreground py-10 text-center">No project data</p>
           )}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            Procurement Files by Position
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground mb-4">Procurement Files by Position</h3>
           {posChart.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={240}>
               <PieChart>
-                <Pie
-                  data={posChart}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                  innerRadius={45}
-                  paddingAngle={2}
-                >
+                <Pie data={posChart} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={40} paddingAngle={2}>
                   {posChart.map((_, i) => (
                     <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    background: "#1a1f2e",
-                    border: "1px solid #2d3548",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                />
+                <Tooltip contentStyle={{ background: "#1a1f2e", border: "1px solid #2d3548", borderRadius: 8, fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 10 }} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-muted-foreground py-10 text-center">
-              No procurement data
-            </p>
+            <p className="text-sm text-muted-foreground py-10 text-center">No procurement data</p>
           )}
         </div>
       </div>

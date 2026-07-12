@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,11 @@ import {
 } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import {
   Warehouse,
   Plus,
   Search,
@@ -57,6 +63,14 @@ import {
   X,
   ClipboardList,
   Layers,
+  Bookmark,
+  BookmarkPlus,
+  List,
+  ScanSearch,
+  Trash2,
+  Wand2,
+  Check,
+  RefreshCw,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -64,6 +78,7 @@ import {
   STORE_CATEGORIES,
   FILE_CATEGORIES,
   ZONES,
+  confidenceColor,
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -100,6 +115,46 @@ interface StoreItem {
   itemCode: string | null;
   ilmsCode: string | null;
   createdAt: string;
+}
+
+interface EarmarkedItem {
+  id: string;
+  storeItemId: string | null;
+  itemDescription: string;
+  itemCode: string | null;
+  projectId: string;
+  projectName: string;
+  qty: number;
+  unit: string;
+  authority: string | null;
+  remarks: string | null;
+  createdAt: string;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+  voteNumber: string | null;
+}
+
+interface FindCodeCandidate {
+  storeItemId: string | null;
+  description: string;
+  category: string;
+  unit: string;
+  cost: number;
+}
+
+type Confidence = "high" | "medium" | "low" | "none";
+
+interface FindCodeResult {
+  description: string;
+  suggestedItemCode: string | null;
+  isDuplicate: boolean;
+  duplicateOf: string | null;
+  existingCodes: string[];
+  confidence: Confidence;
+  recommendation: string;
 }
 
 type StockFilter = "all" | "in" | "low" | "out" | "over";
@@ -141,6 +196,9 @@ export function StoresModule() {
   const [editing, setEditing] = useState<StoreItem | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [viewing, setViewing] = useState<StoreItem | null>(null);
+  const [earmarkOpen, setEarmarkOpen] = useState(false);
+  const [earmarkListOpen, setEarmarkListOpen] = useState(false);
+  const [findCodeOpen, setFindCodeOpen] = useState(false);
 
   const { toast } = useToast();
 
@@ -273,7 +331,34 @@ export function StoresModule() {
         description="Zones, inventory & stock-level monitoring across the dockyard"
         icon={Warehouse}
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFindCodeOpen(true)}
+              className="gap-1.5"
+              title="Find item codes using AI"
+            >
+              <ScanSearch className="h-4 w-4" /> Find Item Codes (AI)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEarmarkListOpen(true)}
+              className="gap-1.5"
+              title="View all earmarked items"
+            >
+              <List className="h-4 w-4" /> View Earmarked
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEarmarkOpen(true)}
+              className="gap-1.5"
+              title="Earmark an item for a project without a PR"
+            >
+              <BookmarkPlus className="h-4 w-4" /> Earmark Item
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -285,7 +370,7 @@ export function StoresModule() {
             <Button onClick={openAdd} size="sm" className="gap-1.5">
               <Plus className="h-4 w-4" /> Add Item
             </Button>
-          </>
+          </div>
         }
       />
 
@@ -377,6 +462,30 @@ export function StoresModule() {
         onEdit={(it) => {
           setViewing(null);
           openEdit(it);
+        }}
+      />
+
+      {/* Earmark item dialog */}
+      <EarmarkItemDialog
+        open={earmarkOpen}
+        onOpenChange={setEarmarkOpen}
+        storeItems={items}
+      />
+
+      {/* Earmarked items list dialog */}
+      <EarmarkedItemsDialog
+        open={earmarkListOpen}
+        onOpenChange={setEarmarkListOpen}
+      />
+
+      {/* AI item code finder dialog */}
+      <FindItemCodeDialog
+        open={findCodeOpen}
+        onOpenChange={setFindCodeOpen}
+        storeItems={items}
+        onApplied={() => {
+          refreshItems();
+          refreshZones();
         }}
       />
     </div>
@@ -1790,5 +1899,909 @@ function DetailField({
       </p>
       <p className={cn("text-sm mt-0.5", toneClass[tone])}>{value}</p>
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Earmark Item dialog — reserve materials for a project without a PR
+// ────────────────────────────────────────────────────────────
+interface EarmarkItemDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  storeItems: StoreItem[] | null;
+}
+
+const MANUAL_ENTRY = "__manual__";
+
+function EarmarkItemDialog({
+  open,
+  onOpenChange,
+  storeItems,
+}: EarmarkItemDialogProps) {
+  const { data: projects, loading: pLoading } = useFetch<ProjectOption[]>(
+    open ? "/api/projects" : null
+  );
+  const [storeItemId, setStoreItemId] = useState<string>("");
+  const [itemDescription, setItemDescription] = useState("");
+  const [itemCode, setItemCode] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("NOS");
+  const [authority, setAuthority] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const reset = () => {
+    setStoreItemId("");
+    setItemDescription("");
+    setItemCode("");
+    setProjectId("");
+    setProjectName("");
+    setQty("");
+    setUnit("NOS");
+    setAuthority("");
+    setRemarks("");
+  };
+
+  const onStoreItemSelect = (id: string) => {
+    setStoreItemId(id);
+    if (id === MANUAL_ENTRY) {
+      setItemDescription("");
+      setItemCode("");
+      setUnit("NOS");
+      return;
+    }
+    const it = (storeItems ?? []).find((i) => i.id === id);
+    if (it) {
+      setItemDescription(it.description);
+      setItemCode(it.itemCode ?? "");
+      setUnit(it.unit || "NOS");
+    }
+  };
+
+  const onProjectSelect = (id: string) => {
+    setProjectId(id);
+    const p = (projects ?? []).find((x) => x.id === id);
+    setProjectName(p ? p.name : "");
+  };
+
+  const submit = async () => {
+    if (!itemDescription.trim()) {
+      toast({ title: "Item description is required", variant: "destructive" });
+      return;
+    }
+    if (!projectId) {
+      toast({ title: "Project is required", variant: "destructive" });
+      return;
+    }
+    if (!qty || Number(qty) <= 0) {
+      toast({
+        title: "Quantity must be greater than zero",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!authority.trim()) {
+      toast({ title: "Authority is required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      storeItemId:
+        storeItemId && storeItemId !== MANUAL_ENTRY ? storeItemId : null,
+      itemDescription: itemDescription.trim(),
+      itemCode: itemCode.trim() || null,
+      projectId,
+      projectName,
+      qty: Number(qty),
+      unit: unit || "NOS",
+      authority: authority.trim(),
+      remarks: remarks.trim() || null,
+    };
+    const res = await apiRequest("/api/earmarked", "POST", payload);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: "Item earmarked",
+        description: `${itemDescription} → ${projectName}`,
+      });
+      reset();
+      onOpenChange(false);
+    } else {
+      toast({
+        title: "Failed to earmark item",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o);
+        if (!o && !saving) setTimeout(reset, 200);
+      }}
+    >
+      <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <Bookmark className="h-5 w-5 text-primary" /> Earmark Item for Project
+          </DialogTitle>
+          <DialogDescription>
+            Reserve materials for a project without a raised PR. The approving
+            authority and remarks will be recorded against this earmark.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Select Store Item (optional)</Label>
+            <Select value={storeItemId} onValueChange={onStoreItemSelect}>
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue placeholder="Pick an existing item — or enter manually" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={MANUAL_ENTRY}>— Manual entry —</SelectItem>
+                {(storeItems ?? []).map((it) => (
+                  <SelectItem key={it.id} value={it.id}>
+                    {it.description}
+                    {it.itemCode ? ` (${it.itemCode})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Selecting an item auto-fills description, code and unit.
+            </p>
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>
+              Item Description <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              value={itemDescription}
+              onChange={(e) => setItemDescription(e.target.value)}
+              placeholder="e.g. GI Wire 14 SWG"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Item Code</Label>
+            <Input
+              value={itemCode}
+              onChange={(e) => setItemCode(e.target.value)}
+              placeholder="Auto-filled if item selected"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Unit</Label>
+            <Input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              placeholder="NOS, KG, MTR..."
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              Project <span className="text-red-400">*</span>
+            </Label>
+            <Select value={projectId} onValueChange={onProjectSelect}>
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue
+                  placeholder={pLoading ? "Loading projects..." : "Select project"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {(projects ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                    {p.voteNumber ? ` — ${p.voteNumber}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              Qty <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              placeholder="0"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              Authority <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              value={authority}
+              onChange={(e) => setAuthority(e.target.value)}
+              placeholder="Approving authority"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Project Name (auto)</Label>
+            <Input
+              value={projectName}
+              readOnly
+              placeholder="— select project —"
+              className="bg-secondary/40 border-border text-muted-foreground"
+            />
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Remarks</Label>
+            <Textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Any additional notes (optional)"
+              className="bg-background border-border min-h-20"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={saving} className="gap-1.5">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            <BookmarkPlus className="h-4 w-4" /> Earmark
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Earmarked Items dialog — list & delete earmarks
+// ────────────────────────────────────────────────────────────
+interface EarmarkedItemsDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}
+
+function EarmarkedItemsDialog({
+  open,
+  onOpenChange,
+}: EarmarkedItemsDialogProps) {
+  const { data, loading, error, refresh } = useFetch<EarmarkedItem[]>(
+    open ? "/api/earmarked" : null
+  );
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const handleDelete = async (id: string) => {
+    setDeleting(id);
+    const res = await apiRequest(`/api/earmarked/${id}`, "DELETE");
+    setDeleting(null);
+    if (res.ok) {
+      toast({ title: "Earmarked item removed" });
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <Bookmark className="h-5 w-5 text-primary" /> Earmarked Items
+          </DialogTitle>
+          <DialogDescription>
+            Materials reserved for projects without a raised PR.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            {data ? `${data.length} earmarked` : "Loading..."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refresh}
+            disabled={loading}
+            className="gap-1.5"
+          >
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+            />{" "}
+            Refresh
+          </Button>
+        </div>
+
+        {loading ? (
+          <LoadingState label="Loading earmarked items..." />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : !data || data.length === 0 ? (
+          <EmptyState
+            icon={Bookmark}
+            title="No earmarked items"
+            description="Materials reserved for projects will appear here."
+          />
+        ) : (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead>Item Description</TableHead>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Project</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead>Authority</TableHead>
+                    <TableHead>Remarks</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.map((e) => (
+                    <TableRow key={e.id} className="border-border">
+                      <TableCell className="font-medium text-foreground">
+                        {e.itemDescription}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {e.itemCode || "—"}
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        {e.projectName}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(e.qty)} {e.unit}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {e.authority || "—"}
+                      </TableCell>
+                      <TableCell
+                        className="text-muted-foreground text-xs max-w-[220px] truncate"
+                        title={e.remarks || ""}
+                      >
+                        {e.remarks || "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                          disabled={deleting === e.id}
+                          onClick={() => handleDelete(e.id)}
+                          title="Delete earmark"
+                        >
+                          {deleting === e.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// AI Item Code Finder dialog — bulk find/assign item codes
+// ────────────────────────────────────────────────────────────
+interface FindItemCodeDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  storeItems: StoreItem[] | null;
+  onApplied: () => void;
+}
+
+const EMPTY_CANDIDATE: FindCodeCandidate = {
+  storeItemId: null,
+  description: "",
+  category: "General",
+  unit: "NOS",
+  cost: 0,
+};
+
+function FindItemCodeDialog({
+  open,
+  onOpenChange,
+  storeItems,
+  onApplied,
+}: FindItemCodeDialogProps) {
+  const [rows, setRows] = useState<FindCodeCandidate[]>([
+    { ...EMPTY_CANDIDATE },
+  ]);
+  const [running, setRunning] = useState(false);
+  const [results, setResults] = useState<
+    { candidate: FindCodeCandidate; result: FindCodeResult }[] | null
+  >(null);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
+
+  const reset = () => {
+    setRows([{ ...EMPTY_CANDIDATE }]);
+    setResults(null);
+    setAppliedIds(new Set());
+    setApplying(null);
+    setRunning(false);
+  };
+
+  const loadFromStore = () => {
+    if (!storeItems || storeItems.length === 0) {
+      toast({
+        title: "No store items available",
+        description: "Add items to the store first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setRows(
+      storeItems.map((it) => ({
+        storeItemId: it.id,
+        description: it.description,
+        category: it.category || "General",
+        unit: it.unit || "NOS",
+        cost: it.unitCost || 0,
+      }))
+    );
+    setResults(null);
+    setAppliedIds(new Set());
+    toast({
+      title: `Loaded ${storeItems.length} store items`,
+      description: "Review the rows and run AI matching.",
+    });
+  };
+
+  const addRow = () =>
+    setRows((r) => [...r, { ...EMPTY_CANDIDATE }]);
+
+  const removeRow = (i: number) =>
+    setRows((r) => r.filter((_, idx) => idx !== i));
+
+  const updateRow = (i: number, patch: Partial<FindCodeCandidate>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const hasValidRow = rows.some((r) => r.description.trim() !== "");
+
+  const runAI = async () => {
+    const valid = rows.filter((r) => r.description.trim() !== "");
+    if (valid.length === 0) {
+      toast({
+        title: "Add at least one item with a description",
+        variant: "destructive",
+      });
+      return;
+    }
+    setRunning(true);
+    setResults(null);
+    const payload = valid.map((r) => ({
+      description: r.description.trim(),
+      category: r.category || "General",
+      unit: r.unit || "NOS",
+      cost: Number(r.cost) || 0,
+    }));
+    const res = await apiRequest("/api/stores/find-code", "POST", payload);
+    setRunning(false);
+    if (res.ok && Array.isArray(res.data)) {
+      const out = (res.data as FindCodeResult[]).map((result, idx) => ({
+        candidate: valid[idx],
+        result,
+      }));
+      setResults(out);
+      const dupCount = out.filter((o) => o.result.isDuplicate).length;
+      toast({
+        title: `AI matched ${out.length} item(s)`,
+        description:
+          dupCount > 0
+            ? `${dupCount} duplicate(s) flagged — review recommendations.`
+            : "No duplicates detected.",
+      });
+    } else {
+      toast({
+        title: "AI matching failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const apply = async (i: number) => {
+    const item = results?.[i];
+    if (!item || !item.result.suggestedItemCode || !item.candidate.storeItemId)
+      return;
+    const sid = item.candidate.storeItemId;
+    setApplying(sid);
+    const res = await apiRequest(`/api/stores/${sid}`, "PUT", {
+      itemCode: item.result.suggestedItemCode,
+    });
+    setApplying(null);
+    if (res.ok) {
+      setAppliedIds((prev) => new Set(prev).add(sid));
+      toast({
+        title: "Item code applied",
+        description: `${item.candidate.description} → ${item.result.suggestedItemCode}`,
+      });
+      onApplied();
+    } else {
+      toast({
+        title: "Failed to apply code",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const dupCount = results?.filter((r) => r.result.isDuplicate).length ?? 0;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!running) {
+          onOpenChange(o);
+          if (!o) setTimeout(reset, 200);
+        }
+      }}
+    >
+      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <ScanSearch className="h-5 w-5 text-primary" /> AI Item Code Finder
+          </DialogTitle>
+          <DialogDescription>
+            Bulk-assign item codes using AI with duplicate detection across the
+            store catalogue. Load current store items or enter rows manually,
+            then run matching and apply suggested codes one-by-one.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadFromStore}
+            className="gap-1.5"
+            disabled={running || !storeItems}
+          >
+            <Boxes className="h-3.5 w-3.5" /> Load from current store items
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={addRow}
+            disabled={running}
+            className="gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Row
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {rows.length} row(s)
+            </span>
+            <Button
+              onClick={runAI}
+              disabled={running || !hasValidRow}
+              className="gap-1.5"
+              size="sm"
+            >
+              {running ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Wand2 className="h-3.5 w-3.5" />
+              )}
+              {running ? "Matching..." : "Run AI Matching"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Candidate editing table */}
+        <div className="border border-border rounded-lg overflow-hidden">
+          <div className="max-h-[26vh] overflow-auto scrollbar-thin">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="w-10 text-center">#</TableHead>
+                  <TableHead>
+                    Description <span className="text-red-400">*</span>
+                  </TableHead>
+                  <TableHead className="w-36">Category</TableHead>
+                  <TableHead className="w-20">Unit</TableHead>
+                  <TableHead className="w-28 text-right">Cost</TableHead>
+                  <TableHead className="w-12 text-center">Del</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow className="border-border">
+                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-4">
+                      No rows. Click &quot;Add Row&quot; to begin.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((row, i) => (
+                    <TableRow key={i} className="border-border">
+                      <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
+                        {i + 1}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={row.description}
+                          onChange={(e) =>
+                            updateRow(i, { description: e.target.value })
+                          }
+                          placeholder="Item description"
+                          className="bg-background border-border h-8"
+                          disabled={running}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={row.category}
+                          onChange={(e) =>
+                            updateRow(i, { category: e.target.value })
+                          }
+                          placeholder="Category"
+                          className="bg-background border-border h-8"
+                          disabled={running}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={row.unit}
+                          onChange={(e) => updateRow(i, { unit: e.target.value })}
+                          placeholder="NOS"
+                          className="bg-background border-border h-8"
+                          disabled={running}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          value={row.cost}
+                          onChange={(e) =>
+                            updateRow(i, { cost: Number(e.target.value) || 0 })
+                          }
+                          className="bg-background border-border h-8 text-right tabular-nums"
+                          disabled={running}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                          onClick={() => removeRow(i)}
+                          disabled={running || rows.length === 1}
+                          title="Remove row"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Results */}
+        {results && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-semibold text-foreground">
+                AI Results
+              </h3>
+              <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
+                {results.length} matched
+              </CustomBadge>
+              {dupCount > 0 && (
+                <CustomBadge className="bg-red-500/15 text-red-400 border-red-500/30">
+                  {dupCount} duplicate(s)
+                </CustomBadge>
+              )}
+            </div>
+
+            {results.length === 0 ? (
+              <EmptyState
+                icon={ScanSearch}
+                title="No results"
+                description="Try running AI matching again with valid descriptions."
+              />
+            ) : (
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="max-h-[40vh] overflow-auto scrollbar-thin">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10 bg-card">
+                      <TableRow className="border-border hover:bg-transparent">
+                        <TableHead>Description</TableHead>
+                        <TableHead>Suggested Code</TableHead>
+                        <TableHead className="w-20">Duplicate</TableHead>
+                        <TableHead>Duplicate Of</TableHead>
+                        <TableHead>Existing Codes</TableHead>
+                        <TableHead className="w-24">Confidence</TableHead>
+                        <TableHead>Recommendation</TableHead>
+                        <TableHead className="w-24 text-right">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {results.map((r, i) => {
+                        const sid = r.candidate.storeItemId;
+                        const hasCode = !!r.result.suggestedItemCode;
+                        const isApplied = sid ? appliedIds.has(sid) : false;
+                        const isApplying = sid ? applying === sid : false;
+                        return (
+                          <TableRow
+                            key={i}
+                            className={cn(
+                              "border-border",
+                              r.result.isDuplicate &&
+                                "border-l-4 border-l-red-500/60 bg-red-500/[0.04]"
+                            )}
+                          >
+                            <TableCell className="font-medium text-foreground max-w-[220px]">
+                              <div
+                                className="truncate"
+                                title={r.candidate.description}
+                              >
+                                {r.candidate.description}
+                              </div>
+                              {!sid && (
+                                <span className="text-[10px] text-amber-400">
+                                  Manual entry
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {hasCode ? (
+                                <span className="font-mono text-xs px-2 py-1 rounded bg-primary/10 text-primary border border-primary/30">
+                                  {r.result.suggestedItemCode}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">
+                                  —
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <CustomBadge
+                                className={
+                                  r.result.isDuplicate
+                                    ? "bg-red-500/15 text-red-400 border-red-500/30"
+                                    : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                }
+                              >
+                                {r.result.isDuplicate ? "Yes" : "No"}
+                              </CustomBadge>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {r.result.duplicateOf || "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-[180px]">
+                              {r.result.existingCodes.length > 0
+                                ? r.result.existingCodes.join(", ")
+                                : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <CustomBadge
+                                className={confidenceColor(r.result.confidence)}
+                              >
+                                {r.result.confidence}
+                              </CustomBadge>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-[260px]">
+                              <div className="leading-relaxed">
+                                {r.result.recommendation || "—"}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isApplied ? (
+                                <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
+                                  <Check className="h-3.5 w-3.5" /> Applied
+                                </span>
+                              ) : !hasCode ? (
+                                <span className="text-xs text-muted-foreground">
+                                  No code
+                                </span>
+                              ) : !sid ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="inline-flex">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled
+                                        className="h-7 gap-1"
+                                      >
+                                        <Wand2 className="h-3 w-3" /> Apply
+                                      </Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Manual entry — create item first
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 gap-1"
+                                  disabled={isApplying}
+                                  onClick={() => apply(i)}
+                                >
+                                  {isApplying ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Wand2 className="h-3 w-3" />
+                                  )}
+                                  Apply
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={running}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

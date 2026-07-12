@@ -6,7 +6,7 @@ import { StatCard } from "@/components/erp/stat-card";
 import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
 import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
 import { PresentPositionDialog } from "./projects/present-position";
-import { AddProjectDialog } from "./projects/add-project";
+import { AddProjectWizard } from "./projects/add-project-wizard";
 import {
   FolderKanban,
   Wallet,
@@ -15,6 +15,7 @@ import {
   Plus,
   FileText,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -73,6 +74,8 @@ interface Project {
   startDate: string | null;
   endDate: string | null;
   department: string | null;
+  benefactor: string | null;
+  reference: string | null;
   projectOfficer: string | null;
   status: string;
   description: string | null;
@@ -105,7 +108,7 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         icon={FolderKanban}
         actions={
           <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
-            <Plus className="h-4 w-4" /> Add Project
+            <Sparkles className="h-4 w-4" /> Add Project (Estimate)
           </Button>
         }
       />
@@ -126,7 +129,7 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
           description="Create your first project to start managing vote allocations and procurement files."
           action={
             <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
-              <Plus className="h-4 w-4" /> Add Project
+              <Sparkles className="h-4 w-4" /> Add Project (Estimate)
             </Button>
           }
         />
@@ -146,7 +149,9 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                       {p.name}
                     </h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {p.voteNumber} · {p.department || "—"}
+                      {p.voteNumber}
+                      {p.benefactor ? ` · ${p.benefactor}` : p.department ? ` · ${p.department}` : ""}
+                      {p.reference ? ` · ${p.reference}` : ""}
                     </p>
                   </div>
                   <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
@@ -198,7 +203,7 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                   </span>
                   <span className="flex items-center gap-1">
                     <Layers className="h-3.5 w-3.5" />
-                    {p.startDate || "—"}
+                    EDC: {p.endDate ? new Date(p.endDate).toLocaleDateString("en-GB") : "—"}
                   </span>
                 </div>
               </div>
@@ -217,14 +222,16 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         />
       )}
 
-      {/* Add Project Dialog */}
-      <AddProjectDialog
+      {/* Add Project Wizard (Step 1 + Step 2) */}
+      <AddProjectWizard
         open={addOpen}
-        onOpenChange={setAddOpen}
-        onCreated={() => {
+        onClose={() => setAddOpen(false)}
+        onCreated={(project) => {
           setAddOpen(false);
-          toast({ title: "Project created successfully" });
+          toast({ title: "Project created & estimate processed" });
           refresh();
+          // open the present position window for the new project
+          setSelectedProject(project as Project);
         }}
       />
     </div>

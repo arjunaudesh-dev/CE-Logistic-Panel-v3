@@ -280,6 +280,70 @@ export async function POST() {
       ],
     });
 
+    // Update projects with new fields (benefactor, reference, EDC)
+    await db.project.update({ where: { id: p1.id }, data: { benefactor: "Engineering Dept", reference: "AOR", endDate: "2025-12-20" } });
+    await db.project.update({ where: { id: p2.id }, data: { benefactor: "Civil Works Dept", reference: "Work Order", endDate: "2026-03-30" } });
+    await db.project.update({ where: { id: p3.id }, data: { benefactor: "Workshop Dept", reference: "Job Order", endDate: "2025-11-30" } });
+
+    // ── Sample Estimate (Step 1 draft + processed) ──
+    const est = await db.estimate.create({
+      data: { projectId: p1.id, name: "Refit Material Estimate - Q3", status: "Processed", processedAt: new Date() },
+    });
+    const estItems = [
+      ["Centrifugal Pump 15kW", 4, "NOS", 385000],
+      ["Mild Steel Plate 6mm", 1200, "KG", 245],
+      ["LED Flood Light 200W", 20, "NOS", 18500],
+      ["Epoxy Primer Grey", 60, "LTR", 3200],
+      ["GI Pipe 50mm", 80, "MTR", 4200],
+      ["Hydraulic Oil ISO 68", 150, "LTR", 1850],
+    ] as const;
+    for (let i = 0; i < estItems.length; i++) {
+      const it = estItems[i];
+      const isRC = ["BMS-220", "MT-045", "EL-301", "PT-077", "PL-118", "LO-008"][i] !== undefined;
+      const code = ["BMS-220", "MT-045", "EL-301", "PT-077", "PL-118", "LO-008"][i];
+      const rcRate = [385000, 245, 18500, 3200, 4200, 1850][i];
+      await db.estimateItem.create({
+        data: {
+          estimateId: est.id,
+          srNo: i + 1,
+          itemName: it[0] as string,
+          itemCode: code,
+          qty: it[1] as number,
+          unit: it[2] as string,
+          estimateCost: (it[1] as number) * (it[3] as number),
+          approxCost: isRC ? rcRate * (it[1] as number) : (it[1] as number) * (it[3] as number),
+          isRC,
+          rcNumber: isRC ? "2025" : null,
+          rcRate: isRC ? rcRate : 0,
+          rcSupplier: isRC ? ["Marine Pumps Ltd", "Ceylon Steel", "Electro Lanka", "Asian Paints", "Steel Centre", "Lubricant Hub"][i] : null,
+          lastPurchasePrice: isRC ? rcRate : (it[3] as number),
+          availableStock: [12, 1200, 6, 18, 240, 60][i],
+          stockLocation: ["Zone A", "Zone B", "Zone C", "Zone D", "Zone A", "Zone A"][i],
+          nonMovingStock: i === 5 ? 60 : 0,
+          status: i < 2 ? "Initiated" : "Pending",
+          prNumber: i < 2 ? ["PR-2025-001", "PR-2025-003"][i] : null,
+          fileNumber: i < 2 ? [`FILE/2025-01-15`, `FILE/2025-01-16`][i] : null,
+        },
+      });
+    }
+
+    // ── Sample Earmarked Items ──
+    await db.earmarkedItem.createMany({
+      data: [
+        { itemDescription: "TMT Bars 16mm", itemCode: "MT-110", projectId: p2.id, projectName: p2.name, qty: 500, unit: "KG", authority: "Lt. M. Fernando", remarks: "Earmarked for jetty slab pending PR" },
+        { itemDescription: "Portland Cement 50kg", itemCode: "GN-205", projectId: p2.id, projectName: p2.name, qty: 50, unit: "BAG", authority: "WO K. Silva", remarks: "Reserved for urgent patch work" },
+      ],
+    });
+
+    // ── Sample QC Inspections ──
+    await db.qCInspection.createMany({
+      data: [
+        { refType: "daily", refId: "seed-1", itemName: "Hydraulic Jack 20T", supplier: "Tools & Co", qty: 3, qcLevel: "Good", qcOfficer: "PO Bandara", qcOfficerDetails: "QC Bay 2", remarks: "Functional test passed" },
+        { refType: "partsupply", refId: "seed-ps-1", itemName: "TMT Bars 16mm", supplier: "Steel Centre", qty: 1200, qcLevel: "Satisfactory", qcOfficer: "LS Silva", qcOfficerDetails: "QC Bay 1", remarks: "Tensile test within spec" },
+        { refType: "daily", refId: "seed-2", itemName: "Bearing 6204 ZZ", supplier: "Bearing House", qty: 10, qcLevel: "Fail", qcOfficer: "PO Bandara", qcOfficerDetails: "QC Bay 2", remarks: "2 units pitted; rejected batch" },
+      ],
+    });
+
     return NextResponse.json({ ok: true, message: "Seed data created" });
   } catch (e) {
     console.error("seed error", e);

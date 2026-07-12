@@ -93,6 +93,68 @@ export const COLLECTION_STATUSES = [
 
 export const PART_SUPPLY_STATUSES = ["Active", "Completed"] as const;
 
+export const REFERENCE_TYPES = [
+  "AOR",
+  "Work Order",
+  "Estimate",
+  "Job Order",
+  "Repair Order",
+  "Internal",
+] as const;
+
+export const QC_LEVELS = [
+  "Fail",
+  "Below Average",
+  "Satisfactory",
+  "Good",
+  "Excellent",
+] as const;
+
+export function qcLevelColor(level: string): string {
+  switch (level) {
+    case "Fail":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    case "Below Average":
+      return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+    case "Satisfactory":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Good":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Excellent":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export function estimateStatusColor(status: string): string {
+  switch (status) {
+    case "Draft":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    case "Processed":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Archived":
+      return "bg-muted text-muted-foreground border-border";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export function confidenceColor(conf: string): string {
+  switch (conf) {
+    case "high":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "medium":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "low":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "none":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
 // Maps present positions to color classes for badges
 export function positionColor(position: string): string {
   const p = position.toLowerCase();
