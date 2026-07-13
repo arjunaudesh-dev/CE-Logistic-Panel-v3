@@ -14,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { CustomBadge } from "@/components/erp/badges";
 import { LoadingState, EmptyState } from "@/components/erp/states";
 import { InitiateFileDialog, EstimateItem } from "./initiate-file";
-import { formatCurrency, estimateStatusColor, confidenceColor } from "@/lib/constants";
+import { formatCurrency, estimateStatusColor } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2,
@@ -23,6 +23,9 @@ import {
   CheckCircle2,
   PackageSearch,
   AlertCircle,
+  ShieldCheck,
+  FileText,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,12 +36,47 @@ interface Props {
   onChanged?: () => void;
 }
 
+interface EstimateWithProject {
+  id: string;
+  status: string;
+  items: EstimateItem[];
+  project?: {
+    projectType?: string | null;
+    financialMean?: string | null;
+  } | null;
+}
+
+type SectionVariant = "rc" | "non-rate" | "contractual";
+type ThemeKey = "emerald" | "amber" | "violet";
+
+const SECTION_THEME: Record<SectionVariant, { key: ThemeKey; bar: string; title: string; summary: string; desc: string }> = {
+  rc: {
+    key: "emerald",
+    bar: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    title: "text-emerald-300",
+    summary: "text-emerald-400",
+    desc: "bg-emerald-500/5 text-emerald-400/90",
+  },
+  "non-rate": {
+    key: "amber",
+    bar: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    title: "text-amber-300",
+    summary: "text-amber-400",
+    desc: "bg-amber-500/5 text-amber-400/90",
+  },
+  contractual: {
+    key: "violet",
+    bar: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+    title: "text-violet-300",
+    summary: "text-violet-400",
+    desc: "bg-violet-500/5 text-violet-400/90",
+  },
+};
+
 export function EstimateItemsTable({ estimateId, showProcessButton = false, onChanged }: Props) {
-  const { data: estimate, loading, refresh } = useFetch<{
-    id: string;
-    status: string;
-    items: EstimateItem[];
-  }>(`/api/estimates/${estimateId}`);
+  const { data: estimate, loading, refresh } = useFetch<EstimateWithProject>(
+    `/api/estimates/${estimateId}`
+  );
   const [processing, setProcessing] = useState(false);
   const [initiateItem, setInitiateItem] = useState<EstimateItem | null>(null);
   const { toast } = useToast();
@@ -46,6 +84,17 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
   const items = estimate?.items || [];
   const pendingItems = items.filter((i) => i.status === "Pending");
   const initiatedItems = items.filter((i) => i.status === "Initiated");
+
+  // Determine if the project context is contractual — infer from project type OR financial mean.
+  const projectType = estimate?.project?.projectType;
+  const financialMean = estimate?.project?.financialMean;
+  const isProjectContractual =
+    projectType === "Contractual Job" || financialMean === "Contractual";
+
+  // Split items into 3 groups according to type
+  const rcItems = items.filter((i) => i.isRC);
+  const contractualItems = items.filter((i) => !i.isRC && isProjectContractual);
+  const nonRateItems = items.filter((i) => !i.isRC && !isProjectContractual);
 
   const handleProcess = async () => {
     setProcessing(true);
@@ -83,7 +132,7 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
         </div>
       )}
 
-      {/* summary tiles */}
+      {/* summary tiles — kept identical to original */}
       {items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <SummaryTile
@@ -94,7 +143,7 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
           />
           <SummaryTile
             label="RC Items"
-            value={String(items.filter((i) => i.isRC).length)}
+            value={String(rcItems.length)}
             tone="text-emerald-400"
             icon={<CheckCircle2 className="h-4 w-4" />}
           />
@@ -120,100 +169,37 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
           description="Add material estimate items in Step 1, then process with AI."
         />
       ) : (
-        <div className="border border-border rounded-lg overflow-hidden">
-          <ScrollArea className="max-h-[55vh]">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent border-border bg-secondary/40">
-                  <TableHead className="text-muted-foreground w-12">Sr</TableHead>
-                  <TableHead className="text-muted-foreground">Item Name</TableHead>
-                  <TableHead className="text-muted-foreground">Item Code</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Qty</TableHead>
-                  <TableHead className="text-muted-foreground">Deno</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
-                  <TableHead className="text-muted-foreground">RC No.</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
-                  <TableHead className="text-muted-foreground">Available Stock</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((it) => {
-                  const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
-                  return (
-                    <TableRow key={it.id} className="border-border">
-                      <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
-                      <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {it.itemCode ? (
-                          <span className="text-blue-400">{it.itemCode}</span>
-                        ) : (
-                          <span className="text-muted-foreground italic">TBC</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">{it.qty}</TableCell>
-                      <TableCell className="text-xs">{it.unit}</TableCell>
-                      <TableCell className="text-right font-medium text-foreground">
-                        {formatCurrency(it.approxCost)}
-                        {it.isRC && (
-                          <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
-                        )}
-                        {!it.isRC && (
-                          <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {it.isRC ? (
-                          <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right text-xs">
-                        {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {it.availableStock > 0 ? (
-                          <div className="text-xs">
-                            <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
-                            {it.stockLocation && (
-                              <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
-                            )}
-                            {it.nonMovingStock > 0 && (
-                              <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">0</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {it.status === "Initiated" ? (
-                          <div className="flex flex-col items-end gap-0.5">
-                            <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
-                              <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
-                            </CustomBadge>
-                            {it.fileNumber && (
-                              <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setInitiateItem(it)}
-                            className="gap-1.5 h-7"
-                          >
-                            <FileSignature className="h-3.5 w-3.5" /> Initiate File
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </ScrollArea>
+        <div className="space-y-4">
+          {rcItems.length > 0 && (
+            <ItemsSection
+              title="RC (Rate Contract) Items"
+              icon={<ShieldCheck className="h-4 w-4" />}
+              variant="rc"
+              description="Items matched to an active Rate Contract — procurement can proceed at the locked RC rate."
+              items={rcItems}
+              onInitiate={(it) => setInitiateItem(it)}
+            />
+          )}
+          {nonRateItems.length > 0 && (
+            <ItemsSection
+              title="Non-Rate Items (Tender/Quotation Required)"
+              icon={<FileText className="h-4 w-4" />}
+              variant="non-rate"
+              description="These items are not on an active Rate Contract — they require a tender or quotation process."
+              items={nonRateItems}
+              onInitiate={(it) => setInitiateItem(it)}
+            />
+          )}
+          {contractualItems.length > 0 && (
+            <ItemsSection
+              title="Contractual Items (ARO Flow)"
+              icon={<ScrollText className="h-4 w-4" />}
+              variant="contractual"
+              description="These items follow the ARO (Annual Requirement Order) contractual process flow."
+              items={contractualItems}
+              onInitiate={(it) => setInitiateItem(it)}
+            />
+          )}
         </div>
       )}
 
@@ -227,6 +213,154 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
           onChanged?.();
         }}
       />
+    </div>
+  );
+}
+
+function ItemsSection({
+  title,
+  icon,
+  variant,
+  description,
+  items,
+  onInitiate,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  variant: SectionVariant;
+  description: string;
+  items: EstimateItem[];
+  onInitiate: (item: EstimateItem) => void;
+}) {
+  const theme = SECTION_THEME[variant];
+  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+  const showRcCols = variant === "rc";
+  const DescIcon = variant === "rc" ? CheckCircle2 : AlertCircle;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      {/* Colored header bar — icon + title + count + total cost */}
+      <div className={cn("flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border flex-wrap", theme.bar)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0">{icon}</span>
+          <h4 className={cn("text-sm font-semibold", theme.title)}>{title}</h4>
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-background/40 font-mono">
+            {items.length}
+          </span>
+        </div>
+        <div className="text-xs">
+          <span className="opacity-80">Total Approx Cost: </span>
+          <span className={cn("font-semibold", theme.summary)}>{formatCurrency(totalCost)}</span>
+        </div>
+      </div>
+
+      {/* Variant description strip */}
+      <div className={cn("px-4 py-1.5 border-b border-border flex items-center gap-1.5 text-[11px]", theme.desc)}>
+        <DescIcon className="h-3 w-3 shrink-0" />
+        {description}
+      </div>
+
+      <ScrollArea className="max-h-[55vh]">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent border-border bg-secondary/40">
+              <TableHead className="text-muted-foreground w-12">Sr</TableHead>
+              <TableHead className="text-muted-foreground">Item Name</TableHead>
+              <TableHead className="text-muted-foreground">Item Code</TableHead>
+              <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+              <TableHead className="text-muted-foreground">Deno</TableHead>
+              <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
+              {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+              {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+              <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
+              <TableHead className="text-muted-foreground">Available Stock</TableHead>
+              <TableHead className="text-muted-foreground text-right">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((it) => {
+              const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
+              return (
+                <TableRow key={it.id} className="border-border">
+                  <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
+                  <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {it.itemCode ? (
+                      <span className="text-blue-400">{it.itemCode}</span>
+                    ) : (
+                      <span className="text-muted-foreground italic">TBC</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">{it.qty}</TableCell>
+                  <TableCell className="text-xs">{it.unit}</TableCell>
+                  <TableCell className="text-right font-medium text-foreground">
+                    {formatCurrency(it.approxCost)}
+                    {it.isRC && (
+                      <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
+                    )}
+                    {!it.isRC && (
+                      <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
+                    )}
+                  </TableCell>
+                  {showRcCols && (
+                    <TableCell>
+                      {it.isRC ? (
+                        <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {showRcCols && (
+                    <TableCell className="text-xs text-muted-foreground">
+                      {it.rcSupplier || "—"}
+                    </TableCell>
+                  )}
+                  <TableCell className="text-right text-xs">
+                    {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
+                  </TableCell>
+                  <TableCell>
+                    {it.availableStock > 0 ? (
+                      <div className="text-xs">
+                        <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
+                        {it.stockLocation && (
+                          <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
+                        )}
+                        {it.nonMovingStock > 0 && (
+                          <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">0</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {it.status === "Initiated" ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
+                          <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
+                        </CustomBadge>
+                        {it.fileNumber && (
+                          <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onInitiate(it)}
+                        className="gap-1.5 h-7"
+                      >
+                        <FileSignature className="h-3.5 w-3.5" /> Initiate File
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </ScrollArea>
     </div>
   );
 }

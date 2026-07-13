@@ -1,0 +1,786 @@
+  1700→  onEditStep,
+  1701→  onDeleteStep,
+  1702→  onEditFlow,
+  1703→  onDeleteFlow,
+  1704→}: FlowCardProps) {
+  1705→  const accent = flowAccent(flow.name);
+  1706→  const steps = [...(flow.steps ?? [])].sort(
+  1707→    (a, b) => a.stepOrder - b.stepOrder
+  1708→  );
+  1709→
+  1710→  const tenderCount = steps.filter((s) => s.isTenderStage).length;
+  1711→  const evalCount = steps.filter((s) => s.isEvaluationStage).length;
+  1712→  const delegationCount = steps.filter(
+  1713→    (s) => s.financialDelegationLevel && s.financialDelegationLevel !== "—"
+  1714→  ).length;
+  1715→
+  1716→  return (
+  1717→    <div
+  1718→      className={cn(
+  1719→        "bg-card border rounded-xl overflow-hidden",
+  1720→        accent.border
+  1721→      )}
+  1722→    >
+  1723→      {/* Colored header */}
+  1724→      <div
+  1725→        className={cn(
+  1726→          "flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-5 border-b",
+  1727→          accent.headerBg,
+  1728→          accent.border
+  1729→        )}
+  1730→      >
+  1731→        <div className="flex items-start gap-3 min-w-0">
+  1732→          <div
+  1733→            className={cn(
+  1734→              "h-11 w-11 rounded-lg flex items-center justify-center shrink-0 ring-2",
+  1735→              accent.headerBg,
+  1736→              accent.ring
+  1737→            )}
+  1738→          >
+  1739→            <GitBranch className={cn("h-6 w-6", accent.text)} />
+  1740→          </div>
+  1741→          <div className="min-w-0">
+  1742→            <div className="flex items-center gap-2 flex-wrap">
+  1743→              <h3 className="text-lg font-bold text-foreground">{flow.name}</h3>
+  1744→              <CustomBadge className={accent.badge}>{flow.name} Flow</CustomBadge>
+  1745→              <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1746→                {steps.length} step{steps.length === 1 ? "" : "s"}
+  1747→              </CustomBadge>
+  1748→              {tenderCount > 0 && (
+  1749→                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+  1750→                  <Gavel className="h-3 w-3 mr-1" />
+  1751→                  {tenderCount} Tender
+  1752→                </CustomBadge>
+  1753→              )}
+  1754→              {evalCount > 0 && (
+  1755→                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+  1756→                  <ClipboardCheck className="h-3 w-3 mr-1" />
+  1757→                  {evalCount} Evaluation
+  1758→                </CustomBadge>
+  1759→              )}
+  1760→              {delegationCount > 0 && (
+  1761→                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+  1762→                  <Banknote className="h-3 w-3 mr-1" />
+  1763→                  {delegationCount} Delegation{delegationCount === 1 ? "" : "s"}
+  1764→                </CustomBadge>
+  1765→              )}
+  1766→            </div>
+  1767→            {flow.description && (
+  1768→              <p className="text-sm text-muted-foreground mt-1">
+  1769→                {flow.description}
+  1770→              </p>
+  1771→            )}
+  1772→          </div>
+  1773→        </div>
+  1774→        <div className="flex items-center gap-1 shrink-0">
+  1775→          <Button
+  1776→            variant="outline"
+  1777→            size="sm"
+  1778→            onClick={onEditFlow}
+  1779→            className="bg-background/60"
+  1780→          >
+  1781→            <Pencil className="h-3.5 w-3.5 mr-1" />
+  1782→            Edit
+  1783→          </Button>
+  1784→          <Button
+  1785→            variant="outline"
+  1786→            size="sm"
+  1787→            onClick={onDeleteFlow}
+  1788→            className="bg-background/60 text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30"
+  1789→          >
+  1790→            <Trash2 className="h-3.5 w-3.5 mr-1" />
+  1791→            Delete
+  1792→          </Button>
+  1793→          <Button size="sm" onClick={onAddStep}>
+  1794→            <Plus className="h-3.5 w-3.5 mr-1" />
+  1795→            Add Step
+  1796→          </Button>
+  1797→        </div>
+  1798→      </div>
+  1799→
+  1800→      {/* Body — vertical timeline */}
+  1801→      <div className="p-5">
+  1802→        {steps.length === 0 ? (
+  1803→          <EmptyState
+  1804→            icon={ListTree}
+  1805→            title="No steps defined"
+  1806→            description="Add steps to outline the procurement file's journey through this flow."
+  1807→            action={
+  1808→              <Button size="sm" onClick={onAddStep}>
+  1809→                <Plus className="h-4 w-4 mr-1" />
+  1810→                Add First Step
+  1811→              </Button>
+  1812→            }
+  1813→          />
+  1814→        ) : (
+  1815→          <div className="relative pl-8 sm:pl-10">
+  1816→            {/* vertical line */}
+  1817→            <div
+  1818→              className={cn(
+  1819→                "absolute left-3 sm:left-4 top-2 bottom-2 w-0.5",
+  1820→                accent.dot,
+  1821→                "opacity-30"
+  1822→              )}
+  1823→            />
+  1824→            <ol className="space-y-4">
+  1825→              {steps.map((step, idx) => (
+  1826→                <StepTimelineItem
+  1827→                  key={step.id}
+  1828→                  step={step}
+  1829→                  isLast={idx === steps.length - 1}
+  1830→                  accent={accent}
+  1831→                  onEdit={() => onEditStep(step)}
+  1832→                  onDelete={() => onDeleteStep(step)}
+  1833→                />
+  1834→              ))}
+  1835→            </ol>
+  1836→          </div>
+  1837→        )}
+  1838→      </div>
+  1839→    </div>
+  1840→  );
+  1841→}
+  1842→
+  1843→// ─────────────────────────────────────────────────────────
+  1844→// Step Timeline Item
+  1845→// ─────────────────────────────────────────────────────────
+  1846→interface StepTimelineItemProps {
+  1847→  step: ProcessStep;
+  1848→  isLast: boolean;
+  1849→  accent: ReturnType<typeof flowAccent>;
+  1850→  onEdit: () => void;
+  1851→  onDelete: () => void;
+  1852→}
+  1853→
+  1854→function StepTimelineItem({
+  1855→  step,
+  1856→  accent,
+  1857→  onEdit,
+  1858→  onDelete,
+  1859→}: StepTimelineItemProps) {
+  1860→  const hasDelegation =
+  1861→    step.financialDelegationLevel &&
+  1862→    step.financialDelegationLevel.trim() !== "" &&
+  1863→    step.financialDelegationLevel !== "—";
+  1864→  const isBranch = step.isTenderStage || step.isEvaluationStage;
+  1865→
+  1866→  // Branch styling: tender = amber, evaluation = violet, both = combined
+  1867→  const branchBorder = step.isTenderStage
+  1868→    ? "border-l-amber-500"
+  1869→    : step.isEvaluationStage
+  1870→    ? "border-l-violet-500"
+  1871→    : "border-l-border";
+  1872→
+  1873→  return (
+  1874→    <li className="relative">
+  1875→      {/* Dot — colored by branch or by flow accent */}
+  1876→      <div
+  1877→        className={cn(
+  1878→          "absolute -left-[1.4rem] sm:-left-[1.6rem] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-card",
+  1879→          step.isTenderStage
+  1880→            ? "bg-amber-500"
+  1881→            : step.isEvaluationStage
+  1882→            ? "bg-violet-500"
+  1883→            : accent.stepDot
+  1884→        )}
+  1885→      >
+  1886→        {step.isTenderStage && step.isEvaluationStage && (
+  1887→          <div className="absolute inset-0 rounded-full bg-violet-500 mix-blend-lighten" />
+  1888→        )}
+  1889→      </div>
+  1890→
+  1891→      <div
+  1892→        className={cn(
+  1893→          "bg-secondary/30 border border-l-4 rounded-lg p-4 transition-colors hover:bg-secondary/50",
+  1894→          branchBorder
+  1895→        )}
+  1896→      >
+  1897→        {/* Top row: order + position + branch tags */}
+  1898→        <div className="flex flex-wrap items-center gap-2 mb-2">
+  1899→          <span
+  1900→            className={cn(
+  1901→              "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold",
+  1902→              accent.headerBg,
+  1903→              accent.text,
+  1904→              "border",
+  1905→              accent.border
+  1906→            )}
+  1907→          >
+  1908→            #{step.stepOrder}
+  1909→          </span>
+  1910→          <CustomBadge
+  1911→            className={cn(
+  1912→              "text-sm font-semibold",
+  1913→              accent.badge
+  1914→            )}
+  1915→          >
+  1916→            {step.positionName}
+  1917→          </CustomBadge>
+  1918→
+  1919→          {step.isTenderStage && (
+  1920→            <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+  1921→              <Gavel className="h-3 w-3 mr-1" />
+  1922→              TENDER
+  1923→            </CustomBadge>
+  1924→          )}
+  1925→          {step.isEvaluationStage && (
+  1926→            <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+  1927→              <ClipboardCheck className="h-3 w-3 mr-1" />
+  1928→              EVALUATION
+  1929→            </CustomBadge>
+  1930→          )}
+  1931→
+  1932→          <div className="ml-auto flex items-center gap-1">
+  1933→            <Button
+  1934→              variant="ghost"
+  1935→              size="sm"
+  1936→              className="h-7 w-7 p-0"
+  1937→              onClick={onEdit}
+  1938→              title="Edit step"
+  1939→            >
+  1940→              <Pencil className="h-3.5 w-3.5" />
+  1941→            </Button>
+  1942→            <Button
+  1943→              variant="ghost"
+  1944→              size="sm"
+  1945→              className="h-7 w-7 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+  1946→              onClick={onDelete}
+  1947→              title="Delete step"
+  1948→            >
+  1949→              <Trash2 className="h-3.5 w-3.5" />
+  1950→            </Button>
+  1951→          </div>
+  1952→        </div>
+  1953→
+  1954→        {/* Description */}
+  1955→        {step.description && (
+  1956→          <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+  1957→            {step.description}
+  1958→          </p>
+  1959→        )}
+  1960→
+  1961→        {/* Body: responsible person + financial delegation */}
+  1962→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1963→          <div className="rounded-lg border border-border bg-background/40 p-3">
+  1964→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
+  1965→              <UserCircle2 className="h-3 w-3" />
+  1966→              Default Responsible Person
+  1967→            </p>
+  1968→            <p className="text-sm font-medium text-foreground">
+  1969→              {step.defaultResponsiblePerson || "—"}
+  1970→            </p>
+  1971→          </div>
+  1972→          <div
+  1973→            className={cn(
+  1974→              "rounded-lg border p-3",
+  1975→              hasDelegation
+  1976→                ? "border-blue-500/40 bg-blue-500/5"
+  1977→                : "border-border bg-background/40"
+  1978→            )}
+  1979→          >
+  1980→            <p
+  1981→              className={cn(
+  1982→                "text-[10px] uppercase tracking-wide mb-1 flex items-center gap-1",
+  1983→                hasDelegation
+  1984→                  ? "text-blue-400"
+  1985→                  : "text-muted-foreground"
+  1986→              )}
+  1987→            >
+  1988→              <Award className="h-3 w-3" />
+  1989→              Financial Delegation Level
+  1990→            </p>
+  1991→            <p
+  1992→              className={cn(
+  1993→                "text-sm font-semibold",
+  1994→                hasDelegation ? "text-blue-300" : "text-muted-foreground"
+  1995→              )}
+  1996→            >
+  1997→              {step.financialDelegationLevel || "—"}
+  1998→            </p>
+  1999→          </div>
+  2000→        </div>
+  2001→
+  2002→        {/* Branch helper caption */}
+  2003→        {isBranch && (
+  2004→          <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+  2005→            <ArrowRight className="h-3 w-3" />
+  2006→            {step.isTenderStage && step.isEvaluationStage
+  2007→              ? "Combined tender & evaluation branch — quotation opening and BEC evaluation occur at this stage."
+  2008→              : step.isTenderStage
+  2009→              ? "Tender branch — quotation/tender is called, received and opened at this stage."
+  2010→              : "Evaluation branch — Bid Evaluation Committee (BEC) reviews and recommends at this stage."}
+  2011→          </div>
+  2012→        )}
+  2013→      </div>
+  2014→    </li>
+  2015→  );
+  2016→}
+  2017→
+  2018→// ─────────────────────────────────────────────────────────
+  2019→// Flow Form Dialog (Add/Edit)
+  2020→// ─────────────────────────────────────────────────────────
+  2021→interface FlowFormProps {
+  2022→  open: boolean;
+  2023→  onOpenChange: (o: boolean) => void;
+  2024→  initial: ProcessFlow | null;
+  2025→  onSaved: () => void;
+  2026→}
+  2027→
+  2028→function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps) {
+  2029→  const isEdit = !!initial;
+  2030→  const { toast } = useToast();
+  2031→  const [saving, setSaving] = useState(false);
+  2032→
+  2033→  const [name, setName] = useState<string>(initial?.name ?? "RC");
+  2034→  const [description, setDescription] = useState(initial?.description ?? "");
+  2035→
+  2036→  async function handleSubmit(e: React.FormEvent) {
+  2037→    e.preventDefault();
+  2038→    if (!name.trim()) {
+  2039→      toast({ title: "Flow name is required", variant: "destructive" });
+  2040→      return;
+  2041→    }
+  2042→    setSaving(true);
+  2043→    const body = {
+  2044→      name: name.trim(),
+  2045→      description: description.trim() || null,
+  2046→    };
+  2047→    const res = isEdit
+  2048→      ? await apiRequest(`/api/process-flows/${initial!.id}`, "PUT", body)
+  2049→      : await apiRequest("/api/process-flows", "POST", body);
+  2050→    setSaving(false);
+  2051→    if (res.ok) {
+  2052→      toast({
+  2053→        title: isEdit ? "Flow updated" : "Flow created",
+  2054→        description: body.name,
+  2055→      });
+  2056→      onSaved();
+  2057→    } else {
+  2058→      toast({
+  2059→        title: "Failed to save",
+  2060→        description: res.error,
+  2061→        variant: "destructive",
+  2062→      });
+  2063→    }
+  2064→  }
+  2065→
+  2066→  return (
+  2067→    <Dialog open={open} onOpenChange={onOpenChange}>
+  2068→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+  2069→        <DialogHeader>
+  2070→          <DialogTitle className="flex items-center gap-2">
+  2071→            <GitBranch className="h-5 w-5 text-primary" />
+  2072→            {isEdit ? "Edit Process Flow" : "Add Process Flow"}
+  2073→          </DialogTitle>
+  2074→          <DialogDescription>
+  2075→            Define a procurement process flow (RC, Non-Rate, ARO Contractual).
+  2076→            Steps are added separately after creation.
+  2077→          </DialogDescription>
+  2078→        </DialogHeader>
+  2079→        <form onSubmit={handleSubmit} className="space-y-4">
+  2080→          <Field label="Flow Name" required>
+  2081→            <Select value={name} onValueChange={setName}>
+  2082→              <SelectTrigger className="bg-background">
+  2083→                <SelectValue placeholder="Select flow type" />
+  2084→              </SelectTrigger>
+  2085→              <SelectContent>
+  2086→                {PROCESS_FLOW_TYPES.map((t) => (
+  2087→                  <SelectItem key={t} value={t}>
+  2088→                    <span className="flex items-center gap-2">
+  2089→                      <span
+  2090→                        className={cn(
+  2091→                          "h-2 w-2 rounded-full",
+  2092→                          t === "RC"
+  2093→                            ? "bg-emerald-500"
+  2094→                            : t === "Non-Rate"
+  2095→                            ? "bg-amber-500"
+  2096→                            : "bg-violet-500"
+  2097→                        )}
+  2098→                      />
+  2099→                      {t}
+  2100→                    </span>
+  2101→                  </SelectItem>
+  2102→                ))}
+  2103→              </SelectContent>
+  2104→            </Select>
+  2105→          </Field>
+  2106→          <Field label="Description">
+  2107→            <Textarea
+  2108→              value={description}
+  2109→              onChange={(e) => setDescription(e.target.value)}
+  2110→              placeholder="e.g. Rate Contract procurement flow — items under active RC list"
+  2111→              className="bg-background min-h-[80px]"
+  2112→            />
+  2113→          </Field>
+  2114→          <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-1.5">
+  2115→            <p className="font-medium text-foreground flex items-center gap-1.5">
+  2116→              <TrendingUp className="h-3.5 w-3.5" />
+  2117→              Flow Type Guide
+  2118→            </p>
+  2119→            <p>
+  2120→              <span className="text-emerald-400 font-medium">RC</span> — Linear
+  2121→              flow for items under an active Rate Contract (no tender).
+  2122→            </p>
+  2123→            <p>
+  2124→              <span className="text-amber-400 font-medium">Non-Rate</span> —
+  2125→              Tender called + BEC evaluation branch for items not under RC.
+  2126→            </p>
+  2127→            <p>
+  2128→              <span className="text-violet-400 font-medium">
+  2129→                ARO (Contractual)
+  2130→              </span>{" "}
+  2131→              — Tender opening, negotiation, evaluation branches with full
+  2132→              financial delegation.
+  2133→            </p>
+  2134→          </div>
+  2135→          <DialogFooter>
+  2136→            <Button
+  2137→              type="button"
+  2138→              variant="outline"
+  2139→              onClick={() => onOpenChange(false)}
+  2140→              disabled={saving}
+  2141→            >
+  2142→              Cancel
+  2143→            </Button>
+  2144→            <Button type="submit" disabled={saving}>
+  2145→              {saving ? (
+  2146→                <>
+  2147→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  2148→                  Saving...
+  2149→                </>
+  2150→              ) : (
+  2151→                <>
+  2152→                  <CheckCircle2 className="h-4 w-4 mr-1" />
+  2153→                  {isEdit ? "Save Changes" : "Create Flow"}
+  2154→                </>
+  2155→              )}
+  2156→            </Button>
+  2157→          </DialogFooter>
+  2158→        </form>
+  2159→      </DialogContent>
+  2160→    </Dialog>
+  2161→  );
+  2162→}
+  2163→
+  2164→// ─────────────────────────────────────────────────────────
+  2165→// Step Form Dialog (Add/Edit)
+  2166→// ─────────────────────────────────────────────────────────
+  2167→interface StepFormProps {
+  2168→  open: boolean;
+  2169→  onOpenChange: (o: boolean) => void;
+  2170→  flow: ProcessFlow;
+  2171→  initial: ProcessStep | null;
+  2172→  onSaved: () => void;
+  2173→}
+  2174→
+  2175→function StepFormDialog({
+  2176→  open,
+  2177→  onOpenChange,
+  2178→  flow,
+  2179→  initial,
+  2180→  onSaved,
+  2181→}: StepFormProps) {
+  2182→  const isEdit = !!initial;
+  2183→  const { toast } = useToast();
+  2184→  const [saving, setSaving] = useState(false);
+  2185→
+  2186→  const accent = flowAccent(flow.name);
+  2187→
+  2188→  const nextOrder = useMemo(() => {
+  2189→    const max = flow.steps?.reduce(
+  2190→      (m, s) => Math.max(m, s.stepOrder),
+  2191→      0
+  2192→    );
+  2193→    return (max ?? 0) + 1;
+  2194→  }, [flow.steps]);
+  2195→
+  2196→  const [stepOrder, setStepOrder] = useState<string>(
+  2197→    String(initial?.stepOrder ?? nextOrder)
+  2198→  );
+  2199→  const [positionName, setPositionName] = useState(
+  2200→    initial?.positionName ?? ""
+  2201→  );
+  2202→  const [description, setDescription] = useState(initial?.description ?? "");
+  2203→  const [defaultResponsiblePerson, setDefaultResponsiblePerson] = useState(
+  2204→    initial?.defaultResponsiblePerson ?? ""
+  2205→  );
+  2206→  const [financialDelegationLevel, setFinancialDelegationLevel] = useState(
+  2207→    initial?.financialDelegationLevel ?? ""
+  2208→  );
+  2209→  const [isTenderStage, setIsTenderStage] = useState(
+  2210→    initial?.isTenderStage ?? false
+  2211→  );
+  2212→  const [isEvaluationStage, setIsEvaluationStage] = useState(
+  2213→    initial?.isEvaluationStage ?? false
+  2214→  );
+  2215→
+  2216→  async function handleSubmit(e: React.FormEvent) {
+  2217→    e.preventDefault();
+  2218→    const orderNum = Number(stepOrder);
+  2219→    if (!positionName.trim()) {
+  2220→      toast({ title: "Position name is required", variant: "destructive" });
+  2221→      return;
+  2222→    }
+  2223→    if (isNaN(orderNum) || orderNum < 1) {
+  2224→      toast({
+  2225→        title: "Step order must be a positive number",
+  2226→        variant: "destructive",
+  2227→      });
+  2228→      return;
+  2229→    }
+  2230→    setSaving(true);
+  2231→    const body = {
+  2232→      stepOrder: orderNum,
+  2233→      positionName: positionName.trim(),
+  2234→      description: description.trim() || null,
+  2235→      defaultResponsiblePerson: defaultResponsiblePerson.trim() || null,
+  2236→      financialDelegationLevel: financialDelegationLevel.trim() || null,
+  2237→      isTenderStage,
+  2238→      isEvaluationStage,
+  2239→    };
+  2240→    const res = isEdit
+  2241→      ? await apiRequest(
+  2242→          `/api/process-flows/${flow.id}/steps/${initial!.id}`,
+  2243→          "PUT",
+  2244→          body
+  2245→        )
+  2246→      : await apiRequest(`/api/process-flows/${flow.id}/steps`, "POST", body);
+  2247→    setSaving(false);
+  2248→    if (res.ok) {
+  2249→      toast({
+  2250→        title: isEdit ? "Step updated" : "Step added",
+  2251→        description: `${body.positionName} → ${flow.name} flow`,
+  2252→      });
+  2253→      onSaved();
+  2254→    } else {
+  2255→      toast({
+  2256→        title: "Failed to save step",
+  2257→        description: res.error,
+  2258→        variant: "destructive",
+  2259→      });
+  2260→    }
+  2261→  }
+  2262→
+  2263→  return (
+  2264→    <Dialog open={open} onOpenChange={onOpenChange}>
+  2265→      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+  2266→        <DialogHeader>
+  2267→          <DialogTitle className="flex items-center gap-2">
+  2268→            <ListTree className="h-5 w-5 text-primary" />
+  2269→            {isEdit ? "Edit Process Step" : "Add Process Step"}
+  2270→          </DialogTitle>
+  2271→          <DialogDescription>
+  2272→            Configure a step in the{" "}
+  2273→            <CustomBadge className={accent.badge}>{flow.name}</CustomBadge> flow
+  2274→            — including tender/evaluation branch flags and financial delegation
+  2275→            level.
+  2276→          </DialogDescription>
+  2277→        </DialogHeader>
+  2278→        <form onSubmit={handleSubmit} className="space-y-4">
+  2279→          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+  2280→            <Field label="Step Order" required>
+  2281→              <Input
+  2282→                type="number"
+  2283→                min={1}
+  2284→                value={stepOrder}
+  2285→                onChange={(e) => setStepOrder(e.target.value)}
+  2286→                placeholder="1"
+  2287→                className="bg-background"
+  2288→                required
+  2289→              />
+  2290→            </Field>
+  2291→            <div className="sm:col-span-2">
+  2292→              <Field label="Position Name" required>
+  2293→                <Input
+  2294→                  value={positionName}
+  2295→                  onChange={(e) => setPositionName(e.target.value)}
+  2296→                  placeholder="e.g. PR Raised / Tender Called / BEC Evaluation"
+  2297→                  className="bg-background"
+  2298→                  required
+  2299→                />
+  2300→              </Field>
+  2301→            </div>
+  2302→          </div>
+  2303→
+  2304→          <Field label="Description">
+  2305→            <Textarea
+  2306→              value={description}
+  2307→              onChange={(e) => setDescription(e.target.value)}
+  2308→              placeholder="Brief description of what happens at this step..."
+  2309→              className="bg-background min-h-[70px]"
+  2310→            />
+  2311→          </Field>
+  2312→
+  2313→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  2314→            <Field label="Default Responsible Person">
+  2315→              <Input
+  2316→                value={defaultResponsiblePerson}
+  2317→                onChange={(e) => setDefaultResponsiblePerson(e.target.value)}
+  2318→                placeholder="e.g. ASO(E) — Lt. Cdr. K. Silva"
+  2319→                className="bg-background"
+  2320→              />
+  2321→            </Field>
+  2322→            <Field label="Financial Delegation Level">
+  2323→              <Input
+  2324→                value={financialDelegationLevel}
+  2325→                onChange={(e) => setFinancialDelegationLevel(e.target.value)}
+  2326→                placeholder="e.g. Up to Rs. 2,000,000 — Capt"
+  2327→                className="bg-background"
+  2328→              />
+  2329→            </Field>
+  2330→          </div>
+  2331→
+  2332→          {/* Branch flags */}
+  2333→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  2334→            <label
+  2335→              htmlFor="tender-stage"
+  2336→              className={cn(
+  2337→                "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+  2338→                isTenderStage
+  2339→                  ? "border-amber-500/50 bg-amber-500/5"
+  2340→                  : "border-border bg-secondary/30 hover:bg-secondary/50"
+  2341→              )}
+  2342→            >
+  2343→              <Checkbox
+  2344→                id="tender-stage"
+  2345→                checked={isTenderStage}
+  2346→                onCheckedChange={(v) => setIsTenderStage(v === true)}
+  2347→                className="mt-0.5 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+  2348→              />
+  2349→              <div className="flex-1">
+  2350→                <div className="flex items-center gap-1.5">
+  2351→                  <Gavel className="h-3.5 w-3.5 text-amber-400" />
+  2352→                  <span className="text-sm font-medium text-foreground">
+  2353→                    Tender Stage
+  2354→                  </span>
+  2355→                </div>
+  2356→                <p className="text-xs text-muted-foreground mt-0.5">
+  2357→                  Marks this as part of the tender branch — quotation called,
+  2358→                  received or opened.
+  2359→                </p>
+  2360→              </div>
+  2361→            </label>
+  2362→
+  2363→            <label
+  2364→              htmlFor="eval-stage"
+  2365→              className={cn(
+  2366→                "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+  2367→                isEvaluationStage
+  2368→                  ? "border-violet-500/50 bg-violet-500/5"
+  2369→                  : "border-border bg-secondary/30 hover:bg-secondary/50"
+  2370→              )}
+  2371→            >
+  2372→              <Checkbox
+  2373→                id="eval-stage"
+  2374→                checked={isEvaluationStage}
+  2375→                onCheckedChange={(v) => setIsEvaluationStage(v === true)}
+  2376→                className="mt-0.5 data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
+  2377→              />
+  2378→              <div className="flex-1">
+  2379→                <div className="flex items-center gap-1.5">
+  2380→                  <ClipboardCheck className="h-3.5 w-3.5 text-violet-400" />
+  2381→                  <span className="text-sm font-medium text-foreground">
+  2382→                    Evaluation Stage
+  2383→                  </span>
+  2384→                </div>
+  2385→                <p className="text-xs text-muted-foreground mt-0.5">
+  2386→                  Marks this as part of the BEC evaluation branch — bid
+  2387→                  evaluation & recommendation.
+  2388→                </p>
+  2389→              </div>
+  2390→            </label>
+  2391→          </div>
+  2392→
+  2393→          {/* Live preview */}
+  2394→          <div className="rounded-lg border border-border bg-background/40 p-3">
+  2395→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+  2396→              Live Preview
+  2397→            </p>
+  2398→            <div className="flex flex-wrap items-center gap-2">
+  2399→              <span
+  2400→                className={cn(
+  2401→                  "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
+  2402→                  accent.headerBg,
+  2403→                  accent.text,
+  2404→                  accent.border
+  2405→                )}
+  2406→              >
+  2407→                #{stepOrder || "?"}
+  2408→              </span>
+  2409→              <CustomBadge className={cn("font-semibold", accent.badge)}>
+  2410→                {positionName || "Position Name"}
+  2411→              </CustomBadge>
+  2412→              {isTenderStage && (
+  2413→                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+  2414→                  <Gavel className="h-3 w-3 mr-1" />
+  2415→                  TENDER
+  2416→                </CustomBadge>
+  2417→              )}
+  2418→              {isEvaluationStage && (
+  2419→                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+  2420→                  <ClipboardCheck className="h-3 w-3 mr-1" />
+  2421→                  EVALUATION
+  2422→                </CustomBadge>
+  2423→              )}
+  2424→              {financialDelegationLevel &&
+  2425→                financialDelegationLevel.trim() !== "" && (
+  2426→                  <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+  2427→                    <Award className="h-3 w-3 mr-1" />
+  2428→                    {financialDelegationLevel}
+  2429→                  </CustomBadge>
+  2430→                )}
+  2431→            </div>
+  2432→          </div>
+  2433→
+  2434→          <DialogFooter>
+  2435→            <Button
+  2436→              type="button"
+  2437→              variant="outline"
+  2438→              onClick={() => onOpenChange(false)}
+  2439→              disabled={saving}
+  2440→            >
+  2441→              Cancel
+  2442→            </Button>
+  2443→            <Button type="submit" disabled={saving}>
+  2444→              {saving ? (
+  2445→                <>
+  2446→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  2447→                  Saving...
+  2448→                </>
+  2449→              ) : (
+  2450→                <>
+  2451→                  <CheckCircle2 className="h-4 w-4 mr-1" />
+  2452→                  {isEdit ? "Save Changes" : "Add Step"}
+  2453→                </>
+  2454→              )}
+  2455→            </Button>
+  2456→          </DialogFooter>
+  2457→        </form>
+  2458→      </DialogContent>
+  2459→    </Dialog>
+  2460→  );
+  2461→}
+  2462→
+  2463→// ─────────────────────────────────────────────────────────
+  2464→// Field helper
+  2465→// ─────────────────────────────────────────────────────────
+  2466→function Field({
+  2467→  label,
+  2468→  required,
+  2469→  children,
+  2470→}: {
+  2471→  label: string;
+  2472→  required?: boolean;
+  2473→  children: React.ReactNode;
+  2474→}) {
+  2475→  return (
+  2476→    <div className="space-y-1.5">
+  2477→      <Label className="text-xs text-muted-foreground">
+  2478→        {label}
+  2479→        {required && <span className="text-red-400 ml-0.5">*</span>}
+  2480→      </Label>
+  2481→      {children}
+  2482→    </div>
+  2483→  );
+  2484→}
+  2485→

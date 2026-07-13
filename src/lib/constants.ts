@@ -256,6 +256,7 @@ export function duplicateTypeColor(type: string): string {
 }
 
 // ─── Project Types & Financial Means ───
+// NOTE: FINANCIAL_MEANS + financialMeanColor are declared further below (updated section).
 export const PROJECT_TYPES = [
   "New Construction",
   "Continue",
@@ -263,13 +264,6 @@ export const PROJECT_TYPES = [
   "Maintenance",
   "General Requirement",
   "Contractual Job",
-] as const;
-
-export const FINANCIAL_MEANS = [
-  "Vote",
-  "Malima Fund",
-  "Non-Public Fund",
-  "Contractual",
 ] as const;
 
 export function projectTypeColor(type: string): string {
@@ -285,21 +279,6 @@ export function projectTypeColor(type: string): string {
     case "General Requirement":
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
     case "Contractual Job":
-      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
-    default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
-  }
-}
-
-export function financialMeanColor(mean: string): string {
-  switch (mean) {
-    case "Vote":
-      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
-    case "Malima Fund":
-      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
-    case "Non-Public Fund":
-      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
-    case "Contractual":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
@@ -395,6 +374,72 @@ export function userRoleColor(role: string): string {
       return "bg-violet-500/15 text-violet-400 border-violet-500/30";
     case "Viewer":
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Roles & Access Permissions Matrix ───
+export interface RolePermission {
+  module: string;
+  admin: string;
+  manager: string;
+  officer: string;
+  clerk: string;
+  viewer: string;
+}
+
+export const ROLE_PERMISSIONS: RolePermission[] = [
+  { module: "Dashboard", admin: "Full", manager: "Full", officer: "View", clerk: "View", viewer: "View" },
+  { module: "Projects", admin: "Full", manager: "Full", officer: "Edit", clerk: "Create/Edit Files", viewer: "View" },
+  { module: "Procurement Files", admin: "Full", manager: "Full", officer: "Edit", clerk: "Create/Edit", viewer: "View" },
+  { module: "Store Management", admin: "Full", manager: "Edit", officer: "View", clerk: "Create/Edit Items", viewer: "View" },
+  { module: "Rate Finder", admin: "Full", manager: "Edit", officer: "View", clerk: "View", viewer: "View" },
+  { module: "Collection", admin: "Full", manager: "Full", officer: "Edit", clerk: "Create/Edit", viewer: "View" },
+  { module: "Stakeholders", admin: "Full", manager: "Edit", officer: "View", clerk: "View", viewer: "View" },
+  { module: "Settings", admin: "Full", manager: "View", officer: "—", clerk: "—", viewer: "—" },
+];
+
+export function permissionColor(perm: string): string {
+  if (perm === "Full") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+  if (perm.includes("Edit") || perm.includes("Create")) return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+  if (perm === "View") return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  return "bg-muted text-muted-foreground border-border";
+}
+
+// ─── Votes ───
+export const VOTE_TYPES = ["Capital", "Recurring"] as const;
+
+export function voteTypeColor(type: string): string {
+  switch (type) {
+    case "Capital":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Recurring":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Financial Means (updated) ───
+export const FINANCIAL_MEANS = [
+  "Vote/Funds",
+  "Malima Fund",
+  "Non-Public Fund",
+  "Contractual",
+] as const;
+
+export function financialMeanColor(mean: string): string {
+  switch (mean) {
+    case "Vote/Funds":
+    case "Vote":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Malima Fund":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Non-Public Fund":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "Contractual":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   }

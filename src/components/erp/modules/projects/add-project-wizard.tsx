@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef } from "react";
-import { apiRequest } from "@/lib/use-fetch";
+import { apiRequest, useFetch } from "@/lib/use-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,8 @@ import {
   FINANCIAL_MEANS,
   projectTypeColor,
   financialMeanColor,
+  voteTypeColor,
+  formatCurrency,
 } from "@/lib/constants";
 import { EstimateItemsTable } from "./estimate-items";
 import {
@@ -44,8 +46,22 @@ import {
   Upload,
   AlertCircle,
   Info,
+  Vote,
+  Pencil,
+  ChevronLeft,
+  Landmark,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface Vote {
+  id: string;
+  voteNumber: string;
+  description: string;
+  voteType: string;
+  allocation: number;
+  financialYear: string | null;
+  active: boolean;
+}
 
 interface EstimateRow {
   itemName: string;
@@ -70,6 +86,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
+  const [customVoteNumber, setCustomVoteNumber] = useState(false);
+  const [selectedVoteId, setSelectedVoteId] = useState("");
+  const { data: votes } = useFetch<Vote[]>("/api/votes");
 
   const [form, setForm] = useState({
     name: "",
@@ -82,7 +101,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     benefactor: "", // replaces Department
     reference: "", // manual text — how vote allocated
     projectType: "New Construction",
-    financialMean: "Vote",
+    financialMean: "Vote/Funds",
     projectOfficer: "",
     status: "Active",
     description: "",
@@ -90,6 +109,36 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const [estimateRows, setEstimateRows] = useState<EstimateRow[]>([
     { itemName: "", qty: "", unit: "NOS", estimateCost: "" },
   ]);
+
+  const selectedVote = votes?.find((v) => v.id === selectedVoteId);
+
+  const handleVoteSelect = (id: string) => {
+    setSelectedVoteId(id);
+    const v = votes?.find((vt) => vt.id === id);
+    if (v) {
+      setForm((prev) => ({
+        ...prev,
+        voteNumber: v.voteNumber,
+        voteAllocation: v.allocation ? String(v.allocation) : prev.voteAllocation,
+      }));
+    }
+  };
+
+  const handleFinancialMeanChange = (v: string) => {
+    setForm((prev) => ({ ...prev, financialMean: v, voteNumber: "" }));
+    setCustomVoteNumber(false);
+    setSelectedVoteId("");
+  };
+
+  const isVoteFunds = form.financialMean === "Vote/Funds";
+  const isNonVote = !isVoteFunds;
+  const nonVotePlaceholder = form.financialMean === "Contractual" ? "CONTRACTUAL" : "NON-NAVAL";
+  const nonVoteHint =
+    form.financialMean === "Contractual"
+      ? "Contractual funding — Vote Number should be 'CONTRACTUAL' or the ARO reference."
+      : form.financialMean === "Malima Fund"
+      ? "Malima Fund — Vote Number can be 'NON-NAVAL' or the Malima reference number."
+      : "Non-Public Fund — Vote Number can be 'NON-NAVAL' or the fund reference.";
 
   const addRow = () =>
     setEstimateRows([...estimateRows, { itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
@@ -103,8 +152,6 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     (r) => r.itemName.trim() && (Number(r.qty) > 0 || Number(r.estimateCost) > 0)
   );
   const hasValidEstimate = validEstimateRows.length > 0;
-
-  const isNonVote = form.financialMean && form.financialMean !== "Vote";
 
   const downloadTemplate = () => {
     const header = "ItemName,Qty,Unit,EstimateCost";
@@ -274,10 +321,12 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       setForm({
         name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
         startDate: "", endDate: "", benefactor: "", reference: "",
-        projectType: "New Construction", financialMean: "Vote",
+        projectType: "New Construction", financialMean: "Vote/Funds",
         projectOfficer: "", status: "Active", description: "",
       });
       setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+      setCustomVoteNumber(false);
+      setSelectedVoteId("");
     }
   };
 
@@ -318,19 +367,100 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   <Label>Project Name *</Label>
                   <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
                 </div>
+
+                {/* Vote Number — conditional UI based on Financial Mean */}
                 <div className="space-y-1.5">
-                  <Label>Vote Number *</Label>
-                  <Input
-                    value={form.voteNumber}
-                    onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
-                    placeholder={isNonVote ? "NON-NAVAL or CONTRACTUAL" : "e.g. V-2025-001"}
-                    className="bg-background border-border"
-                  />
-                  {isNonVote && (
-                    <p className="text-[11px] text-amber-400 flex items-start gap-1">
-                      <Info className="h-3 w-3 mt-0.5 shrink-0" />
-                      Non-Vote funding — Vote Number can be &apos;NON-NAVAL&apos; or &apos;CONTRACTUAL&apos;
-                    </p>
+                  <Label className="flex items-center gap-1.5">
+                    <Vote className="h-3.5 w-3.5 text-primary" />
+                    Vote Number *
+                  </Label>
+                  {isVoteFunds && !customVoteNumber ? (
+                    <>
+                      <Select value={selectedVoteId} onValueChange={handleVoteSelect}>
+                        <SelectTrigger className="bg-background border-border">
+                          <SelectValue placeholder="Select a vote from the list…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {votes && votes.length > 0 ? (
+                            votes.map((v) => (
+                              <SelectItem key={v.id} value={v.id}>
+                                <span className="font-mono">{v.voteNumber}</span> — {v.description} ({v.voteType})
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="_none" disabled>No votes available</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      {selectedVote ? (
+                        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                          <CustomBadge className={cn("border", voteTypeColor(selectedVote.voteType))}>
+                            {selectedVote.voteType}
+                          </CustomBadge>
+                          {selectedVote.allocation > 0 && (
+                            <span className="text-[11px] text-muted-foreground">
+                              Allocation: {formatCurrency(selectedVote.allocation)}
+                            </span>
+                          )}
+                          {selectedVote.financialYear && (
+                            <span className="text-[11px] text-muted-foreground">
+                              · FY: {selectedVote.financialYear}
+                            </span>
+                          )}
+                          {!selectedVote.active && (
+                            <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">Inactive</CustomBadge>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                          <Info className="h-3 w-3 mt-0.5 shrink-0" />
+                          Capital votes fund one-time construction. Recurring votes fund annual maintenance.
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomVoteNumber(true);
+                          setSelectedVoteId("");
+                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+                        }}
+                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+                      >
+                        <Pencil className="h-3 w-3" /> Enter custom vote number
+                      </button>
+                    </>
+                  ) : isVoteFunds && customVoteNumber ? (
+                    <>
+                      <Input
+                        value={form.voteNumber}
+                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+                        placeholder="e.g. 223-1-01-2104"
+                        className="bg-background border-border"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomVoteNumber(false);
+                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+                        }}
+                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+                      >
+                        <ChevronLeft className="h-3 w-3" /> Back to vote list
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        value={form.voteNumber}
+                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+                        placeholder={nonVotePlaceholder}
+                        className="bg-background border-border"
+                      />
+                      <p className="text-[11px] text-amber-400 flex items-start gap-1">
+                        <Landmark className="h-3 w-3 mt-0.5 shrink-0" />
+                        {nonVoteHint}
+                      </p>
+                    </>
                   )}
                 </div>
 
@@ -357,7 +487,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                 {/* Financial Mean */}
                 <div className="space-y-1.5">
                   <Label>Financial Mean *</Label>
-                  <Select value={form.financialMean} onValueChange={(v) => setForm({ ...form, financialMean: v })}>
+                  <Select value={form.financialMean} onValueChange={handleFinancialMeanChange}>
                     <SelectTrigger className="bg-background border-border">
                       <SelectValue />
                     </SelectTrigger>

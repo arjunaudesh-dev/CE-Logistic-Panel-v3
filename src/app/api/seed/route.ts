@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { hashPassword } from "@/lib/auth";
 
 // Seeds the database with realistic dockyard sample data
 export async function POST() {
@@ -33,6 +34,8 @@ export async function POST() {
     await db.areaStoreRecord.deleteMany();
     await db.userProfile.deleteMany();
     await db.storeSetting.deleteMany();
+    await db.vote.deleteMany();
+    await db.navyListImport.deleteMany();
     await db.project.deleteMany();
 
     // ── Projects (Real Vote Data) ──
@@ -761,13 +764,25 @@ export async function POST() {
       ],
     });
 
-    // ── User Profiles ──
+    // ── User Profiles (with passwords for authentication) ──
+    const adminHash = hashPassword("admin123");
     await db.userProfile.createMany({
       data: [
-        { username: "rperera", displayName: "Cdr. R. Perera", email: "rperera@navy.lk", role: "Admin", department: "CSLOG" },
-        { username: "mfernando", displayName: "Lt. M. Fernando", email: "mfernando@navy.lk", role: "Officer", department: "CSLOG" },
-        { username: "pbandara", displayName: "PO Bandara", email: "pbandara@navy.lk", role: "Clerk", department: "CSLOG" },
-        { username: "tjaya", displayName: "Capt. T. Jayasuriya", email: "tjaya@navy.lk", role: "Manager", department: "CE" },
+        { username: "rperera", displayName: "Cdr. R. Perera", email: "rperera@navy.lk", role: "Admin", department: "CSLOG", passwordHash: adminHash },
+        { username: "mfernando", displayName: "Lt. M. Fernando", email: "mfernando@navy.lk", role: "Officer", department: "CSLOG", passwordHash: hashPassword("officer123") },
+        { username: "pbandara", displayName: "PO Bandara", email: "pbandara@navy.lk", role: "Clerk", department: "CSLOG", passwordHash: hashPassword("clerk123") },
+        { username: "tjaya", displayName: "Capt. T. Jayasuriya", email: "tjaya@navy.lk", role: "Manager", department: "CE", passwordHash: hashPassword("manager123") },
+      ],
+    });
+
+    // ── Votes (Vote/Funds management) ──
+    await db.vote.createMany({
+      data: [
+        { voteNumber: "223-1-01-2104", description: "New Construction", voteType: "Capital", allocation: 292000000, financialYear: "2025" },
+        { voteNumber: "223-1-01-2001", description: "Renovation", voteType: "Capital", allocation: 85000000, financialYear: "2025" },
+        { voteNumber: "223-1-01-2506", description: "Infrastructure Development", voteType: "Capital", allocation: 250000000, financialYear: "2025" },
+        { voteNumber: "223-1-01-1303", description: "Maintenance", voteType: "Recurring", allocation: 18000000, financialYear: "2025" },
+        { voteNumber: "223-1-01-2103", description: "General Requirement (Equipment)", voteType: "Capital", allocation: 75000000, financialYear: "2026" },
       ],
     });
 
@@ -781,6 +796,19 @@ export async function POST() {
         { storeName: "Paint Area Store", storeType: "AreaStore", responsiblePerson: "PO Bandara", location: "CSLOG Paint Bay" },
         { storeName: "Oil & Lubricant Area Store", storeType: "AreaStore", responsiblePerson: "LS Silva", location: "CSLOG Oil Bay" },
         { storeName: "Ready-Use Stores", storeType: "Ready-Use", responsiblePerson: "LS Silva", location: "Dockyard RU" },
+      ],
+    });
+
+    // ── Navy List (officers seniority) ──
+    await db.navyListImport.createMany({
+      data: [
+        { name: "Capt. T. Jayasuriya", rank: "Captain", svcNumber: "SVC/1111", appointment: "CCED(E)", seniority: 1, department: "CE", category: "CCED Officer" },
+        { name: "Cdr. R. Perera", rank: "Commander", svcNumber: "SVC/1234", appointment: "CSLOG", seniority: 2, department: "CSLOG", category: "CSLOG Officer" },
+        { name: "Lt. Cdr. A. Wickrama", rank: "Lt. Commander", svcNumber: "SVC/2222", appointment: "CCEO(E)", seniority: 3, department: "CE", category: "CCED Officer" },
+        { name: "Lt. Cdr. K. Silva", rank: "Lt. Commander", svcNumber: "SVC/3456", appointment: "ASO(E)", seniority: 4, department: "CSLOG", category: "CSLOG Officer" },
+        { name: "Lt. M. Fernando", rank: "Lieutenant", svcNumber: "SVC/2345", appointment: "CLOGD", seniority: 5, department: "CSLOG", category: "CSLOG Officer" },
+        { name: "Lt. D. Rajapaksa", rank: "Lieutenant", svcNumber: "SVC/3333", appointment: "SCE(M)", seniority: 6, department: "CE", category: "CCED Officer" },
+        { name: "Lt. N. Gunawardena", rank: "Lieutenant", svcNumber: "SVC/4444", appointment: "SCE(P&P)", seniority: 7, department: "CE", category: "CCED Officer" },
       ],
     });
 

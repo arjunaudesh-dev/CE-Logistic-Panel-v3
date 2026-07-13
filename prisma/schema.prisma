@@ -518,9 +518,36 @@ model UserProfile {
   role        String   @default("Officer") // Admin | Manager | Officer | Clerk | Viewer
   stakeholderId String? // link to Stakeholder
   department  String?
+  passwordHash String?  // bcrypt-style hash (simple hash for demo)
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── VOTES (Settings — Vote/Funds management) ─────────────────────────
+model Vote {
+  id          String   @id @default(cuid())
+  voteNumber  String   @unique
+  description String
+  voteType    String   @default("Capital") // Capital | Recurring
+  allocation  Float    @default(0)
+  financialYear String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── NAVY LIST IMPORT (Stakeholders seniority) ─────────────────────────
+model NavyListImport {
+  id          String   @id @default(cuid())
+  name        String
+  rank        String?
+  svcNumber   String?
+  appointment String?
+  seniority   Int      @default(999)
+  department  String?
+  category    String?
+  importedAt  DateTime @default(now())
 }
 
 // ───────────────────────── STORE MANAGEMENT SETTINGS ─────────────────────────

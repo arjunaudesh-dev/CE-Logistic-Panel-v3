@@ -94,6 +94,10 @@ import {
   Store,
   Medal,
   UserCircle,
+  Upload,
+  Download,
+  FileUp,
+  Ship,
 } from "lucide-react";
 import {
   BarChart,
@@ -187,6 +191,18 @@ interface Supplier {
   ratingCount: number;
 }
 
+interface NavyListRecord {
+  id: string;
+  name: string;
+  rank: string | null;
+  svcNumber: string | null;
+  appointment: string | null;
+  seniority: number;
+  department: string | null;
+  category: string | null;
+  importedAt: string;
+}
+
 // ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
@@ -275,6 +291,123 @@ function resolveCategory(p: {
 /** Whether a category is a sailor category (for table column display). */
 function isSailorCategory(cat: string): boolean {
   return cat === "CCED Sailor" || cat === "CSLOG Sailor";
+}
+
+/** Whether a stakeholder's seniority is considered "unset" (null or 999 default). */
+function isUnranked(seniority: number | null | undefined): boolean {
+  return seniority == null || seniority === 999;
+}
+
+/** Minimal RFC-4180-aware CSV parser: handles quoted fields, "" escape, CRLF. */
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let current: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+    } else {
+      if (c === '"') {
+        inQuotes = true;
+      } else if (c === ",") {
+        current.push(field);
+        field = "";
+      } else if (c === "\n") {
+        current.push(field);
+        rows.push(current);
+        current = [];
+        field = "";
+      } else if (c === "\r") {
+        // skip — handled with \n
+      } else {
+        field += c;
+      }
+    }
+  }
+  // Trailing field/row (if file doesn't end with newline)
+  if (field.length > 0 || current.length > 0) {
+    current.push(field);
+    rows.push(current);
+  }
+  return rows;
+}
+
+/** Quote a CSV cell per RFC 4180 (quotes cell if it contains comma, quote, or newline). */
+function csvCell(value: string | null | undefined): string {
+  const v = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(v)) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
+}
+
+/** Convert an array of objects into a CSV string with a header row. */
+function toCSV(rows: Record<string, unknown>[], headers: string[]): string {
+  const lines = [headers.map(csvCell).join(",")];
+  for (const r of rows) {
+    lines.push(headers.map((h) => csvCell(r[h] as string | null | undefined)).join(","));
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Trigger a CSV file download in the browser. */
+function downloadCSV(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Columns of the Navy List CSV template. */
+const NAVY_LIST_CSV_COLUMNS = [
+  "Name",
+  "Rank",
+  "SVCNumber",
+  "Appointment",
+  "Seniority",
+  "Department",
+  "Category",
+] as const;
+
+/** Build a downloadable CSV template for Navy List import. */
+function buildNavyListTemplate(): string {
+  const sampleRows: Record<string, string>[] = [
+    {
+      Name: "Cdr. R. Perera",
+      Rank: "Commander",
+      SVCNumber: "SVC/1001",
+      Appointment: "CSLOG",
+      Seniority: "1",
+      Department: "CSLOG",
+      Category: "CSLOG Officer",
+    },
+    {
+      Name: "Lt. M. Fernando",
+      Rank: "Lieutenant",
+      SVCNumber: "SVC/1042",
+      Appointment: "AOE",
+      Seniority: "4",
+      Department: "CE",
+      Category: "Officer-in-Area",
+    },
+  ];
+  return toCSV(sampleRows, [...NAVY_LIST_CSV_COLUMNS]);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -609,6 +742,12 @@ function OfficersSailorsTab() {
         </div>
       )}
 
+      {/* Navy List — officer seniority management */}
+      <NavyListSection
+        stakeholders={list}
+        onStakeholdersRefresh={refresh}
+      />
+
       {/* Add / Edit dialog */}
       {addOpen && (
         <StakeholderFormDialog
@@ -797,9 +936,24 @@ function CategorySection({
                       <User className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="font-medium text-foreground truncate">
-                        {p.name}
-                      </p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-medium text-foreground truncate">
+                          {p.name}
+                        </p>
+                        {!isSailor && (
+                          <CustomBadge
+                            className={cn(
+                              "border",
+                              isUnranked(p.seniority)
+                                ? "bg-muted text-muted-foreground border-border"
+                                : "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                            )}
+                          >
+                            <Medal className="h-3 w-3 mr-1" />
+                            {isUnranked(p.seniority) ? "Unranked" : `#${p.seniority}`}
+                          </CustomBadge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">{p.role}</p>
                     </div>
                   </div>
@@ -840,13 +994,15 @@ function CategorySection({
                   </>
                 ) : (
                   <TableCell>
-                    {p.seniority != null ? (
-                      <CustomBadge className="bg-secondary/70 text-foreground border-border">
+                    {isUnranked(p.seniority) ? (
+                      <CustomBadge className="bg-muted text-muted-foreground border-border">
+                        Unranked
+                      </CustomBadge>
+                    ) : (
+                      <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
                         <Medal className="h-3 w-3 mr-1" />
                         #{p.seniority}
                       </CustomBadge>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
                 )}
@@ -1367,9 +1523,9 @@ function StakeholderViewDialog({
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Seniority (Navy List)</p>
                   <p className="text-sm text-foreground">
-                    {s.seniority != null
-                      ? `#${s.seniority} (lower = more senior)`
-                      : "—"}
+                    {isUnranked(s.seniority)
+                      ? "Unranked"
+                      : `#${s.seniority} (lower = more senior)`}
                   </p>
                 </div>
               </div>
@@ -3223,5 +3379,700 @@ function Field({
       </Label>
       {children}
     </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// Navy List — Officer Seniority Management
+// ═════════════════════════════════════════════════════════
+interface ParsedNavyRecord {
+  name: string;
+  rank: string | null;
+  svcNumber: string | null;
+  appointment: string | null;
+  seniority: number;
+  department: string | null;
+  category: string | null;
+}
+
+function NavyListSection({
+  stakeholders,
+  onStakeholdersRefresh,
+}: {
+  stakeholders: Stakeholder[] | undefined;
+  onStakeholdersRefresh: () => void;
+}) {
+  const {
+    data: navyList,
+    loading: nlLoading,
+    error: nlError,
+    refresh: nlRefresh,
+  } = useFetch<NavyListRecord[]>("/api/navy-list");
+  const { toast } = useToast();
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const count = navyList?.length ?? 0;
+
+  // Build a lower-cased set of stakeholder names for quick "is this officer
+  // already in the directory" lookups (used for the upload summary).
+  const stakeholderNames = useMemo(() => {
+    const s = new Set<string>();
+    (stakeholders ?? []).forEach((p) => {
+      if (p.name) s.add(p.name.toLowerCase().trim());
+    });
+    return s;
+  }, [stakeholders]);
+
+  const officerCount = useMemo(
+    () =>
+      (stakeholders ?? []).filter(
+        (p) => !isSailorCategory(resolveCategory(p))
+      ).length,
+    [stakeholders]
+  );
+  const rankedCount = useMemo(
+    () =>
+      (stakeholders ?? []).filter(
+        (p) =>
+          !isSailorCategory(resolveCategory(p)) && !isUnranked(p.seniority)
+      ).length,
+    [stakeholders]
+  );
+
+  async function handleClear() {
+    setClearing(true);
+    const res = await apiRequest("/api/navy-list", "DELETE");
+    setClearing(false);
+    if (!res.ok) {
+      toast({
+        title: "Failed to clear",
+        description: res.error,
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: "Navy List cleared",
+      description:
+        "All Navy List records removed. Existing stakeholder seniorities remain unchanged.",
+    });
+    setClearOpen(false);
+    nlRefresh();
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0 bg-blue-500/15 text-blue-400 border border-blue-500/30">
+            <Ship className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">
+              Navy List (Officer Seniority)
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Upload the Navy List to define officer seniority. Officers will be
+              sorted by seniority (lower number = more senior) in each officer
+              section.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <CustomBadge className="bg-secondary/70 text-foreground border-border">
+            {nlLoading
+              ? "…"
+              : nlError
+                ? "error"
+                : `${count} ${count === 1 ? "record" : "records"}`}
+          </CustomBadge>
+          <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+            <Medal className="h-3 w-3 mr-1" />
+            {officerCount} officers · {rankedCount} ranked
+          </CustomBadge>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setUploadOpen(true)}
+            className="gap-1.5"
+          >
+            <Upload className="h-4 w-4" /> Upload Navy List
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setViewOpen(true)}
+            className="gap-1.5"
+            disabled={count === 0 && !nlLoading}
+          >
+            <Eye className="h-4 w-4" /> View Navy List
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setClearOpen(true)}
+            className="gap-1.5 hover:text-red-400 hover:border-red-500/40"
+            disabled={count === 0 && !nlLoading}
+          >
+            <Trash2 className="h-4 w-4" /> Clear
+          </Button>
+        </div>
+      </div>
+
+      {uploadOpen && (
+        <UploadNavyListDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          stakeholderNames={stakeholderNames}
+          onImported={() => {
+            setUploadOpen(false);
+            nlRefresh();
+            onStakeholdersRefresh();
+          }}
+        />
+      )}
+      {viewOpen && (
+        <ViewNavyListDialog open={viewOpen} onOpenChange={setViewOpen} />
+      )}
+
+      <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear entire Navy List?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove all{" "}
+              <span className="text-foreground font-medium">{count}</span>{" "}
+              Navy List records. Existing stakeholder seniorities will remain
+              on stakeholders until you re-import or edit them individually.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleClear();
+              }}
+              disabled={clearing}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {clearing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Clearing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-1.5" /> Clear All
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Upload Navy List Dialog (CSV template + file input + preview + import)
+// ─────────────────────────────────────────────────────────
+function UploadNavyListDialog({
+  open,
+  onOpenChange,
+  stakeholderNames,
+  onImported,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  stakeholderNames: Set<string>;
+  onImported: () => void;
+}) {
+  const { toast } = useToast();
+  const [parsed, setParsed] = useState<ParsedNavyRecord[]>([]);
+  const [fileName, setFileName] = useState<string>("");
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  function reset() {
+    setParsed([]);
+    setFileName("");
+    setParseError(null);
+    setImporting(false);
+    setProgress(0);
+  }
+
+  function handleOpenChange(o: boolean) {
+    if (!o) reset();
+    onOpenChange(o);
+  }
+
+  function handleDownloadTemplate() {
+    downloadCSV("navy-list-template.csv", buildNavyListTemplate());
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setParseError(null);
+    setParsed([]);
+    setProgress(0);
+    const f = e.target.files?.[0];
+    if (!f) {
+      setFileName("");
+      return;
+    }
+    setFileName(f.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result ?? "");
+        const rows = parseCSV(text);
+        if (rows.length < 2) {
+          setParseError("CSV has no data rows.");
+          return;
+        }
+        const header = rows[0].map((h) => h.trim().toLowerCase());
+        const colIdx: Partial<Record<(typeof NAVY_LIST_CSV_COLUMNS)[number], number>> =
+          {};
+        NAVY_LIST_CSV_COLUMNS.forEach((c) => {
+          const idx = header.indexOf(c.toLowerCase());
+          if (idx >= 0) colIdx[c] = idx;
+        });
+        if (colIdx.Name == null) {
+          setParseError(
+            'CSV must include a "Name" column. Use the template button to get the correct format.'
+          );
+          return;
+        }
+        const records: ParsedNavyRecord[] = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.every((c) => !c.trim())) continue;
+          const name = (row[colIdx.Name!] ?? "").trim();
+          if (!name) continue;
+          const seniorityRaw =
+            colIdx.Seniority != null ? (row[colIdx.Seniority] ?? "").trim() : "";
+          const seniorityNum = seniorityRaw ? Number(seniorityRaw) : NaN;
+          records.push({
+            name,
+            rank:
+              colIdx.Rank != null ? (row[colIdx.Rank] ?? "").trim() || null : null,
+            svcNumber:
+              colIdx.SVCNumber != null
+                ? (row[colIdx.SVCNumber] ?? "").trim() || null
+                : null,
+            appointment:
+              colIdx.Appointment != null
+                ? (row[colIdx.Appointment] ?? "").trim() || null
+                : null,
+            seniority:
+              !isNaN(seniorityNum) && seniorityNum > 0 ? seniorityNum : 999,
+            department:
+              colIdx.Department != null
+                ? (row[colIdx.Department] ?? "").trim() || null
+                : null,
+            category:
+              colIdx.Category != null
+                ? (row[colIdx.Category] ?? "").trim() || null
+                : null,
+          });
+        }
+        if (records.length === 0) {
+          setParseError("No valid rows found in the CSV.");
+          return;
+        }
+        setParsed(records);
+      } catch (err) {
+        setParseError(
+          "Failed to parse CSV: " +
+            (err instanceof Error ? err.message : String(err))
+        );
+      }
+    };
+    reader.onerror = () => {
+      setParseError("Failed to read file.");
+    };
+    reader.readAsText(f);
+  }
+
+  // Pre-compute how many parsed names match an existing stakeholder
+  // (so the success message can report "updated Y stakeholder seniorities").
+  const matchedStakeholderCount = useMemo(() => {
+    if (parsed.length === 0) return 0;
+    let n = 0;
+    for (const r of parsed) {
+      if (stakeholderNames.has(r.name.toLowerCase().trim())) n += 1;
+    }
+    return n;
+  }, [parsed, stakeholderNames]);
+
+  async function handleImport() {
+    if (parsed.length === 0) {
+      toast({ title: "No records to import", variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    setProgress(15);
+    const body = parsed.map((r) => ({
+      name: r.name,
+      rank: r.rank,
+      svcNumber: r.svcNumber,
+      appointment: r.appointment,
+      seniority: r.seniority,
+      department: r.department,
+      category: r.category,
+    }));
+    setProgress(45);
+    const res = await apiRequest("/api/navy-list", "POST", body);
+    setProgress(85);
+    if (!res.ok) {
+      setImporting(false);
+      setProgress(0);
+      toast({
+        title: "Import failed",
+        description: res.error,
+        variant: "destructive",
+      });
+      return;
+    }
+    setProgress(100);
+    setImporting(false);
+    toast({
+      title: "Navy List imported",
+      description: `Imported ${parsed.length} records, updated ${matchedStakeholderCount} stakeholder seniorit${
+        matchedStakeholderCount === 1 ? "y" : "ies"
+      }.`,
+    });
+    onImported();
+  }
+
+  const previewSorted = useMemo(
+    () => parsed.slice().sort((a, b) => a.seniority - b.seniority),
+    [parsed]
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ship className="h-5 w-5 text-blue-400" />
+            Upload Navy List
+          </DialogTitle>
+          <DialogDescription>
+            Bulk-import officer seniority records. The CSV must include at least
+            a &quot;Name&quot; column. Importing replaces the entire Navy List
+            and auto-updates stakeholder seniority where names match.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* Template + file input */}
+          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDownloadTemplate}
+              className="gap-1.5 shrink-0"
+            >
+              <Download className="h-4 w-4" /> Download CSV Template
+            </Button>
+            <div className="flex-1 min-w-0">
+              <Label className="text-xs text-muted-foreground mb-1.5 block">
+                CSV file (Name, Rank, SVCNumber, Appointment, Seniority,
+                Department, Category)
+              </Label>
+              <Input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleFile}
+                className="cursor-pointer"
+              />
+              {fileName && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Loaded: <span className="font-mono">{fileName}</span> —{" "}
+                  {parsed.length} valid row{parsed.length === 1 ? "" : "s"}
+                  {parsed.length > 0 && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <span className="text-emerald-400">
+                        {matchedStakeholderCount} match
+                        {matchedStakeholderCount === 1 ? "" : "es"} existing
+                        stakeholders
+                      </span>
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {parseError && (
+            <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-400">
+              {parseError}
+            </div>
+          )}
+
+          {/* Progress */}
+          {importing && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Importing…</span>
+                <span>{progress}%</span>
+              </div>
+              <Progress value={progress} className="h-1.5" />
+            </div>
+          )}
+
+          {/* Preview table */}
+          {parsed.length > 0 && !importing && (
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
+                <span>Preview ({parsed.length} records)</span>
+                <span className="text-[10px] uppercase tracking-wide">
+                  sorted by seniority
+                </span>
+              </div>
+              <div className="max-h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+                <Table>
+                  <TableHeader className="sticky top-0">
+                    <TableRow className="border-border bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="text-xs">#</TableHead>
+                      <TableHead className="text-xs">Name</TableHead>
+                      <TableHead className="text-xs">Rank</TableHead>
+                      <TableHead className="text-xs">SVC</TableHead>
+                      <TableHead className="text-xs">Appointment</TableHead>
+                      <TableHead className="text-xs text-right">Seniority</TableHead>
+                      <TableHead className="text-xs">Department</TableHead>
+                      <TableHead className="text-xs">Category</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewSorted.map((r, idx) => {
+                      const matched = stakeholderNames.has(
+                        r.name.toLowerCase().trim()
+                      );
+                      return (
+                        <TableRow key={idx} className="border-border">
+                          <TableCell className="text-xs text-muted-foreground">
+                            {idx + 1}
+                          </TableCell>
+                          <TableCell className="text-sm text-foreground font-medium">
+                            <span className="flex items-center gap-1.5">
+                              {r.name}
+                              {matched && (
+                                <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                              )}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.rank || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground font-mono">
+                            {r.svcNumber || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.appointment || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-right">
+                            {r.seniority === 999 ? (
+                              <span className="text-muted-foreground">
+                                Unranked
+                              </span>
+                            ) : (
+                              <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+                                <Medal className="h-3 w-3 mr-1" />#{r.seniority}
+                              </CustomBadge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.department || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.category || "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={importing}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleImport}
+            disabled={importing || parsed.length === 0}
+            className="gap-1.5"
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileUp className="h-4 w-4" />
+            )}
+            {importing
+              ? "Importing..."
+              : parsed.length > 0
+                ? `Import ${parsed.length} Record${parsed.length === 1 ? "" : "s"}`
+                : "Import"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// View Navy List Dialog (sorted table + Export CSV)
+// ─────────────────────────────────────────────────────────
+function ViewNavyListDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const {
+    data: navyList,
+    loading,
+    error,
+  } = useFetch<NavyListRecord[]>("/api/navy-list");
+
+  const sorted = useMemo(() => {
+    return (navyList ?? []).slice().sort((a, b) => {
+      if (a.seniority !== b.seniority) return a.seniority - b.seniority;
+      return a.name.localeCompare(b.name);
+    });
+  }, [navyList]);
+
+  function handleExportCSV() {
+    if (sorted.length === 0) return;
+    const rows = sorted.map((r) => ({
+      Name: r.name,
+      Rank: r.rank ?? "",
+      SVCNumber: r.svcNumber ?? "",
+      Appointment: r.appointment ?? "",
+      Seniority: String(r.seniority),
+      Department: r.department ?? "",
+      Category: r.category ?? "",
+    }));
+    const csv = toCSV(rows, [...NAVY_LIST_CSV_COLUMNS]);
+    downloadCSV(
+      `navy-list-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ship className="h-5 w-5 text-blue-400" />
+            Navy List
+          </DialogTitle>
+          <DialogDescription>
+            Current Navy List records, sorted by seniority (lower = more
+            senior).
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CustomBadge className="bg-secondary/70 text-foreground border-border">
+            {loading ? "…" : `${sorted.length} ${sorted.length === 1 ? "record" : "records"}`}
+          </CustomBadge>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={sorted.length === 0}
+            className="gap-1.5"
+          >
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+        </div>
+        {loading ? (
+          <LoadingState label="Loading Navy List..." />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : sorted.length === 0 ? (
+          <EmptyState
+            icon={Ship}
+            title="Navy List is empty"
+            description="Upload a Navy List CSV to define officer seniority."
+          />
+        ) : (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="max-h-[55vh] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+              <Table>
+                <TableHeader className="sticky top-0">
+                  <TableRow className="border-border bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="text-xs">#</TableHead>
+                    <TableHead className="text-xs">Name</TableHead>
+                    <TableHead className="text-xs">Rank</TableHead>
+                    <TableHead className="text-xs">SVC</TableHead>
+                    <TableHead className="text-xs">Appointment</TableHead>
+                    <TableHead className="text-xs text-right">Seniority</TableHead>
+                    <TableHead className="text-xs">Department</TableHead>
+                    <TableHead className="text-xs">Category</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sorted.map((r, idx) => (
+                    <TableRow key={r.id} className="border-border">
+                      <TableCell className="text-xs text-muted-foreground">
+                        {idx + 1}
+                      </TableCell>
+                      <TableCell className="text-sm text-foreground font-medium">
+                        {r.name}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {r.rank || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground font-mono">
+                        {r.svcNumber || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {r.appointment || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-right">
+                        {r.seniority === 999 ? (
+                          <span className="text-muted-foreground">Unranked</span>
+                        ) : (
+                          <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+                            <Medal className="h-3 w-3 mr-1" />#{r.seniority}
+                          </CustomBadge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {r.department || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {r.category || "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

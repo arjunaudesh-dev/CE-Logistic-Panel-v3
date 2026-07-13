@@ -54,6 +54,10 @@ import {
   FILE_CATEGORIES,
   QC_LEVELS,
   qcLevelColor,
+  AREA_STORES,
+  AREA_STORE_CATEGORIES,
+  NAV_REFERENCES,
+  navRefColor,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -82,6 +86,9 @@ import {
   AlertCircle,
   Star,
   X,
+  Send,
+  Store,
+  MapPin,
 } from "lucide-react";
 import {
   LineChart,
@@ -166,6 +173,26 @@ interface StoreItem {
   totalCost?: number;
   supplier?: string | null;
   itemCode?: string | null;
+}
+
+interface AreaStoreRecord {
+  id: string;
+  storeName: string;
+  itemCode: string | null;
+  itemName: string;
+  category: string;
+  unit: string;
+  qty: number;
+  unitCost: number;
+  totalCost: number;
+  recordType: string; // "Oncharge" | "OffCharge"
+  navReference: string | null;
+  qcInspectionId: string | null;
+  fileNumber: string | null;
+  location: string | null;
+  date: string | null;
+  remarks: string | null;
+  createdAt: string;
 }
 
 interface QCInspection {
@@ -309,6 +336,30 @@ function supplierRatingLabel(avg: number): string {
   if (avg >= 2.5) return "Satisfactory";
   if (avg >= 1.5) return "Below Average";
   return "Fail";
+}
+
+/**
+ * Suggest an area store based on the item's store category.
+ * Falls back to "General" when no mapping matches.
+ *   BMS / Plumbing      → BMS
+ *   Metal / Aluminium   → Metal
+ *   Paint               → Paint
+ *   Lubricant Oil       → Oil & Lubricant
+ *   Tools               → General
+ *   (default)           → General
+ */
+function suggestStoreForCategory(category: string | null | undefined): string {
+  if (!category) return "General";
+  const cat = category.trim();
+  for (const [store, cats] of Object.entries(AREA_STORE_CATEGORIES)) {
+    if (cats.includes(cat)) return store;
+  }
+  return "General";
+}
+
+/** Whether a QC level is considered "passing" (eligible for transfer to a store). */
+function isPassingQc(level: string): boolean {
+  return level === "Satisfactory" || level === "Good" || level === "Excellent";
 }
 
 // Reference Type options for QC Inspection dialog
@@ -2567,10 +2618,17 @@ function QCInspectionTab() {
     error,
     refresh,
   } = useFetch<QCInspection[]>("/api/qc");
+  // Area store records (used to detect which inspections have already been
+  // transferred to a store, and to show a "Sent to {store}" badge on them).
+  const {
+    data: areaStoreRecords,
+    refresh: refreshAreaStores,
+  } = useFetch<AreaStoreRecord[]>("/api/area-stores");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<QCInspection | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [sendTarget, setSendTarget] = useState<QCInspection | null>(null);
   const { toast } = useToast();
 
   const total = inspections?.length ?? 0;
@@ -2579,6 +2637,48 @@ function QCInspectionTab() {
   ).length;
   const failed = (inspections ?? []).filter((i) => i.qcLevel === "Fail").length;
   const passRate = total > 0 ? (passed / total) * 100 : 0;
+
+  // Build a lookup of "transferred" area store records keyed by
+  // (a) qcInspectionId — direct link,
+  // (b) lowercased itemName — fallback when no qcInspectionId was set,
+  // (c) fileNumber — when one was captured in the send dialog.
+  // Each entry stores the most recent matching AreaStoreRecord so the UI can
+  // show "Sent to {store}" without re-fetching.
+  const transferredByInspection = useMemo(() => {
+    const map = new Map<string, AreaStoreRecord>();
+    (areaStoreRecords ?? []).forEach((r) => {
+      if (r.qcInspectionId) {
+        // Keep the most recent
+        const existing = map.get(r.qcInspectionId);
+        if (!existing || r.createdAt > existing.createdAt) {
+          map.set(r.qcInspectionId, r);
+        }
+      }
+    });
+    return map;
+  }, [areaStoreRecords]);
+
+  const transferredByName = useMemo(() => {
+    const map = new Map<string, AreaStoreRecord>();
+    (areaStoreRecords ?? []).forEach((r) => {
+      const key = (r.itemName || "").toLowerCase().trim();
+      if (!key) return;
+      const existing = map.get(key);
+      if (!existing || r.createdAt > existing.createdAt) {
+        map.set(key, r);
+      }
+    });
+    return map;
+  }, [areaStoreRecords]);
+
+  // Find the area store record that this inspection was transferred to (if any).
+  function transferredRecordFor(i: QCInspection): AreaStoreRecord | null {
+    if (!i) return null;
+    const byId = transferredByInspection.get(i.id);
+    if (byId) return byId;
+    const byName = transferredByName.get((i.itemName || "").toLowerCase().trim());
+    return byName ?? null;
+  }
 
   // Supplier rating aggregation
   const supplierRatings = useMemo(() => {
@@ -2715,75 +2815,120 @@ function QCInspectionTab() {
                   <TableHead className="text-muted-foreground">
                     Remarks
                   </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Area Store
+                  </TableHead>
                   <TableHead className="text-muted-foreground text-right">
                     Actions
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {inspections.map((i) => (
-                  <TableRow key={i.id} className="border-border">
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                      {formatDateTime(i.inspectedAt)}
-                    </TableCell>
-                    <TableCell className="text-foreground">
-                      <div className="text-[10px] uppercase text-muted-foreground tracking-wide">
-                        {i.refType}
-                      </div>
-                      <div className="font-medium truncate max-w-[220px]">
-                        {i.itemName}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-foreground whitespace-nowrap">
-                      {i.supplier || "—"}
-                    </TableCell>
-                    <TableCell className="text-foreground text-right whitespace-nowrap">
-                      {formatNumber(i.qty)}
-                    </TableCell>
-                    <TableCell>
-                      <CustomBadge
-                        className={cn("border", qcLevelColor(i.qcLevel))}
-                      >
-                        {i.qcLevel}
-                      </CustomBadge>
-                    </TableCell>
-                    <TableCell className="text-foreground">
-                      <div className="text-sm">{i.qcOfficer || "—"}</div>
-                      {i.qcOfficerDetails && (
-                        <div className="text-xs text-muted-foreground">
-                          {i.qcOfficerDetails}
+                {inspections.map((i) => {
+                  const transferred = transferredRecordFor(i);
+                  const passing = isPassingQc(i.qcLevel);
+                  return (
+                    <TableRow key={i.id} className="border-border">
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        {formatDateTime(i.inspectedAt)}
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        <div className="text-[10px] uppercase text-muted-foreground tracking-wide">
+                          {i.refType}
                         </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-[260px]">
-                      <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
-                        {i.remarks || "—"}
-                      </p>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0"
-                          onClick={() => openEdit(i)}
-                          aria-label="Edit inspection"
+                        <div className="font-medium truncate max-w-[220px]">
+                          {i.itemName}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-foreground whitespace-nowrap">
+                        {i.supplier || "—"}
+                      </TableCell>
+                      <TableCell className="text-foreground text-right whitespace-nowrap">
+                        {formatNumber(i.qty)}
+                      </TableCell>
+                      <TableCell>
+                        <CustomBadge
+                          className={cn("border", qcLevelColor(i.qcLevel))}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0 hover:text-red-400"
-                          onClick={() => setDeleteId(i.id)}
-                          aria-label="Delete inspection"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {i.qcLevel}
+                        </CustomBadge>
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        <div className="text-sm">{i.qcOfficer || "—"}</div>
+                        {i.qcOfficerDetails && (
+                          <div className="text-xs text-muted-foreground">
+                            {i.qcOfficerDetails}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[260px]">
+                        <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
+                          {i.remarks || "—"}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        {transferred ? (
+                          <div className="flex flex-col gap-1">
+                            <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                              <Store className="h-3 w-3 mr-1" />
+                              Sent to {transferred.storeName}
+                            </CustomBadge>
+                            {transferred.navReference && (
+                              <CustomBadge
+                                className={cn(
+                                  "border",
+                                  navRefColor(transferred.navReference)
+                                )}
+                              >
+                                {transferred.navReference}
+                              </CustomBadge>
+                            )}
+                          </div>
+                        ) : passing ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 h-7 text-xs"
+                            onClick={() => setSendTarget(i)}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                            Send to Store
+                          </Button>
+                        ) : (
+                          <CustomBadge
+                            className="bg-red-500/10 text-red-400 border-red-500/30"
+                            title="Failed inspections cannot be transferred to a store"
+                          >
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Rejected — cannot transfer
+                          </CustomBadge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => openEdit(i)}
+                            aria-label="Edit inspection"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 hover:text-red-400"
+                            onClick={() => setDeleteId(i.id)}
+                            aria-label="Delete inspection"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -2865,6 +3010,24 @@ function QCInspectionTab() {
               title: editing ? "Inspection updated" : "Inspection recorded",
             });
             refresh();
+          }}
+        />
+      )}
+
+      {/* Send to Area Store dialog */}
+      {sendTarget && (
+        <SendToAreaStoreDialog
+          key={`send-${sendTarget.id}`}
+          open={!!sendTarget}
+          inspection={sendTarget}
+          onOpenChange={(o) => !o && setSendTarget(null)}
+          onSent={(storeName) => {
+            setSendTarget(null);
+            toast({
+              title: "Item sent to Area Store",
+              description: `Item sent to ${storeName} Area Store`,
+            });
+            refreshAreaStores();
           }}
         />
       )}
@@ -3252,6 +3415,434 @@ function QCInspectionDialog({
               : isEdit
               ? "Update Inspection"
               : "Record Inspection"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Send to Area Store Dialog — transfer a passing QCI item into an area store
+// ─────────────────────────────────────────────────────────
+function SendToAreaStoreDialog({
+  open,
+  onOpenChange,
+  inspection,
+  onSent,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  inspection: QCInspection;
+  onSent: (storeName: string) => void;
+}) {
+  const { toast } = useToast();
+  const { data: storeItems } = useFetch<StoreItem[]>("/api/stores");
+
+  // Look up the matching store item (by description, case-insensitive).
+  const matchedStoreItem = useMemo(() => {
+    if (!storeItems || !inspection.itemName) return null;
+    const target = inspection.itemName.toLowerCase().trim();
+    return (
+      storeItems.find((s) => (s.description || "").toLowerCase().trim() === target) ??
+      null
+    );
+  }, [storeItems, inspection.itemName]);
+
+  // Suggested area store derived from the matched store item's category.
+  const suggestedStore = useMemo(() => {
+    if (matchedStoreItem?.category) {
+      return suggestStoreForCategory(matchedStoreItem.category);
+    }
+    return "General";
+  }, [matchedStoreItem]);
+
+  // Suggested category for the new area store record (from store item or "General").
+  const suggestedCategory = useMemo(() => {
+    return matchedStoreItem?.category ?? "General";
+  }, [matchedStoreItem]);
+
+  // Suggested unit from store item or "NOS".
+  const suggestedUnit = useMemo(() => {
+    return matchedStoreItem?.unit ?? "NOS";
+  }, [matchedStoreItem]);
+
+  // Suggested unit cost from store item (0 when unknown).
+  const suggestedUnitCost = useMemo(() => {
+    return matchedStoreItem?.unitCost ?? 0;
+  }, [matchedStoreItem]);
+
+  // Suggested item code from store item.
+  const suggestedItemCode = useMemo(() => {
+    return matchedStoreItem?.itemCode ?? "";
+  }, [matchedStoreItem]);
+
+  // Form state (initialised once per inspection via the `key` prop on caller).
+  const [storeName, setStoreName] = useState<string>(suggestedStore);
+  const [itemCode, setItemCode] = useState<string>(suggestedItemCode);
+  const [itemName, setItemName] = useState<string>(inspection.itemName || "");
+  const [category, setCategory] = useState<string>(suggestedCategory);
+  const [unit, setUnit] = useState<string>(suggestedUnit);
+  const [qty, setQty] = useState<string>(
+    inspection.qty != null ? String(inspection.qty) : ""
+  );
+  const [unitCost, setUnitCost] = useState<string>(
+    suggestedUnitCost ? String(suggestedUnitCost) : ""
+  );
+  const [navReference, setNavReference] = useState<string>("NAV 255");
+  const [fileNumber, setFileNumber] = useState<string>("");
+  const [location, setLocation] = useState<string>(`${suggestedStore} Store`);
+  const [date, setDate] = useState<string>(todayISO());
+  const [remarks, setRemarks] = useState<string>(
+    "Transferred from QCI after inspection passed"
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  // Compute total cost live for the footer preview.
+  const totalCost = useMemo(() => {
+    const q = Number(qty) || 0;
+    const c = Number(unitCost) || 0;
+    return q * c;
+  }, [qty, unitCost]);
+
+  // Categories allowed for the currently-selected area store (per
+  // AREA_STORE_CATEGORIES), falling back to the full FILE_CATEGORIES list.
+  const allowedCategories = useMemo(() => {
+    const list = AREA_STORE_CATEGORIES[storeName] ?? FILE_CATEGORIES;
+    // De-duplicate while preserving order.
+    return Array.from(new Set(list));
+  }, [storeName]);
+
+  // When the user changes the area store, re-suggest category + location
+  // (only if they haven't been manually edited relative to the previous
+  // suggestion). Done in the change handler — no useEffect.
+  function handleStoreChange(next: string) {
+    setStoreName(next);
+    const nextCats = AREA_STORE_CATEGORIES[next] ?? FILE_CATEGORIES;
+    if (!nextCats.includes(category)) {
+      setCategory(nextCats[0] ?? "General");
+    }
+    setLocation(`${next} Store`);
+  }
+
+  async function handleSubmit() {
+    if (!storeName) {
+      toast({ title: "Area store required", variant: "destructive" });
+      return;
+    }
+    if (!itemName.trim()) {
+      toast({ title: "Item name required", variant: "destructive" });
+      return;
+    }
+    if (!qty.trim() || Number(qty) <= 0) {
+      toast({
+        title: "Quantity must be a positive number",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSubmitting(true);
+    const body = {
+      storeName,
+      itemCode: itemCode.trim() || null,
+      itemName: itemName.trim(),
+      category: category || "General",
+      unit: unit || "NOS",
+      qty: Number(qty) || 0,
+      unitCost: Number(unitCost) || 0,
+      recordType: "Oncharge",
+      navReference,
+      qcInspectionId: inspection.id,
+      fileNumber: fileNumber.trim() || null,
+      location: location.trim() || null,
+      date: date || todayISO(),
+      remarks: remarks.trim() || null,
+    };
+    const res = await apiRequest("/api/area-stores", "POST", body);
+    setSubmitting(false);
+    if (!res.ok) {
+      toast({
+        title: "Failed to send to store",
+        description: res.error,
+        variant: "destructive",
+      });
+      return;
+    }
+    onSent(storeName);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Send className="h-5 w-5 text-emerald-400" />
+            Send to Area Store
+          </DialogTitle>
+          <DialogDescription>
+            Transfer this passing QCI item into an area store as an{" "}
+            <span className="text-foreground font-medium">Oncharge</span> record
+            (NAV 255 — off-charge from shipping stores into the area store).
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Inspection summary */}
+        <div className="rounded-lg border border-border bg-muted/30 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div>
+            <p className="text-muted-foreground">Item</p>
+            <p className="text-foreground font-medium truncate">
+              {inspection.itemName || "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Qty</p>
+            <p className="text-foreground font-medium">
+              {formatNumber(inspection.qty)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">QC Level</p>
+            <CustomBadge className={cn("border", qcLevelColor(inspection.qcLevel))}>
+              {inspection.qcLevel}
+            </CustomBadge>
+          </div>
+          <div>
+            <p className="text-muted-foreground">QCI Officer</p>
+            <p className="text-foreground font-medium truncate">
+              {inspection.qcOfficer || "—"}
+            </p>
+          </div>
+        </div>
+
+        {/* Matched store item hint */}
+        {matchedStoreItem ? (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
+            <Store className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              Matched existing store item —{" "}
+              <span className="font-mono">
+                {matchedStoreItem.itemCode || "no code"}
+              </span>{" "}
+              · category{" "}
+              <span className="font-medium">{matchedStoreItem.category}</span> ·
+              unit cost {formatCurrency(matchedStoreItem.unitCost)}
+            </span>
+          </div>
+        ) : (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-300 flex items-center gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              No matching store item found — defaults applied. Verify the area
+              store and unit cost before sending.
+            </span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Area Store */}
+          <div className="space-y-1.5">
+            <Label>Area Store</Label>
+            <Select value={storeName} onValueChange={handleStoreChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select area store" />
+              </SelectTrigger>
+              <SelectContent>
+                {AREA_STORES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                    {s === suggestedStore ? " (suggested)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Item Code */}
+          <div className="space-y-1.5">
+            <Label>Item Code</Label>
+            <Input
+              value={itemCode}
+              onChange={(e) => setItemCode(e.target.value)}
+              placeholder="e.g. BMS-220"
+              className="font-mono"
+            />
+          </div>
+
+          {/* Item Name */}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Item Name</Label>
+            <Input
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              placeholder="Item name"
+            />
+          </div>
+
+          {/* Category */}
+          <div className="space-y-1.5">
+            <Label>Category</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {allowedCategories.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Unit */}
+          <div className="space-y-1.5">
+            <Label>Unit</Label>
+            <Select value={unit} onValueChange={setUnit}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["NOS", "KG", "LTR", "M", "MTR", "ROLL", "BOX", "SET", "PAIR", "BOTTLE", "GAL"].map(
+                  (u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  )
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Qty */}
+          <div className="space-y-1.5">
+            <Label>Qty</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+
+          {/* Unit Cost */}
+          <div className="space-y-1.5">
+            <Label>Unit Cost (Rs.)</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+
+          {/* NAV Reference */}
+          <div className="space-y-1.5">
+            <Label>NAV Reference</Label>
+            <Select value={navReference} onValueChange={setNavReference}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {NAV_REFERENCES.map((n) => (
+                  <SelectItem key={n} value={n}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* File Number */}
+          <div className="space-y-1.5">
+            <Label>File Number</Label>
+            <Input
+              value={fileNumber}
+              onChange={(e) => setFileNumber(e.target.value)}
+              placeholder="QCI file number"
+              className="font-mono"
+            />
+          </div>
+
+          {/* Location */}
+          <div className="space-y-1.5">
+            <Label>Location</Label>
+            <Input
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="e.g. BMS Store"
+            />
+          </div>
+
+          {/* Date */}
+          <div className="space-y-1.5">
+            <Label>Date</Label>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+
+          {/* Remarks */}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Remarks</Label>
+            <Textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={2}
+              placeholder="Remarks for the area store record"
+            />
+          </div>
+        </div>
+
+        {/* Total + record type chips */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+              Oncharge
+            </CustomBadge>
+            <CustomBadge
+              className={cn("border", navRefColor(navReference))}
+            >
+              {navReference}
+            </CustomBadge>
+            {matchedStoreItem && (
+              <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+                <Store className="h-3 w-3 mr-1" />
+                {matchedStoreItem.category}
+              </CustomBadge>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">Total Cost</p>
+            <p className="text-sm font-semibold text-foreground">
+              {formatCurrency(totalCost)}
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {submitting ? "Sending..." : `Send to ${storeName} Store`}
           </Button>
         </DialogFooter>
       </DialogContent>
