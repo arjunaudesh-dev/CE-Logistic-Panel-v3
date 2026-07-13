@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -52,6 +53,10 @@ import {
   X,
   FileSignature,
   Sparkles,
+  ArrowRight,
+  User,
+  UserCheck,
+  Hash,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,12 +89,27 @@ interface Estimate {
   items: { id: string; status: string; srNo: number; itemName: string }[];
 }
 
+interface ProcessStep {
+  id: string;
+  positionName: string;
+  defaultResponsiblePerson: string | null;
+  financialDelegationLevel: string | null;
+}
+
+interface ProcessFlow {
+  id: string;
+  name: string;
+  steps: ProcessStep[];
+}
+
 interface Props {
   project: Project;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onChanged: () => void;
 }
+
+type FileNumberFilter = "all" | "with" | "without";
 
 export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
   const { data: files, loading, refresh } = useFetch<ProjectFile[]>(
@@ -98,17 +118,34 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const { data: estimates, refresh: refreshEst } = useFetch<Estimate[]>(
     `/api/estimates?projectId=${project.id}`
   );
+  // Fetch process flows once to support the "Update Position" popup's default responsible person lookup
+  const { data: processFlows } = useFetch<ProcessFlow[]>(`/api/process-flows`);
   const [activeTab, setActiveTab] = useState<"raised" | "estimate">("raised");
   const [search, setSearch] = useState("");
   const [positionFilter, setPositionFilter] = useState("all");
+  const [fileNumberFilter, setFileNumberFilter] = useState<FileNumberFilter>("all");
   const [addOpen, setAddOpen] = useState(false);
-  const [editFile, setEditFile] = useState<ProjectFile | null>(null);
+  const [updateFile, setUpdateFile] = useState<ProjectFile | null>(null);
   const [logFile, setLogFile] = useState<ProjectFile | null>(null);
   const [allocOpen, setAllocOpen] = useState(false);
   const [activeEstimateId, setActiveEstimateId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<"createdAt" | "fileCost" | "prNumber">("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const { toast } = useToast();
+
+  // Build a lookup of positionName -> defaultResponsiblePerson across all flows.
+  // Multiple flows may define the same positionName; we keep the first non-empty match.
+  const positionToResponsible = useMemo(() => {
+    const map = new Map<string, string>();
+    processFlows?.forEach((flow) => {
+      flow.steps.forEach((step) => {
+        if (step.positionName && step.defaultResponsiblePerson && !map.has(step.positionName)) {
+          map.set(step.positionName, step.defaultResponsiblePerson);
+        }
+      });
+    });
+    return map;
+  }, [processFlows]);
 
   // Position summary
   const positionSummary = useMemo(() => {
@@ -133,7 +170,6 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
     });
     return list;
   }, [estimates]);
-  const pendingCost = 0; // approx cost fetched per-estimate in the table
   const initiatedCount = useMemo(
     () =>
       estimates?.reduce(
@@ -142,6 +178,13 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       ) ?? 0,
     [estimates]
   );
+
+  // File-number counts for the filter toggle
+  const fileNumberCounts = useMemo(() => {
+    const all = files?.length || 0;
+    const withFn = files?.filter((f) => f.fileNumber && f.fileNumber.trim()).length || 0;
+    return { all, with: withFn, without: all - withFn };
+  }, [files]);
 
   const filteredFiles = useMemo(() => {
     let list = files || [];
@@ -152,11 +195,17 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
           f.prNumber.toLowerCase().includes(q) ||
           f.itemCode.toLowerCase().includes(q) ||
           f.itemName.toLowerCase().includes(q) ||
-          (f.supplier || "").toLowerCase().includes(q)
+          (f.supplier || "").toLowerCase().includes(q) ||
+          (f.fileNumber || "").toLowerCase().includes(q)
       );
     }
     if (positionFilter !== "all") {
       list = list.filter((f) => f.presentPosition === positionFilter);
+    }
+    if (fileNumberFilter === "with") {
+      list = list.filter((f) => f.fileNumber && f.fileNumber.trim());
+    } else if (fileNumberFilter === "without") {
+      list = list.filter((f) => !f.fileNumber || !f.fileNumber.trim());
     }
     list = [...list].sort((a, b) => {
       let cmp = 0;
@@ -166,7 +215,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
-  }, [files, search, positionFilter, sortKey, sortDir]);
+  }, [files, search, positionFilter, fileNumberFilter, sortKey, sortDir]);
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -191,6 +240,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const exportExcel = () => {
     const rows = filteredFiles.map((f) => ({
       "PR Number": f.prNumber,
+      "File Number": f.fileNumber || "",
       "Item Code": f.itemCode,
       "Item Name": f.itemName,
       Unit: f.unit,
@@ -199,12 +249,13 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       "File Cost": f.fileCost,
       Supplier: f.supplier || "",
       "Present Position": f.presentPosition,
+      "Responsible Person": f.responsiblePerson || "",
       Category: f.fileCategory,
     }));
-    const headers = Object.keys(rows[0] || {});
+    const headers = Object.keys(rows[0] || { "PR Number": "" });
     const csv = [
       headers.join(","),
-      ...rows.map((r) => headers.map((h) => `"${(r as Record<string, unknown>)[h]}"`).join(",")),
+      ...rows.map((r) => headers.map((h) => `"${(r as Record<string, unknown>)[h] ?? ""}"`).join(",")),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -305,7 +356,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search PR, item, supplier..." className="pl-9 bg-background border-border" />
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search PR, file no, item, supplier..." className="pl-9 bg-background border-border" />
                 </div>
                 <Select value={positionFilter} onValueChange={setPositionFilter}>
                   <SelectTrigger className="w-[180px] bg-background border-border"><SelectValue placeholder="Position" /></SelectTrigger>
@@ -314,6 +365,24 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     {PRESENT_POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {/* File Number filter toggle */}
+                <div className="inline-flex rounded-md border border-border overflow-hidden bg-background">
+                  <FilterPill
+                    label={`All (${fileNumberCounts.all})`}
+                    active={fileNumberFilter === "all"}
+                    onClick={() => setFileNumberFilter("all")}
+                  />
+                  <FilterPill
+                    label={`With File No (${fileNumberCounts.with})`}
+                    active={fileNumberFilter === "with"}
+                    onClick={() => setFileNumberFilter("with")}
+                  />
+                  <FilterPill
+                    label={`Pending (${fileNumberCounts.without})`}
+                    active={fileNumberFilter === "without"}
+                    onClick={() => setFileNumberFilter("without")}
+                  />
+                </div>
                 <Button variant="outline" size="sm" onClick={exportExcel} className="gap-1.5"><Download className="h-4 w-4" /> Export</Button>
                 <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
               </div>
@@ -325,6 +394,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     <TableHeader>
                       <TableRow className="hover:bg-transparent border-border">
                         <SortTh label="PR Number" onClick={() => toggleSort("prNumber")} active={sortKey === "prNumber"} dir={sortDir} />
+                        <TableHead className="text-muted-foreground">File Number</TableHead>
                         <TableHead className="text-muted-foreground">Item Code</TableHead>
                         <TableHead className="text-muted-foreground">Item Name</TableHead>
                         <TableHead className="text-muted-foreground text-right">Qty</TableHead>
@@ -338,35 +408,63 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     </TableHeader>
                     <TableBody>
                       {loading ? (
-                        <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
+                        <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
                       ) : filteredFiles.length === 0 ? (
-                        <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No files found. Click "Add File" to create one.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No files found. Click &quot;Add File&quot; to create one.</TableCell></TableRow>
                       ) : (
-                        filteredFiles.map((f) => (
-                          <TableRow key={f.id} className="border-border cursor-pointer hover:bg-secondary/40" onClick={() => setLogFile(f)}>
-                            <TableCell className="font-mono text-xs text-foreground">{f.prNumber}</TableCell>
-                            <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
-                            <TableCell className="text-foreground">{f.itemName}</TableCell>
-                            <TableCell className="text-right">{f.qty} {f.unit}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(f.unitPrice)}</TableCell>
-                            <TableCell className="text-right font-medium text-foreground">{formatCurrency(f.fileCost)}</TableCell>
-                            <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
-                            <TableCell><PositionBadge position={f.presentPosition} /></TableCell>
-                            <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditFile(f)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => handleDelete(f)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        filteredFiles.map((f) => {
+                          const hasFileNumber = !!(f.fileNumber && f.fileNumber.trim());
+                          return (
+                            <TableRow key={f.id} className="border-border cursor-pointer hover:bg-secondary/40" onClick={() => setLogFile(f)}>
+                              <TableCell className="font-mono text-xs text-foreground">{f.prNumber}</TableCell>
+                              <TableCell>
+                                {hasFileNumber ? (
+                                  <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
+                                    <Hash className="h-3 w-3" />
+                                    {f.fileNumber}
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setUpdateFile(f); }}
+                                    className="inline-flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 underline-offset-2 hover:underline"
+                                  >
+                                    <Hash className="h-3 w-3" /> Assign File No
+                                  </button>
+                                )}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
+                              <TableCell className="text-foreground">{f.itemName}</TableCell>
+                              <TableCell className="text-right">{f.qty} {f.unit}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(f.unitPrice)}</TableCell>
+                              <TableCell className="text-right font-medium text-foreground">{formatCurrency(f.fileCost)}</TableCell>
+                              <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-0.5">
+                                  <PositionBadge position={f.presentPosition} />
+                                  {f.responsiblePerson && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                                      <User className="h-2.5 w-2.5" />
+                                      {f.responsiblePerson}
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Update Position"><Pencil className="h-3.5 w-3.5" /></Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => handleDelete(f)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">{filteredFiles.length} file(s) · Click any row to view full log</p>
+              <p className="text-xs text-muted-foreground">{filteredFiles.length} file(s) · Click any row to view full log · Click the pencil to update position &amp; assign file number</p>
             </>
           ) : (
             /* PR from Estimate tab */
@@ -374,7 +472,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               <div className="bg-secondary/40 rounded-lg p-3 flex items-center gap-2 flex-wrap">
                 <FileSignature className="h-4 w-4 text-amber-400" />
                 <p className="text-sm text-foreground">
-                  Items pending PR initiation from processed estimates. Click <span className="font-medium text-primary">Initiate File</span> to raise a PR — it will be forwarded to the "PR Raised Files" tab.
+                  Items pending PR initiation from processed estimates. Click <span className="font-medium text-primary">Initiate File</span> to raise a PR — it will be forwarded to the &quot;PR Raised Files&quot; tab.
                 </p>
               </div>
               {estimates && estimates.length > 0 ? (
@@ -419,9 +517,16 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
 
       {/* Add File */}
       <FileFormDialog projectId={project.id} open={addOpen} onOpenChange={setAddOpen} onSaved={() => { setAddOpen(false); refresh(); onChanged(); }} />
-      {/* Edit File */}
-      {editFile && (
-        <FileFormDialog projectId={project.id} file={editFile} open={!!editFile} onOpenChange={(o) => !o && setEditFile(null)} onSaved={() => { setEditFile(null); refresh(); onChanged(); }} />
+      {/* Update Position popup (replaces simple Edit) */}
+      {updateFile && (
+        <UpdatePositionDialog
+          file={updateFile}
+          projectId={project.id}
+          positionToResponsible={positionToResponsible}
+          open={!!updateFile}
+          onOpenChange={(o) => !o && setUpdateFile(null)}
+          onSaved={() => { setUpdateFile(null); refresh(); onChanged(); }}
+        />
       )}
       {/* File Log */}
       <FileLogDialog file={logFile} open={!!logFile} onOpenChange={(o) => !o && setLogFile(null)} />
@@ -474,6 +579,22 @@ function MiniStat({ label, value, sub, tone }: { label: string; value: string; s
   );
 }
 
+function FilterPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 function SortTh({ label, onClick, active, dir, align = "left" }: { label: string; onClick: () => void; active: boolean; dir: "asc" | "desc"; align?: "left" | "right" }) {
   return (
     <TableHead className={align === "right" ? "text-muted-foreground text-right" : "text-muted-foreground"}>
@@ -485,7 +606,7 @@ function SortTh({ label, onClick, active, dir, align = "left" }: { label: string
   );
 }
 
-// ─── File Form (Add / Edit) ───
+// ─── File Form (Add only — Edit handled by UpdatePositionDialog) ───
 function FileFormDialog({ projectId, file, open, onOpenChange, onSaved }: { projectId: string; file?: ProjectFile; open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
   const isEdit = !!file;
   const [saving, setSaving] = useState(false);
@@ -498,6 +619,7 @@ function FileFormDialog({ projectId, file, open, onOpenChange, onSaved }: { proj
     unitPrice: String(file?.unitPrice ?? ""),
     fileCost: String(file?.fileCost ?? ""),
     supplier: file?.supplier || "",
+    fileNumber: file?.fileNumber || "",
     presentPosition: file?.presentPosition || "PR Raised",
     fileCategory: file?.fileCategory || "General",
     changedBy: "",
@@ -534,6 +656,7 @@ function FileFormDialog({ projectId, file, open, onOpenChange, onSaved }: { proj
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
           <Field label="PR Number *"><Input value={form.prNumber} onChange={(e) => setForm({ ...form, prNumber: e.target.value })} className="bg-background border-border" /></Field>
+          <Field label="File Number (optional)"><Input value={form.fileNumber} onChange={(e) => setForm({ ...form, fileNumber: e.target.value })} placeholder="e.g. FILE/2025/001" className="bg-background border-border" /></Field>
           <Field label="Item Code *"><Input value={form.itemCode} onChange={(e) => setForm({ ...form, itemCode: e.target.value })} className="bg-background border-border" /></Field>
           <div className="sm:col-span-2"><Field label="Item Name *"><Input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} className="bg-background border-border" /></Field></div>
           <Field label="Unit"><Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="bg-background border-border" /></Field>
@@ -563,6 +686,209 @@ function FileFormDialog({ projectId, file, open, onOpenChange, onSaved }: { proj
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving} className="gap-1.5">{saving && <Loader2 className="h-4 w-4 animate-spin" />}{isEdit ? "Update File" : "Add File"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Update Position Dialog (dedicated edit popup with next-position + responsible person) ───
+function UpdatePositionDialog({
+  file,
+  projectId,
+  positionToResponsible,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  file: ProjectFile;
+  projectId: string;
+  positionToResponsible: Map<string, string>;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: () => void;
+}) {
+  const currentPosition = file.presentPosition;
+  const [nextPosition, setNextPosition] = useState(currentPosition);
+  const [responsiblePerson, setResponsiblePerson] = useState(file.responsiblePerson || "");
+  const [fileNumber, setFileNumber] = useState(file.fileNumber || "");
+  const [supplier, setSupplier] = useState(file.supplier || "");
+  const [changedBy, setChangedBy] = useState("");
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  // When the user picks a different next position, prefill the responsible person
+  // from the process-flow defaults — but only if the user hasn't manually overridden.
+  const defaultForCurrent = positionToResponsible.get(currentPosition) || "";
+  const defaultForNext = positionToResponsible.get(nextPosition) || "";
+
+  const handleNextPositionChange = (v: string) => {
+    setNextPosition(v);
+    // Auto-fill responsible person from the new position's default — only if user hasn't overridden
+    const isUsingDefault = responsiblePerson === defaultForCurrent || responsiblePerson === "";
+    if (isUsingDefault) {
+      const newDefault = positionToResponsible.get(v) || "";
+      setResponsiblePerson(newDefault);
+    }
+  };
+
+  const positionChanged = nextPosition !== currentPosition;
+
+  const submit = async () => {
+    if (positionChanged && !changedBy.trim()) {
+      toast({ title: "Changed By is required when updating position", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const body: Record<string, unknown> = {
+      // Always allow file number + supplier updates
+      fileNumber: fileNumber.trim() || null,
+      supplier: supplier.trim() || null,
+      // Position update
+      presentPosition: nextPosition,
+      responsiblePerson: responsiblePerson.trim() || null,
+      changedBy: changedBy.trim() || "Officer",
+      comment: comment.trim() || (positionChanged ? `Position changed: ${currentPosition} → ${nextPosition}` : "File metadata updated"),
+    };
+    const res = await apiRequest(`/api/projects/${projectId}/files/${file.id}`, "PUT", body);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: positionChanged ? "Position updated" : "File updated",
+        description: positionChanged ? `${currentPosition} → ${nextPosition}` : undefined,
+      });
+      onSaved();
+    } else {
+      toast({ title: "Failed to update", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <Pencil className="h-5 w-5 text-primary" />
+            Update Position — {file.prNumber}
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            {file.itemName} · {file.itemCode}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5">
+          {/* Current → Next position display */}
+          <div className="bg-secondary/40 rounded-lg p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <ArrowRight className="h-3.5 w-3.5" /> Position Transition
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-center">
+              {/* Current */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Current Position</Label>
+                <div className={cn("rounded-lg border px-3 py-2 text-sm font-medium", positionColor(currentPosition))}>
+                  {currentPosition}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Default officer: <span className="text-foreground">{defaultForCurrent || "—"}</span>
+                </p>
+              </div>
+              {/* Arrow */}
+              <div className="flex items-center justify-center">
+                <ArrowRight className="h-5 w-5 text-primary rotate-90 sm:rotate-0" />
+              </div>
+              {/* Next */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Next Position *</Label>
+                <Select value={nextPosition} onValueChange={handleNextPositionChange}>
+                  <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PRESENT_POSITIONS.map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Default officer: <span className="text-foreground">{defaultForNext || "—"}</span>
+                </p>
+              </div>
+            </div>
+            {!positionChanged && (
+              <p className="text-[11px] text-amber-400 mt-3 flex items-center gap-1">
+                <ArrowRight className="h-3 w-3" />
+                Pick a different next position to log a position change.
+              </p>
+            )}
+          </div>
+
+          {/* Responsible Person (auto-filled, editable) */}
+          <div className="bg-secondary/40 rounded-lg p-4 space-y-3">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+              <UserCheck className="h-3.5 w-3.5" /> Responsible Person
+            </h4>
+            <Field label="Responsible Person (editable — defaults from Process Flow)">
+              <Input
+                value={responsiblePerson}
+                onChange={(e) => setResponsiblePerson(e.target.value)}
+                placeholder={defaultForNext || "e.g. Cdr. R. Perera"}
+                className="bg-background border-border"
+              />
+            </Field>
+            <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+              <User className="h-3 w-3 mt-0.5 shrink-0" />
+              Auto-filled from the Process Flow defaults for the selected next position. Override if a different person is responsible.
+            </p>
+          </div>
+
+          {/* File Number + Supplier */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="File Number (received after initial RL)">
+              <Input
+                value={fileNumber}
+                onChange={(e) => setFileNumber(e.target.value)}
+                placeholder="e.g. FILE/2025/001"
+                className="bg-background border-border"
+              />
+            </Field>
+            <Field label="Supplier">
+              <Input
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                placeholder="Supplier name"
+                className="bg-background border-border"
+              />
+            </Field>
+          </div>
+
+          {/* Change log fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label={`Changed By ${positionChanged ? "*" : ""}`}>
+              <Input
+                value={changedBy}
+                onChange={(e) => setChangedBy(e.target.value)}
+                placeholder="Your name / rank"
+                className="bg-background border-border"
+              />
+            </Field>
+            <Field label="Comment (for log)">
+              <Input
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder={positionChanged ? `Position changed: ${currentPosition} → ${nextPosition}` : "Optional note"}
+                className="bg-background border-border"
+              />
+            </Field>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={saving} className="gap-1.5">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            <ArrowRight className="h-4 w-4" />
+            {positionChanged ? "Update Position" : "Save Changes"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

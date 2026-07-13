@@ -51,6 +51,9 @@ import {
   CE_APPOINTMENTS,
   STAKEHOLDER_DEPARTMENTS,
   STAKEHOLDER_ROLES,
+  STAKEHOLDER_CATEGORIES,
+  stakeholderCategoryColor,
+  AREA_STORES,
   AVAILABILITY_STATUSES,
   availabilityColor,
   departmentColor,
@@ -87,6 +90,10 @@ import {
   PhoneCall,
   IdCard,
   ChevronRight,
+  MapPin,
+  Store,
+  Medal,
+  UserCircle,
 } from "lucide-react";
 import {
   BarChart,
@@ -109,6 +116,11 @@ interface Stakeholder {
   svcNumber: string | null;
   appointment: string | null;
   department: string;
+  category: string; // CCED Officer | CCED Sailor | CSLOG Officer | CSLOG Sailor | Officer-in-Area | Officer (legacy)
+  seniority: number | null;
+  areaStoreLocation: string | null;
+  subjectClerk: string | null;
+  ilmsCced: string | null;
   officeNumber: string | null;
   telephone: string | null;
   whatsapp: string | null;
@@ -239,6 +251,32 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
+/**
+ * Resolve a stakeholder's category, falling back to department + role when the
+ * legacy "Officer" / "Sailor" / null value is present (pre-categorisation data).
+ * Returns one of STAKEHOLDER_CATEGORIES.
+ */
+function resolveCategory(p: {
+  category?: string | null;
+  department?: string | null;
+  role?: string | null;
+}): string {
+  const cat = p.category;
+  if (cat && (STAKEHOLDER_CATEGORIES as readonly string[]).includes(cat)) {
+    return cat;
+  }
+  // Legacy fallback
+  const dept = p.department ?? "CSLOG";
+  const role = p.role ?? "Officer";
+  if (dept === "CE") return role === "Sailor" ? "CCED Sailor" : "CCED Officer";
+  return role === "Sailor" ? "CSLOG Sailor" : "CSLOG Officer";
+}
+
+/** Whether a category is a sailor category (for table column display). */
+function isSailorCategory(cat: string): boolean {
+  return cat === "CCED Sailor" || cat === "CSLOG Sailor";
+}
+
 // ─────────────────────────────────────────────────────────
 // Main Module
 // ─────────────────────────────────────────────────────────
@@ -275,7 +313,7 @@ export function StakeholdersModule() {
 }
 
 // ═════════════════════════════════════════════════════════
-// TAB 1 — Officers & Sailors Directory
+// TAB 1 — Officers & Sailors Directory (categorised)
 // ═════════════════════════════════════════════════════════
 function OfficersSailorsTab() {
   const { data: list, loading, error, refresh } = useFetch<Stakeholder[]>(
@@ -288,6 +326,7 @@ function OfficersSailorsTab() {
   const [apptFilter, setApptFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
   const [availFilter, setAvailFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Stakeholder | null>(null);
@@ -298,6 +337,8 @@ function OfficersSailorsTab() {
     if (!list) return [];
     const s = search.trim().toLowerCase();
     return list.filter((p) => {
+      const cat = resolveCategory(p);
+      if (categoryFilter !== "all" && cat !== categoryFilter) return false;
       if (deptFilter !== "all" && p.department !== deptFilter) return false;
       if (apptFilter !== "all" && p.appointment !== apptFilter) return false;
       if (roleFilter !== "all" && p.role !== roleFilter) return false;
@@ -308,14 +349,27 @@ function OfficersSailorsTab() {
       }
       return true;
     });
-  }, [list, search, deptFilter, apptFilter, roleFilter, availFilter]);
+  }, [list, search, deptFilter, apptFilter, roleFilter, availFilter, categoryFilter]);
+
+  // Group filtered records by category, preserving STAKEHOLDER_CATEGORIES order
+  const grouped = useMemo(() => {
+    const map: Record<string, Stakeholder[]> = {};
+    for (const cat of STAKEHOLDER_CATEGORIES) map[cat] = [];
+    for (const p of filtered) {
+      const cat = resolveCategory(p);
+      if (!map[cat]) map[cat] = [];
+      map[cat].push(p);
+    }
+    return map;
+  }, [filtered]);
 
   const cslogCount = useMemo(
-    () => list?.filter((p) => p.department === "CSLOG").length ?? 0,
+    () =>
+      list?.filter((p) => resolveCategory(p).startsWith("CSLOG")).length ?? 0,
     [list]
   );
   const ceCount = useMemo(
-    () => list?.filter((p) => p.department === "CE").length ?? 0,
+    () => list?.filter((p) => resolveCategory(p).startsWith("CCED")).length ?? 0,
     [list]
   );
   const availableCount = useMemo(
@@ -328,7 +382,8 @@ function OfficersSailorsTab() {
     deptFilter !== "all" ||
     apptFilter !== "all" ||
     roleFilter !== "all" ||
-    availFilter !== "all";
+    availFilter !== "all" ||
+    categoryFilter !== "all";
 
   function clearFilters() {
     setSearch("");
@@ -336,6 +391,7 @@ function OfficersSailorsTab() {
     setApptFilter("all");
     setRoleFilter("all");
     setAvailFilter("all");
+    setCategoryFilter("all");
   }
 
   async function handleDelete() {
@@ -373,14 +429,14 @@ function OfficersSailorsTab() {
           value={cslogCount}
           icon={Anchor}
           accent="purple"
-          sub="Logistics officers & sailors"
+          sub="CSLOG officers & sailors"
         />
         <StatCard
           label="CE Dept"
           value={ceCount}
           icon={Wrench}
           accent="amber"
-          sub="Civil engineering"
+          sub="CCED officers & sailors"
         />
         <StatCard
           label="Available Now"
@@ -409,9 +465,25 @@ function OfficersSailorsTab() {
             </div>
           </div>
           <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Category</Label>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full lg:w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {STAKEHOLDER_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Department</Label>
             <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger className="w-full lg:w-44">
+              <SelectTrigger className="w-full lg:w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -494,9 +566,9 @@ function OfficersSailorsTab() {
         </div>
       </div>
 
-      {/* Directory table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        {!filtered.length ? (
+      {/* Categorised sections */}
+      {!filtered.length ? (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
           <EmptyState
             icon={filtersActive ? Filter : Users}
             title={filtersActive ? "No matches" : "No personnel yet"}
@@ -517,140 +589,25 @@ function OfficersSailorsTab() {
               )
             }
           />
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border bg-muted/30 hover:bg-muted/30">
-                  <TableHead className="min-w-[180px]">Name</TableHead>
-                  <TableHead>Rank / Rate</TableHead>
-                  <TableHead>Appointment</TableHead>
-                  <TableHead>Dept</TableHead>
-                  <TableHead>SVC Number</TableHead>
-                  <TableHead>Office</TableHead>
-                  <TableHead>Telephone</TableHead>
-                  <TableHead>WhatsApp</TableHead>
-                  <TableHead>Availability</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((p) => (
-                  <TableRow
-                    key={p.id}
-                    className="border-border cursor-pointer"
-                    onClick={() => setViewTarget(p)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                          <User className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground truncate">{p.name}</p>
-                          <p className="text-xs text-muted-foreground">{p.role}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {p.rankOrRate || "—"}
-                    </TableCell>
-                    <TableCell>
-                      {p.appointment ? (
-                        <CustomBadge className={departmentColor(p.department)}>
-                          {p.appointment}
-                        </CustomBadge>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <CustomBadge className={departmentColor(p.department)}>
-                        {p.department}
-                      </CustomBadge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">
-                      {p.svcNumber || "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {p.officeNumber || "—"}
-                    </TableCell>
-                    <TableCell>
-                      {telLink(p.telephone) ? (
-                        <a
-                          href={telLink(p.telephone)!}
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
-                        >
-                          <Phone className="h-3 w-3" />
-                          {p.telephone}
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {waMeLink(p.whatsapp) ? (
-                        <a
-                          href={waMeLink(p.whatsapp)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          {p.whatsapp}
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <CustomBadge className={availabilityColor(p.availability)}>
-                        {p.availability}
-                      </CustomBadge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div
-                        className="flex items-center justify-end gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setViewTarget(p)}
-                          title="View"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setEditTarget(p)}
-                          title="Edit"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-red-400 hover:text-red-300"
-                          onClick={() => setDeleteTarget(p)}
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {STAKEHOLDER_CATEGORIES.map((cat) => {
+            const people = grouped[cat] ?? [];
+            if (!people.length) return null;
+            return (
+              <CategorySection
+                key={cat}
+                category={cat}
+                people={people}
+                onView={(p) => setViewTarget(p)}
+                onEdit={(p) => setEditTarget(p)}
+                onDelete={(p) => setDeleteTarget(p)}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Add / Edit dialog */}
       {addOpen && (
@@ -719,6 +676,298 @@ function OfficersSailorsTab() {
 }
 
 // ─────────────────────────────────────────────────────────
+// Category Section — coloured header + table for one category
+// ─────────────────────────────────────────────────────────
+interface CategorySectionProps {
+  category: string;
+  people: Stakeholder[];
+  onView: (p: Stakeholder) => void;
+  onEdit: (p: Stakeholder) => void;
+  onDelete: (p: Stakeholder) => void;
+}
+
+function CategorySection({
+  category,
+  people,
+  onView,
+  onEdit,
+  onDelete,
+}: CategorySectionProps) {
+  const isSailor = isSailorCategory(category);
+  // Officers: sort by seniority ascending (most senior first); nulls go last
+  // Sailors: group by areaStoreLocation (sorted), then by name
+  const sorted = useMemo(() => {
+    if (!isSailor) {
+      return people.slice().sort((a, b) => {
+        const sa = a.seniority ?? Number.MAX_SAFE_INTEGER;
+        const sb = b.seniority ?? Number.MAX_SAFE_INTEGER;
+        if (sa !== sb) return sa - sb;
+        return a.name.localeCompare(b.name);
+      });
+    }
+    return people.slice().sort((a, b) => {
+      const la = (a.areaStoreLocation ?? "Unassigned").toLowerCase();
+      const lb = (b.areaStoreLocation ?? "Unassigned").toLowerCase();
+      if (la !== lb) return la.localeCompare(lb);
+      return a.name.localeCompare(b.name);
+    });
+  }, [people, isSailor]);
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Coloured section header */}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 px-4 py-3 border-b border-border",
+          "bg-gradient-to-r from-muted/40 to-transparent"
+        )}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={cn(
+              "h-9 w-9 rounded-lg flex items-center justify-center shrink-0 border",
+              stakeholderCategoryColor(category)
+            )}
+          >
+            {isSailor ? (
+              <UserCircle className="h-5 w-5" />
+            ) : (
+              <Medal className="h-5 w-5" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground truncate">
+              {category}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              {isSailor
+                ? "Sailors — area store location, subject clerk & ILMS CCED"
+                : category === "Officer-in-Area"
+                  ? "Officers assigned to area stores"
+                  : "Officers — sorted by seniority (Navy List)"}
+            </p>
+          </div>
+        </div>
+        <CustomBadge
+          className={cn("border", stakeholderCategoryColor(category))}
+        >
+          {sorted.length} {sorted.length === 1 ? "person" : "people"}
+        </CustomBadge>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
+              <TableHead className="min-w-[180px]">Name</TableHead>
+              <TableHead>{isSailor ? "Rate" : "Rank"}</TableHead>
+              <TableHead>Appointment</TableHead>
+              <TableHead>SVC</TableHead>
+              {isSailor ? (
+                <>
+                  <TableHead>Area Store</TableHead>
+                  <TableHead>Subject Clerk</TableHead>
+                  <TableHead>ILMS CCED</TableHead>
+                </>
+              ) : (
+                <TableHead>Seniority</TableHead>
+              )}
+              <TableHead>{isSailor ? "Phone" : "Office"}</TableHead>
+              {isSailor ? (
+                <TableHead>WhatsApp</TableHead>
+              ) : (
+                <TableHead>Telephone</TableHead>
+              )}
+              {!isSailor && <TableHead>WhatsApp</TableHead>}
+              <TableHead>Availability</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((p) => (
+              <TableRow
+                key={p.id}
+                className="border-border cursor-pointer"
+                onClick={() => onView(p)}
+              >
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <User className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground truncate">
+                        {p.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{p.role}</p>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {p.rankOrRate || "—"}
+                </TableCell>
+                <TableCell>
+                  {p.appointment ? (
+                    <CustomBadge className={departmentColor(p.department)}>
+                      {p.appointment}
+                    </CustomBadge>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground font-mono text-xs">
+                  {p.svcNumber || "—"}
+                </TableCell>
+                {isSailor ? (
+                  <>
+                    <TableCell>
+                      {p.areaStoreLocation ? (
+                        <CustomBadge className="bg-secondary/70 text-foreground border-border">
+                          <Store className="h-3 w-3 mr-1" />
+                          {p.areaStoreLocation}
+                        </CustomBadge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {p.subjectClerk || "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {p.ilmsCced || "—"}
+                    </TableCell>
+                  </>
+                ) : (
+                  <TableCell>
+                    {p.seniority != null ? (
+                      <CustomBadge className="bg-secondary/70 text-foreground border-border">
+                        <Medal className="h-3 w-3 mr-1" />
+                        #{p.seniority}
+                      </CustomBadge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                )}
+                <TableCell>
+                  {isSailor ? (
+                    telLink(p.telephone) ? (
+                      <a
+                        href={telLink(p.telephone)!}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+                      >
+                        <Phone className="h-3 w-3" />
+                        {p.telephone}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {p.officeNumber || "—"}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isSailor ? (
+                    waMeLink(p.whatsapp) ? (
+                      <a
+                        href={waMeLink(p.whatsapp)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+                      >
+                        <MessageCircle className="h-3 w-3" />
+                        {p.whatsapp}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )
+                  ) : (
+                    telLink(p.telephone) ? (
+                      <a
+                        href={telLink(p.telephone)!}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+                      >
+                        <Phone className="h-3 w-3" />
+                        {p.telephone}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )
+                  )}
+                </TableCell>
+                {!isSailor && (
+                  <TableCell>
+                    {waMeLink(p.whatsapp) ? (
+                      <a
+                        href={waMeLink(p.whatsapp)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+                      >
+                        <MessageCircle className="h-3 w-3" />
+                        {p.whatsapp}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                )}
+                <TableCell>
+                  <CustomBadge className={availabilityColor(p.availability)}>
+                    {p.availability}
+                  </CustomBadge>
+                </TableCell>
+                <TableCell className="text-right">
+                  <div
+                    className="flex items-center justify-end gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => onView(p)}
+                      title="View"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => onEdit(p)}
+                      title="Edit"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-400 hover:text-red-300"
+                      onClick={() => onDelete(p)}
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // Stakeholder Form (Add / Edit)
 // ─────────────────────────────────────────────────────────
 interface StakeholderFormProps {
@@ -744,6 +993,25 @@ function StakeholderFormDialog({
   const [svcNumber, setSvcNumber] = useState(initial?.svcNumber ?? "");
   const [appointment, setAppointment] = useState(initial?.appointment ?? "");
   const [department, setDepartment] = useState(initial?.department ?? "CSLOG");
+  const [category, setCategory] = useState(
+    initial?.category && (STAKEHOLDER_CATEGORIES as readonly string[]).includes(initial.category)
+      ? initial.category
+      : initial?.department === "CE"
+        ? initial?.role === "Sailor"
+          ? "CCED Sailor"
+          : "CCED Officer"
+        : initial?.role === "Sailor"
+          ? "CSLOG Sailor"
+          : "CSLOG Officer"
+  );
+  const [seniority, setSeniority] = useState(
+    initial?.seniority != null ? String(initial.seniority) : ""
+  );
+  const [areaStoreLocation, setAreaStoreLocation] = useState(
+    initial?.areaStoreLocation ?? ""
+  );
+  const [subjectClerk, setSubjectClerk] = useState(initial?.subjectClerk ?? "");
+  const [ilmsCced, setIlmsCced] = useState(initial?.ilmsCced ?? "");
   const [officeNumber, setOfficeNumber] = useState(initial?.officeNumber ?? "");
   const [telephone, setTelephone] = useState(initial?.telephone ?? "");
   const [whatsapp, setWhatsapp] = useState(initial?.whatsapp ?? "");
@@ -756,6 +1024,26 @@ function StakeholderFormDialog({
   // Derive appointment options from department
   const apptOptions =
     department === "CE" ? CE_APPOINTMENTS : CSLOG_APPOINTMENTS;
+
+  // Whether the selected category is a sailor category (shows area-store fields)
+  const isSailor = isSailorCategory(category);
+  // Whether the selected category is an officer category (shows seniority)
+  const isOfficer = !isSailor;
+
+  // When the category changes, derive the matching role & department so legacy
+  // department/role filters stay consistent.
+  function onCategoryChange(cat: string) {
+    setCategory(cat);
+    if (cat.startsWith("CCED")) {
+      setDepartment("CE");
+      setRole(cat === "CCED Sailor" ? "Sailor" : "Officer");
+    } else if (cat.startsWith("CSLOG")) {
+      setDepartment("CSLOG");
+      setRole(cat === "CSLOG Sailor" ? "Sailor" : "Officer");
+    } else if (cat === "Officer-in-Area") {
+      setRole("Officer");
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -770,6 +1058,12 @@ function StakeholderFormDialog({
       svcNumber: svcNumber.trim() || null,
       appointment: appointment || null,
       department,
+      category,
+      seniority:
+        seniority !== "" && seniority != null ? Number(seniority) : null,
+      areaStoreLocation: areaStoreLocation || null,
+      subjectClerk: subjectClerk.trim() || null,
+      ilmsCced: ilmsCced.trim() || null,
       officeNumber: officeNumber.trim() || null,
       telephone: telephone.trim() || null,
       whatsapp: whatsapp.trim() || null,
@@ -829,6 +1123,20 @@ function StakeholderFormDialog({
                 placeholder="e.g. SVC/1234"
               />
             </Field>
+            <Field label="Category" required>
+              <Select value={category} onValueChange={onCategoryChange}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STAKEHOLDER_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
             <Field label="Department">
               <Select
                 value={department}
@@ -878,6 +1186,56 @@ function StakeholderFormDialog({
                 </SelectContent>
               </Select>
             </Field>
+            {isOfficer && (
+              <Field label="Seniority (Navy List — lower = more senior)">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  value={seniority}
+                  onChange={(e) => setSeniority(e.target.value)}
+                  placeholder="e.g. 1"
+                  min="1"
+                />
+              </Field>
+            )}
+            {isSailor && (
+              <>
+                <Field label="Area Store Location">
+                  <Select
+                    value={areaStoreLocation || "__none__"}
+                    onValueChange={(v) =>
+                      setAreaStoreLocation(v === "__none__" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select area store" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Unassigned —</SelectItem>
+                      {AREA_STORES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Subject Clerk">
+                  <Input
+                    value={subjectClerk}
+                    onChange={(e) => setSubjectClerk(e.target.value)}
+                    placeholder="e.g. BMS Clerk"
+                  />
+                </Field>
+                <Field label="ILMS CCED (Material & ILMS)">
+                  <Input
+                    value={ilmsCced}
+                    onChange={(e) => setIlmsCced(e.target.value)}
+                    placeholder="e.g. ILMS CCED"
+                  />
+                </Field>
+              </>
+            )}
             <Field label="Office Number">
               <Input
                 value={officeNumber}
@@ -952,6 +1310,8 @@ function StakeholderViewDialog({
   onEdit: () => void;
 }) {
   const s = stakeholder;
+  const cat = resolveCategory(s);
+  const isSailor = isSailorCategory(cat);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -962,7 +1322,7 @@ function StakeholderViewDialog({
             </div>
             <div>
               <div>{s.name}</div>
-              <div className="text-xs text-muted-foreground font-normal flex items-center gap-1.5 mt-0.5">
+              <div className="text-xs text-muted-foreground font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
                 {s.rankOrRate && <span>{s.rankOrRate}</span>}
                 {s.appointment && (
                   <>
@@ -978,8 +1338,16 @@ function StakeholderViewDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Department / Role / Availability chips */}
+          {/* Category / Department / Role / Availability chips */}
           <div className="flex flex-wrap gap-2">
+            <CustomBadge className={stakeholderCategoryColor(cat)}>
+              {isSailor ? (
+                <UserCircle className="h-3 w-3 mr-1" />
+              ) : (
+                <Medal className="h-3 w-3 mr-1" />
+              )}
+              {cat}
+            </CustomBadge>
             <CustomBadge className={departmentColor(s.department)}>
               <Building2 className="h-3 w-3 mr-1" /> {s.department} Dept
             </CustomBadge>
@@ -990,6 +1358,44 @@ function StakeholderViewDialog({
               <ShieldCheck className="h-3 w-3 mr-1" /> {s.availability}
             </CustomBadge>
           </div>
+
+          {/* Officer-specific info row (seniority) */}
+          {!isSailor && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Medal className="h-4 w-4 text-violet-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Seniority (Navy List)</p>
+                  <p className="text-sm text-foreground">
+                    {s.seniority != null
+                      ? `#${s.seniority} (lower = more senior)`
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sailor-specific info: area store + subject clerk + ILMS CCED */}
+          {isSailor && (
+            <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+              <ContactRow
+                icon={Store}
+                label="Area Store Location"
+                value={s.areaStoreLocation}
+              />
+              <ContactRow
+                icon={ClipboardList}
+                label="Subject Clerk"
+                value={s.subjectClerk}
+              />
+              <ContactRow
+                icon={Briefcase}
+                label="ILMS CCED (Material & ILMS)"
+                value={s.ilmsCced}
+              />
+            </div>
+          )}
 
           {/* Contact rows */}
           <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">

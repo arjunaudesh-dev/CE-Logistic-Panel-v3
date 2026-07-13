@@ -14,7 +14,7 @@ datasource db {
 model Project {
   id            String   @id @default(cuid())
   name          String
-  voteNumber    String
+  voteNumber    String   // vote number OR "NON-NAVAL" OR "CONTRACTUAL"
   voteAllocation Float   @default(0)
   committed     Float    @default(0)
   actualSpent   Float    @default(0)
@@ -22,7 +22,9 @@ model Project {
   endDate       String?  // EDC (Estimated Date of Completion)
   department    String?  // kept for backward compat
   benefactor    String?  // replaces "Department" label
-  reference     String?  // reference type (e.g. AOR, WorkOrder, Estimate)
+  reference     String?  // reference (manually entered — how vote allocated)
+  projectType   String   @default("New Construction") // New Construction | Continue | Renovation | Maintenance | General Requirement | Contractual Job
+  financialMean String?  // Vote | Malima Fund | Non-Public Fund | Contractual (for non-naval)
   projectOfficer String?
   status        String   @default("Active") // Active | On Hold | Completed | Cancelled
   description   String?
@@ -48,8 +50,10 @@ model ProjectFile {
   supplier        String?
   presentPosition String   @default("PR Raised") // see PRESENT_POSITIONS
   fileCategory    String   @default("General")
-  createdBy       String?
-  authorizedBy    String?
+  fileNumber      String?  // file number received after initial RL raising
+  createdBy       String?  // sailor name who created
+  authorizedBy    String?  // officer name who authorized
+  responsiblePerson String? // default responsible person for current position
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -218,17 +222,23 @@ model Stakeholder {
   svcNumber     String?  // SVC number
   appointment   String?  // CSLOG, CLOGD, ASO(E), APO(E), AAPO(PT), CCED(E), CCEO(E), SCE(M), SCE(P&P)
   department    String   @default("CSLOG") // CSLOG | CE
+  category      String   @default("Officer") // Officer | Sailor | Officer-in-Area
+  seniority     Int?     // seniority order from Navy List (lower = more senior)
+  areaStoreLocation String? // for sailors: BMS, Metal, General, Paint, Oil & Lubricant, Stationary
+  subjectClerk  String?  // subject clerk assignment
+  ilmsCced      String?  // Material and ILMS CCED assignment
   officeNumber  String?
   telephone     String?
   whatsapp      String?
   email         String?
   availability  String   @default("Available") // Available | On Leave | Busy | Off Duty
-  role          String   @default("Officer") // Officer | Sailor
+  role          String   @default("Officer") // kept for backward compat
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@index([department])
   @@index([appointment])
+  @@index([category])
 }
 
 model Supplier {
@@ -441,4 +451,86 @@ model DailyCollection {
   recordedAt   DateTime @default(now())
 
   @@index([date])
+}
+
+// ───────────────────────── AREA STORES (CSLOG — oncharge/off-charge) ─────────────────────────
+// Area stores belong to CSLOG but records kept here for easy management.
+// Oncharge = received via QCI (NAV 251 reference); Off-charge = transferred to Stores locations (NAV 255)
+model AreaStoreRecord {
+  id            String   @id @default(cuid())
+  storeName     String   // BMS | Metal | General | Paint | Oil & Lubricant | Stationary
+  itemCode      String?
+  itemName      String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  qty           Float    @default(0)
+  unitCost      Float    @default(0)
+  totalCost     Float    @default(0)
+  recordType    String   // Oncharge | OffCharge
+  navReference  String?  // NAV 251 (oncharge) or NAV 255 (off-charge)
+  qcInspectionId String? // link to QC inspection if oncharge via QCI
+  fileNumber    String?  // file number referred to store
+  location      String?  // store location
+  date          String?
+  remarks       String?
+  createdAt     DateTime @default(now())
+
+  @@index([storeName])
+  @@index([recordType])
+  @@index([navReference])
+}
+
+// ───────────────────────── PROCESS FLOWS & FINANCIAL DELEGATION (Settings) ─────────────────────────
+// Defines the file action process for RC, Non-Rate, and ARO (Contractual) flows.
+// Each flow has ordered steps; each step can have a default responsible person.
+model ProcessFlow {
+  id          String   @id @default(cuid())
+  name        String   // RC | Non-Rate | ARO (Contractual)
+  description String?
+  createdAt   DateTime @default(now())
+
+  steps ProcessStep[]
+}
+
+model ProcessStep {
+  id               String   @id @default(cuid())
+  flowId           String
+  stepOrder        Int      @default(1)
+  positionName     String   // e.g. PR Raised, Tender Called, BEC Evaluation, AOE Approval
+  description      String?
+  defaultResponsiblePerson String? // name/role of default responsible person
+  financialDelegationLevel String? // e.g. "Up to Rs. 500,000 — Cdr", "Up to Rs. 5,000,000 — Capt"
+  isTenderStage    Boolean  @default(false)
+  isEvaluationStage Boolean @default(false)
+  createdAt        DateTime @default(now())
+
+  flow ProcessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+}
+
+// ───────────────────────── USER PROFILES (Settings) ─────────────────────────
+model UserProfile {
+  id          String   @id @default(cuid())
+  username    String   @unique
+  displayName String
+  email       String?
+  role        String   @default("Officer") // Admin | Manager | Officer | Clerk | Viewer
+  stakeholderId String? // link to Stakeholder
+  department  String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── STORE MANAGEMENT SETTINGS ─────────────────────────
+model StoreSetting {
+  id              String   @id @default(cuid())
+  storeName       String   @unique
+  storeType       String   @default("Zone") // Zone | AreaStore | Ready-Use | Balance | Project
+  responsiblePerson String? // name of responsible person
+  location        String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

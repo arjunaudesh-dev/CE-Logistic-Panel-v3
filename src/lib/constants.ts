@@ -255,6 +255,151 @@ export function duplicateTypeColor(type: string): string {
   }
 }
 
+// ─── Project Types & Financial Means ───
+export const PROJECT_TYPES = [
+  "New Construction",
+  "Continue",
+  "Renovation",
+  "Maintenance",
+  "General Requirement",
+  "Contractual Job",
+] as const;
+
+export const FINANCIAL_MEANS = [
+  "Vote",
+  "Malima Fund",
+  "Non-Public Fund",
+  "Contractual",
+] as const;
+
+export function projectTypeColor(type: string): string {
+  switch (type) {
+    case "New Construction":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Continue":
+      return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
+    case "Renovation":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Maintenance":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "General Requirement":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    case "Contractual Job":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export function financialMeanColor(mean: string): string {
+  switch (mean) {
+    case "Vote":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Malima Fund":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Non-Public Fund":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "Contractual":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Area Stores (CSLOG) ───
+export const AREA_STORES = [
+  "BMS",
+  "Metal",
+  "General",
+  "Paint",
+  "Oil & Lubricant",
+  "Stationary",
+] as const;
+
+export const AREA_STORE_CATEGORIES: Record<string, string[]> = {
+  BMS: ["Plumbing", "BMS"],
+  Metal: ["Metal", "Aluminium"],
+  General: ["General", "Tools"],
+  Paint: ["Paint"],
+  "Oil & Lubricant": ["Lubricant Oil"],
+  Stationary: ["Stationary"],
+};
+
+export const NAV_REFERENCES = ["NAV 251", "NAV 255"] as const;
+
+export function navRefColor(ref: string): string {
+  switch (ref) {
+    case "NAV 251":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "NAV 255":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Stakeholder Categories ───
+export const STAKEHOLDER_CATEGORIES = [
+  "CCED Officer",
+  "CCED Sailor",
+  "CSLOG Officer",
+  "CSLOG Sailor",
+  "Officer-in-Area",
+] as const;
+
+export function stakeholderCategoryColor(cat: string): string {
+  switch (cat) {
+    case "CCED Officer":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "CCED Sailor":
+      return "bg-violet-500/10 text-violet-300 border-violet-500/20";
+    case "CSLOG Officer":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "CSLOG Sailor":
+      return "bg-blue-500/10 text-blue-300 border-blue-500/20";
+    case "Officer-in-Area":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── Process Flows ───
+export const PROCESS_FLOW_TYPES = ["RC", "Non-Rate", "ARO (Contractual)"] as const;
+
+export function processFlowColor(flow: string): string {
+  switch (flow) {
+    case "RC":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Non-Rate":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "ARO (Contractual)":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// ─── User Roles ───
+export const USER_ROLES = ["Admin", "Manager", "Officer", "Clerk", "Viewer"] as const;
+
+export function userRoleColor(role: string): string {
+  switch (role) {
+    case "Admin":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    case "Manager":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Officer":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Clerk":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "Viewer":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
 // Maps present positions to color classes for badges
 export function positionColor(position: string): string {
   const p = position.toLowerCase();

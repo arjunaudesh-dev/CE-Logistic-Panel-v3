@@ -43,6 +43,8 @@ export async function PUT(
         department: body.department || null,
         benefactor: body.benefactor || null,
         reference: body.reference || null,
+        projectType: body.projectType || "New Construction",
+        financialMean: body.financialMean || null,
         projectOfficer: body.projectOfficer || null,
         status: body.status || "Active",
         description: body.description || null,

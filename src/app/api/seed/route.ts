@@ -18,67 +18,260 @@ export async function POST() {
     await db.fileLog.deleteMany();
     await db.projectFile.deleteMany();
     await db.allocation.deleteMany();
+    await db.estimateItem.deleteMany();
+    await db.estimate.deleteMany();
+    await db.earmarkedItem.deleteMany();
+    await db.qCInspection.deleteMany();
+    await db.supplierRating.deleteMany();
+    await db.supplierNomination.deleteMany();
+    await db.supplierContact.deleteMany();
+    await db.supplier.deleteMany();
+    await db.stakeholder.deleteMany();
+    await db.itemMaster.deleteMany();
+    await db.processStep.deleteMany();
+    await db.processFlow.deleteMany();
+    await db.areaStoreRecord.deleteMany();
+    await db.userProfile.deleteMany();
+    await db.storeSetting.deleteMany();
     await db.project.deleteMany();
 
-    // ── Projects ──
+    // ── Projects (Real Vote Data) ──
+    // VOTE 223-1-01-2104 — New Construction
     const p1 = await db.project.create({
       data: {
-        name: "Dockyard Refit 2025 — Ship A",
-        voteNumber: "V-2025-001",
+        name: "Construction of No. 03 Slipway Hangar at Naval Dockyard",
+        voteNumber: "223-1-01-2104",
         voteAllocation: 85000000,
         committed: 42000000,
         actualSpent: 18500000,
         startDate: "2025-01-15",
         endDate: "2025-12-20",
-        department: "Engineering",
+        benefactor: "Engineering Dept",
+        reference: "Vote 2104 - Allocation 2025",
+        projectType: "New Construction",
+        financialMean: "Vote",
         projectOfficer: "Cdr. R. Perera",
         status: "Active",
-        description: "Annual refit of Ship A hull and propulsion systems.",
+        description: "VOTE 223-1-01-2104 Item 01: Construction of No. 03 Slipway Hangar at Naval Dockyard.",
       },
     });
     const p2 = await db.project.create({
       data: {
-        name: "New Jetty Construction",
-        voteNumber: "V-2025-002",
-        voteAllocation: 120000000,
-        committed: 67000000,
-        actualSpent: 51000000,
-        startDate: "2024-08-01",
+        name: "Expansion of facilities around No. 03 Slipway at Naval Base Trincomalee (50m x 20m steel workshop)",
+        voteNumber: "223-1-01-2104",
+        voteAllocation: 45000000,
+        committed: 18000000,
+        actualSpent: 7200000,
+        startDate: "2025-02-01",
         endDate: "2026-03-30",
-        department: "Civil Works",
+        benefactor: "Civil Works Dept",
+        reference: "Vote 2104 - Allocation 2025",
+        projectType: "New Construction",
+        financialMean: "Vote",
         projectOfficer: "Lt. M. Fernando",
         status: "Active",
-        description: "Construction of reinforced concrete jetty and approaches.",
+        description: "VOTE 223-1-01-2104 Item 02: Expansion of facilities around No. 03 Slipway at Naval Base Trincomalee.",
       },
     });
     const p3 = await db.project.create({
       data: {
-        name: "Workshop Modernization",
-        voteNumber: "V-2025-003",
-        voteAllocation: 35000000,
-        committed: 12000000,
-        actualSpent: 4600000,
+        name: "Construction of new security point in front of beach at SLNS Gotabaya",
+        voteNumber: "223-1-01-2104",
+        voteAllocation: 12000000,
+        committed: 4500000,
+        actualSpent: 1200000,
         startDate: "2025-03-01",
         endDate: "2025-11-30",
-        department: "Workshop",
-        projectOfficer: "WO K. Silva",
-        status: "On Hold",
-        description: "Upgrade of workshop machinery and ventilation.",
+        benefactor: "Civil Works Dept",
+        reference: "Vote 2104 - Allocation 2025",
+        projectType: "New Construction",
+        financialMean: "Vote",
+        projectOfficer: "Lt. D. Rajapaksa",
+        status: "Active",
+        description: "VOTE 223-1-01-2104 Item 03: Construction of new security point at SLNS Gotabaya.",
+      },
+    });
+    const p4 = await db.project.create({
+      data: {
+        name: "New Academy Complex Trincomalee – Logistic & Management School Building",
+        voteNumber: "223-1-01-2104",
+        voteAllocation: 150000000,
+        committed: 35000000,
+        actualSpent: 8200000,
+        startDate: "2025-01-01",
+        endDate: "2026-12-31",
+        benefactor: "CE Dept",
+        reference: "Vote 2104 - Allocation 2025",
+        projectType: "New Construction",
+        financialMean: "Vote",
+        projectOfficer: "Capt. T. Jayasuriya",
+        status: "Active",
+        description: "VOTE 223-1-01-2104 Item 04: New Academy Complex Trincomalee.",
+      },
+    });
+    // VOTE 223-1-01-2001 — Renovation
+    const p5 = await db.project.create({
+      data: {
+        name: "Improvement of security fence at SLNS Kashyapa (No.01 to No.12 security points)",
+        voteNumber: "223-1-01-2001",
+        voteAllocation: 8500000,
+        committed: 3200000,
+        actualSpent: 1100000,
+        startDate: "2025-04-01",
+        endDate: "2025-10-30",
+        benefactor: "CE Dept",
+        reference: "Vote 2001 - Renovation 2025",
+        projectType: "Renovation",
+        financialMean: "Vote",
+        projectOfficer: "Lt. N. Gunawardena",
+        status: "Active",
+        description: "VOTE 223-1-01-2001 Item 01.",
+      },
+    });
+    const p6 = await db.project.create({
+      data: {
+        name: "Renovation of Marine Home building at SLNS Vidura",
+        voteNumber: "223-1-01-2001",
+        voteAllocation: 6500000,
+        committed: 2100000,
+        actualSpent: 680000,
+        startDate: "2025-05-01",
+        endDate: "2025-12-15",
+        benefactor: "CE Dept",
+        reference: "Vote 2001 - Renovation 2025",
+        projectType: "Renovation",
+        financialMean: "Vote",
+        projectOfficer: "Lt. Cdr. A. Wickrama",
+        status: "Active",
+        description: "VOTE 223-1-01-2001 Item 02.",
+      },
+    });
+    const p7 = await db.project.create({
+      data: {
+        name: "Renovation of Command Wardroom at SLN Dockyard (granite floor, Golden Loge rooftop, Commandant Chalet)",
+        voteNumber: "223-1-01-2001",
+        voteAllocation: 9800000,
+        committed: 5400000,
+        actualSpent: 2300000,
+        startDate: "2025-03-15",
+        endDate: "2025-11-30",
+        benefactor: "CE Dept",
+        reference: "Vote 2001 - Renovation 2025",
+        projectType: "Renovation",
+        financialMean: "Vote",
+        projectOfficer: "Lt. Cdr. A. Wickrama",
+        status: "Active",
+        description: "VOTE 223-1-01-2001 Item 03.",
+      },
+    });
+    // VOTE 223-1-01-2506 — Mixed
+    const p8 = await db.project.create({
+      data: {
+        name: "Floating Dock at SLN Dockyard",
+        voteNumber: "223-1-01-2506",
+        voteAllocation: 200000000,
+        committed: 45000000,
+        actualSpent: 12000000,
+        startDate: "2025-01-01",
+        endDate: "2027-06-30",
+        benefactor: "Engineering Dept",
+        reference: "Vote 2506 - Capital 2025",
+        projectType: "New Construction",
+        financialMean: "Vote",
+        projectOfficer: "Cdr. R. Perera",
+        status: "Active",
+        description: "VOTE 223-1-01-2506 Item 06: Floating Dock at SLN Dockyard.",
+      },
+    });
+    // VOTE 223-1-01-1303 — Maintenance
+    const p9 = await db.project.create({
+      data: {
+        name: "Maintenance work at ENA (1303)",
+        voteNumber: "223-1-01-1303",
+        voteAllocation: 18000000,
+        committed: 6500000,
+        actualSpent: 2400000,
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+        benefactor: "CE Dept",
+        reference: "Vote 1303 - Maintenance 2025",
+        projectType: "Maintenance",
+        financialMean: "Vote",
+        projectOfficer: "Lt. D. Rajapaksa",
+        status: "Active",
+        description: "VOTE 223-1-01-1303 Item 01: Maintenance work at ENA.",
+      },
+    });
+    // NON-NAVAL — no vote, uses Malima Fund
+    const p10 = await db.project.create({
+      data: {
+        name: "Renovation work of Sober Island Resort - Trincomalee",
+        voteNumber: "NON-NAVAL",
+        voteAllocation: 25000000,
+        committed: 8500000,
+        actualSpent: 3200000,
+        startDate: "2025-04-01",
+        endDate: "2025-12-30",
+        benefactor: "Non-Public",
+        reference: "Malima Fund Approval 2025",
+        projectType: "Renovation",
+        financialMean: "Malima Fund",
+        projectOfficer: "Lt. N. Gunawardena",
+        status: "Active",
+        description: "NON-NAVAL: Renovation work of Sober Island Resort. Funded via Malima Fund (no government vote).",
+      },
+    });
+    // VOTE 223-1-01-2103 — General Requirement (Equipment)
+    const p11 = await db.project.create({
+      data: {
+        name: "Acquisition of plant machinery & equipment requirement for ENA - 2026",
+        voteNumber: "223-1-01-2103",
+        voteAllocation: 75000000,
+        committed: 12000000,
+        actualSpent: 0,
+        startDate: "2025-07-01",
+        endDate: "2026-06-30",
+        benefactor: "Engineering Dept",
+        reference: "Vote 2103 - Equipment 2026",
+        projectType: "General Requirement",
+        financialMean: "Vote",
+        projectOfficer: "Cdr. R. Perera",
+        status: "Active",
+        description: "VOTE 223-1-01-2103: Acquisition of plant machinery & equipment for ENA 2026.",
+      },
+    });
+    // CONTRACTUAL JOB ENA
+    const p12 = await db.project.create({
+      data: {
+        name: "Contractual Job ENA",
+        voteNumber: "CONTRACTUAL",
+        voteAllocation: 55000000,
+        committed: 15000000,
+        actualSpent: 4500000,
+        startDate: "2025-03-01",
+        endDate: "2026-02-28",
+        benefactor: "Contractual",
+        reference: "ARO Contract - ENA 2025",
+        projectType: "Contractual Job",
+        financialMean: "Contractual",
+        projectOfficer: "Capt. T. Jayasuriya",
+        status: "Active",
+        description: "CONTRACTUAL JOB ENA: ARO (Contractual) flow applies.",
       },
     });
 
     // ── Project files (Processing File Register) ──
     const fileDefs = [
-      [p1.id, "PR-2025-001", "BMS-220", "Centrifugal Pump 15kW", "NOS", 4, 385000, "Marine Pumps Ltd", "Order Placed", "BMS"],
-      [p1.id, "PR-2025-002", "PL-118", "GI Pipe 50mm", "MTR", 120, 4200, "Steel Centre", "Items Received", "Plumbing"],
-      [p1.id, "PR-2025-003", "MT-045", "Mild Steel Plate 6mm", "KG", 850, 245, "Ceylon Steel", "QC Pending", "Metal"],
-      [p1.id, "PR-2025-004", "EL-301", "LED Flood Light 200W", "NOS", 30, 18500, "Electro Lanka", "PO Placed", "Electrical"],
-      [p1.id, "PR-2025-005", "PT-077", "Epoxy Primer Grey", "LTR", 80, 3200, "Asian Paints", "Awaiting Payment", "Paint"],
-      [p2.id, "PR-2025-010", "MT-110", "TMT Bars 16mm", "KG", 5200, 168, "Steel Centre", "Part Supply", "Metal"],
-      [p2.id, "PR-2025-011", "GN-205", "Portland Cement 50kg", "BAG", 400, 1450, "Lanka Cement", "Items Dispatched", "General"],
-      [p2.id, "PR-2025-012", "TL-090", "Concrete Vibrator", "NOS", 2, 145000, "Tools & Co", "Tender Called", "Tools"],
-      [p3.id, "PR-2025-020", "AL-015", "Aluminium Sheet 2mm", "SHT", 25, 12500, "Alu Traders", "PR Raised", "Aluminium"],
-      [p3.id, "PR-2025-021", "LO-008", "Hydraulic Oil ISO 68", "LTR", 200, 1850, "Lubricant Hub", "GS Approval", "Lubricant Oil"],
+      [p1.id, "PR-2025-001", "BMS-220", "Centrifugal Pump 15kW", "NOS", 4, 385000, "Marine Pumps Ltd", "Order Placed", "BMS", "FILE/2025-001", "PO Bandara", "Cdr. R. Perera"],
+      [p1.id, "PR-2025-002", "PL-118", "GI Pipe 50mm", "MTR", 120, 4200, "Steel Centre", "Items Received", "Plumbing", "FILE/2025-002", "LS Silva", "Lt. M. Fernando"],
+      [p1.id, "PR-2025-003", "MT-045", "Mild Steel Plate 6mm", "KG", 850, 245, "Ceylon Steel", "QC Pending", "Metal", "FILE/2025-003", "PO Bandara", "Lt. Cdr. K. Silva"],
+      [p1.id, "PR-2025-004", "EL-301", "LED Flood Light 200W", "NOS", 30, 18500, "Electro Lanka", "PO Placed", "Electrical", null, "LS Silva", "Cdr. R. Perera"],
+      [p1.id, "PR-2025-005", "PT-077", "Epoxy Primer Grey", "LTR", 80, 3200, "Asian Paints", "Awaiting Payment", "Paint", null, "PO Bandara", "Lt. M. Fernando"],
+      [p2.id, "PR-2025-010", "MT-110", "TMT Bars 16mm", "KG", 5200, 168, "Steel Centre", "Part Supply", "Metal", "FILE/2025-010", "LS Silva", "Lt. M. Fernando"],
+      [p8.id, "PR-2025-011", "GN-205", "Portland Cement 50kg", "BAG", 400, 1450, "Lanka Cement", "Items Dispatched", "General", "FILE/2025-011", "PO Bandara", "Cdr. R. Perera"],
+      [p8.id, "PR-2025-012", "TL-090", "Concrete Vibrator", "NOS", 2, 145000, "Tools & Co", "Tender Called", "Tools", null, "LS Silva", "Cdr. R. Perera"],
+      [p9.id, "PR-2025-020", "AL-015", "Aluminium Sheet 2mm", "SHT", 25, 12500, "Alu Traders", "PR Raised", "Aluminium", null, "PO Bandara", "Lt. D. Rajapaksa"],
+      [p9.id, "PR-2025-021", "LO-008", "Hydraulic Oil ISO 68", "LTR", 200, 1850, "Lubricant Hub", "GS Approval", "Lubricant Oil", null, "LS Silva", "Lt. D. Rajapaksa"],
     ] as const;
 
     for (const f of fileDefs) {
@@ -96,8 +289,10 @@ export async function POST() {
           supplier: f[7] as string,
           presentPosition: f[8] as string,
           fileCategory: f[9] as string,
-          createdBy: "System Seed",
-          authorizedBy: "Cdr. R. Perera",
+          fileNumber: (f[10] as string) || null,
+          createdBy: f[11] as string,
+          authorizedBy: f[12] as string,
+          responsiblePerson: f[12] as string,
         },
       });
     }
@@ -108,7 +303,7 @@ export async function POST() {
         { projectId: p1.id, date: "2025-01-20", description: "Initial commitment - pumps", amount: 1540000, type: "Commitment", authorizedBy: "Cdr. R. Perera" },
         { projectId: p1.id, date: "2025-02-05", description: "Pipes & fittings", amount: 504000, type: "Actual", authorizedBy: "Lt. M. Fernando" },
         { projectId: p2.id, date: "2025-01-10", description: "Steel reinforcement", amount: 873600, type: "Actual", authorizedBy: "Lt. M. Fernando" },
-        { projectId: p2.id, date: "2025-02-15", description: "Cement supply", amount: 580000, type: "Commitment", authorizedBy: "WO K. Silva" },
+        { projectId: p8.id, date: "2025-02-15", description: "Cement supply", amount: 580000, type: "Commitment", authorizedBy: "Cdr. R. Perera" },
       ],
     });
 
@@ -116,10 +311,10 @@ export async function POST() {
     const procDefs = [
       ["PR-2025-001", "BMS-220", "Centrifugal Pump 15kW", "NOS", 4, 385000, "Marine Pumps Ltd", "Order Placed", "BMS", p1.name, p1.voteNumber],
       ["PR-2025-010", "MT-110", "TMT Bars 16mm", "KG", 5200, 168, "Steel Centre", "Part Supply", "Metal", p2.name, p2.voteNumber],
-      ["PR-2025-011", "GN-205", "Portland Cement 50kg", "BAG", 400, 1450, "Lanka Cement", "Items Dispatched", "General", p2.name, p2.voteNumber],
+      ["PR-2025-011", "GN-205", "Portland Cement 50kg", "BAG", 400, 1450, "Lanka Cement", "Items Dispatched", "General", p8.name, p8.voteNumber],
       ["PR-2025-030", "EL-410", "Cable 3-Core 25sqmm", "MTR", 600, 980, "Cables Inc", "Tender Called", "Electrical", "", ""],
       ["PR-2025-031", "PT-099", "Marine Paint Red Oxide", "LTR", 150, 4100, "Asian Paints", " quotation Received", "Paint", p1.name, p1.voteNumber],
-      ["PR-2025-032", "TL-022", "Hydraulic Jack 20T", "NOS", 3, 89000, "Tools & Co", "Items Received", "Tools", p3.name, p3.voteNumber],
+      ["PR-2025-032", "TL-022", "Hydraulic Jack 20T", "NOS", 3, 89000, "Tools & Co", "Items Received", "Tools", p9.name, p9.voteNumber],
     ] as const;
 
     for (const f of procDefs) {
@@ -280,11 +475,6 @@ export async function POST() {
       ],
     });
 
-    // Update projects with new fields (benefactor, reference, EDC)
-    await db.project.update({ where: { id: p1.id }, data: { benefactor: "Engineering Dept", reference: "AOR", endDate: "2025-12-20" } });
-    await db.project.update({ where: { id: p2.id }, data: { benefactor: "Civil Works Dept", reference: "Work Order", endDate: "2026-03-30" } });
-    await db.project.update({ where: { id: p3.id }, data: { benefactor: "Workshop Dept", reference: "Job Order", endDate: "2025-11-30" } });
-
     // ── Sample Estimate (Step 1 draft + processed) ──
     const est = await db.estimate.create({
       data: { projectId: p1.id, name: "Refit Material Estimate - Q3", status: "Processed", processedAt: new Date() },
@@ -330,8 +520,8 @@ export async function POST() {
     // ── Sample Earmarked Items ──
     await db.earmarkedItem.createMany({
       data: [
-        { itemDescription: "TMT Bars 16mm", itemCode: "MT-110", projectId: p2.id, projectName: p2.name, qty: 500, unit: "KG", authority: "Lt. M. Fernando", remarks: "Earmarked for jetty slab pending PR" },
-        { itemDescription: "Portland Cement 50kg", itemCode: "GN-205", projectId: p2.id, projectName: p2.name, qty: 50, unit: "BAG", authority: "WO K. Silva", remarks: "Reserved for urgent patch work" },
+        { itemDescription: "TMT Bars 16mm", itemCode: "MT-110", projectId: p2.id, projectName: p2.name, qty: 500, unit: "KG", authority: "Lt. M. Fernando", remarks: "Earmarked for slipway workshop pending PR" },
+        { itemDescription: "Portland Cement 50kg", itemCode: "GN-205", projectId: p8.id, projectName: p8.name, qty: 50, unit: "BAG", authority: "Cdr. R. Perera", remarks: "Reserved for floating dock urgent work" },
       ],
     });
 
@@ -358,8 +548,36 @@ export async function POST() {
         { name: "Lt. Cdr. A. Wickrama", rankOrRate: "Lt. Commander", svcNumber: "SVC/2222", appointment: "CCEO(E)", department: "CE", officeNumber: "Ext 2202", telephone: "011-3456790", whatsapp: "077-2222222", email: "awick@navy.lk", availability: "Available", role: "Officer" },
         { name: "Lt. D. Rajapaksa", rankOrRate: "Lieutenant", svcNumber: "SVC/3333", appointment: "SCE(M)", department: "CE", officeNumber: "Ext 2203", telephone: "011-3456791", whatsapp: "077-3333333", email: "draja@navy.lk", availability: "Off Duty", role: "Officer" },
         { name: "Lt. N. Gunawardena", rankOrRate: "Lieutenant", svcNumber: "SVC/4444", appointment: "SCE(P&P)", department: "CE", officeNumber: "Ext 2204", telephone: "011-3456792", whatsapp: "077-4444444", email: "nguna@navy.lk", availability: "Available", role: "Officer" },
+        // Area Store sailors (CSLOG) — each linked to an area store location
+        { name: "LS Perera", rankOrRate: "Leading Seaman", svcNumber: "SVC/8888", appointment: "APO(E)", department: "CSLOG", officeNumber: "Ext 2106", telephone: "011-2345683", whatsapp: "077-6678901", email: "lperera@navy.lk", availability: "Available", role: "Sailor" },
+        { name: "AB Fernando", rankOrRate: "Able Seaman", svcNumber: "SVC/9999", appointment: "APO(E)", department: "CSLOG", officeNumber: "Ext 2107", telephone: "011-2345684", whatsapp: "077-7789012", email: "afernando@navy.lk", availability: "On Leave", role: "Sailor" },
+        // Officers-in-Area (assigned to area stores)
+        { name: "Lt. S. Wijesinghe", rankOrRate: "Lieutenant", svcNumber: "SVC/5555", appointment: "AOE", department: "CE", officeNumber: "Ext 2205", telephone: "011-3456793", whatsapp: "077-5555555", email: "swijeya@navy.lk", availability: "Available", role: "Officer" },
       ],
     });
+
+    // Update stakeholders with category & seniority (new fields) — must run AFTER createMany above
+    await db.stakeholder.updateMany({ where: { department: "CSLOG", role: "Officer" }, data: { category: "CSLOG Officer" } });
+    await db.stakeholder.updateMany({ where: { department: "CSLOG", role: "Sailor" }, data: { category: "CSLOG Sailor" } });
+    await db.stakeholder.updateMany({ where: { department: "CE", role: "Officer", appointment: { not: "AOE" } }, data: { category: "CCED Officer" } });
+    await db.stakeholder.updateMany({ where: { department: "CE", role: "Sailor" }, data: { category: "CCED Sailor" } });
+    await db.stakeholder.updateMany({ where: { appointment: "AOE" }, data: { category: "Officer-in-Area" } });
+    // set seniority for officers (lower = more senior) — from Navy List
+    await db.stakeholder.updateMany({ where: { appointment: "CCED(E)" }, data: { seniority: 1 } });
+    await db.stakeholder.updateMany({ where: { appointment: "CSLOG" }, data: { seniority: 2 } });
+    await db.stakeholder.updateMany({ where: { appointment: "CCEO(E)" }, data: { seniority: 3 } });
+    await db.stakeholder.updateMany({ where: { appointment: "ASO(E)" }, data: { seniority: 4 } });
+    await db.stakeholder.updateMany({ where: { appointment: "SCE(M)" }, data: { seniority: 5 } });
+    await db.stakeholder.updateMany({ where: { appointment: "SCE(P&P)" }, data: { seniority: 6 } });
+    await db.stakeholder.updateMany({ where: { appointment: "CLOGD" }, data: { seniority: 7 } });
+    await db.stakeholder.updateMany({ where: { appointment: "AOE" }, data: { seniority: 8 } });
+    // set area store locations for sailors (APO(E)→BMS, AAPO(PT)→General; distribute the extra sailors to other stores)
+    await db.stakeholder.updateMany({ where: { appointment: "APO(E)", name: "PO Bandara" }, data: { areaStoreLocation: "BMS", subjectClerk: "BMS Clerk", ilmsCced: "ILMS CCED" } });
+    await db.stakeholder.updateMany({ where: { appointment: "AAPO(PT)" }, data: { areaStoreLocation: "General", subjectClerk: "General Clerk", ilmsCced: "ILMS CCED" } });
+    await db.stakeholder.updateMany({ where: { appointment: "APO(E)", name: "LS Perera" }, data: { areaStoreLocation: "Metal", subjectClerk: "Metal Clerk", ilmsCced: "ILMS CCED" } });
+    await db.stakeholder.updateMany({ where: { appointment: "APO(E)", name: "AB Fernando" }, data: { areaStoreLocation: "Paint", subjectClerk: "Paint Clerk", ilmsCced: "ILMS CCED" } });
+    // Officer-in-Area assigned to area store
+    await db.stakeholder.updateMany({ where: { appointment: "AOE" }, data: { areaStoreLocation: "BMS", subjectClerk: "BMS Clerk", ilmsCced: "ILMS CCED" } });
 
     // ── Suppliers with contacts, nominations, ratings ──
     const sup1 = await db.supplier.create({
@@ -481,6 +699,88 @@ export async function POST() {
         { canonicalCode: "LO-008", description: "Hydraulic Oil ISO 68", category: "Lubricant Oil", unit: "LTR", status: "Active" },
         { canonicalCode: "AL-015", description: "Aluminium Sheet 2mm", category: "Aluminium", unit: "SHT", status: "Active" },
         { canonicalCode: "GN-205", description: "Portland Cement 50kg", category: "General", unit: "BAG", status: "Active" },
+      ],
+    });
+
+    // ── Process Flows (RC, Non-Rate, ARO Contractual) with steps + financial delegation ──
+    const flowRC = await db.processFlow.create({ data: { name: "RC", description: "Rate Contract procurement flow — items under active RC list" } });
+    await db.processStep.createMany({
+      data: [
+        { flowId: flowRC.id, stepOrder: 1, positionName: "PR Raised", defaultResponsiblePerson: "APO(E) — PO Bandara", financialDelegationLevel: "—" },
+        { flowId: flowRC.id, stepOrder: 2, positionName: "GS Approval", defaultResponsiblePerson: "GS Officer", financialDelegationLevel: "Up to Rs. 500,000 — Cdr" },
+        { flowId: flowRC.id, stepOrder: 3, positionName: "RC Verification", defaultResponsiblePerson: "ASO(E) — Lt. Cdr. K. Silva", financialDelegationLevel: "Up to Rs. 500,000 — Cdr" },
+        { flowId: flowRC.id, stepOrder: 4, positionName: "PO Placed", defaultResponsiblePerson: "CLOGD — Lt. M. Fernando", financialDelegationLevel: "Up to Rs. 2,000,000 — Capt" },
+        { flowId: flowRC.id, stepOrder: 5, positionName: "Items Received", defaultResponsiblePerson: "APO(E) — PO Bandara", financialDelegationLevel: "—" },
+        { flowId: flowRC.id, stepOrder: 6, positionName: "QC Passed", defaultResponsiblePerson: "QCI Officer", financialDelegationLevel: "—" },
+        { flowId: flowRC.id, stepOrder: 7, positionName: "Payment Done", defaultResponsiblePerson: "CSLOG — Cdr. R. Perera", financialDelegationLevel: "Up to Rs. 5,000,000 — Capt" },
+      ],
+    });
+
+    const flowNR = await db.processFlow.create({ data: { name: "Non-Rate", description: "Non-Rate contract flow — items not under RC, requires tender/evaluation" } });
+    await db.processStep.createMany({
+      data: [
+        { flowId: flowNR.id, stepOrder: 1, positionName: "PR Raised", defaultResponsiblePerson: "APO(E) — PO Bandara", financialDelegationLevel: "—" },
+        { flowId: flowNR.id, stepOrder: 2, positionName: "GS Approval", defaultResponsiblePerson: "GS Officer", financialDelegationLevel: "Up to Rs. 500,000 — Cdr" },
+        { flowId: flowNR.id, stepOrder: 3, positionName: "Tender Called", defaultResponsiblePerson: "ASO(E) — Lt. Cdr. K. Silva", financialDelegationLevel: "Up to Rs. 500,000 — Cdr", isTenderStage: true },
+        { flowId: flowNR.id, stepOrder: 4, positionName: "Quotation Received", defaultResponsiblePerson: "CLOGD — Lt. M. Fernando", financialDelegationLevel: "Up to Rs. 1,000,000 — Cdr", isTenderStage: true },
+        { flowId: flowNR.id, stepOrder: 5, positionName: "BEC Evaluation", defaultResponsiblePerson: "BEC Committee", financialDelegationLevel: "Up to Rs. 2,000,000 — Capt", isEvaluationStage: true },
+        { flowId: flowNR.id, stepOrder: 6, positionName: "AOE Approval", defaultResponsiblePerson: "AOE", financialDelegationLevel: "Up to Rs. 2,000,000 — Capt", isEvaluationStage: true },
+        { flowId: flowNR.id, stepOrder: 7, positionName: "PO Placed", defaultResponsiblePerson: "CLOGD — Lt. M. Fernando", financialDelegationLevel: "Up to Rs. 5,000,000 — Capt" },
+        { flowId: flowNR.id, stepOrder: 8, positionName: "Items Received", defaultResponsiblePerson: "APO(E) — PO Bandara", financialDelegationLevel: "—" },
+        { flowId: flowNR.id, stepOrder: 9, positionName: "QC Passed", defaultResponsiblePerson: "QCI Officer", financialDelegationLevel: "—" },
+        { flowId: flowNR.id, stepOrder: 10, positionName: "Payment Done", defaultResponsiblePerson: "CSLOG — Cdr. R. Perera", financialDelegationLevel: "Up to Rs. 10,000,000 — FC" },
+      ],
+    });
+
+    const flowARO = await db.processFlow.create({ data: { name: "ARO (Contractual)", description: "ARO Contractual job flow — complex tender opening, evaluation & financial delegation" } });
+    await db.processStep.createMany({
+      data: [
+        { flowId: flowARO.id, stepOrder: 1, positionName: "Contract Initiation", defaultResponsiblePerson: "CCED(E) — Capt. T. Jayasuriya", financialDelegationLevel: "—" },
+        { flowId: flowARO.id, stepOrder: 2, positionName: "Scope Definition", defaultResponsiblePerson: "SCE(M) — Lt. D. Rajapaksa", financialDelegationLevel: "—" },
+        { flowId: flowARO.id, stepOrder: 3, positionName: "Tender Called", defaultResponsiblePerson: "CCEO(E) — Lt. Cdr. A. Wickrama", financialDelegationLevel: "Up to Rs. 5,000,000 — Capt", isTenderStage: true },
+        { flowId: flowARO.id, stepOrder: 4, positionName: "Tender Opening", defaultResponsiblePerson: "Tender Board", financialDelegationLevel: "Up to Rs. 5,000,000 — Capt", isTenderStage: true },
+        { flowId: flowARO.id, stepOrder: 5, positionName: "BEC Evaluation", defaultResponsiblePerson: "BEC Committee", financialDelegationLevel: "Up to Rs. 10,000,000 — FC", isEvaluationStage: true },
+        { flowId: flowARO.id, stepOrder: 6, positionName: "Negotiation", defaultResponsiblePerson: "CCED(E) — Capt. T. Jayasuriya", financialDelegationLevel: "Up to Rs. 10,000,000 — FC", isEvaluationStage: true },
+        { flowId: flowARO.id, stepOrder: 7, positionName: "AOE Approval", defaultResponsiblePerson: "AOE", financialDelegationLevel: "Up to Rs. 20,000,000 — AOE", isEvaluationStage: true },
+        { flowId: flowARO.id, stepOrder: 8, positionName: "Contract Award", defaultResponsiblePerson: "CCED(E) — Capt. T. Jayasuriya", financialDelegationLevel: "Up to Rs. 50,000,000 — CNC" },
+        { flowId: flowARO.id, stepOrder: 9, positionName: "Work In Progress", defaultResponsiblePerson: "SCE(P&P) — Lt. N. Gunawardena", financialDelegationLevel: "—" },
+        { flowId: flowARO.id, stepOrder: 10, positionName: "QC Passed", defaultResponsiblePerson: "QCI Officer", financialDelegationLevel: "—" },
+        { flowId: flowARO.id, stepOrder: 11, positionName: "Final Payment", defaultResponsiblePerson: "CSLOG — Cdr. R. Perera", financialDelegationLevel: "Up to Rs. 50,000,000 — CNC" },
+      ],
+    });
+
+    // ── Area Store Records (oncharge NAV 251, off-charge NAV 255) ──
+    await db.areaStoreRecord.createMany({
+      data: [
+        { storeName: "BMS", itemCode: "BMS-220", itemName: "Centrifugal Pump 15kW", category: "BMS", unit: "NOS", qty: 4, unitCost: 385000, totalCost: 1540000, recordType: "Oncharge", navReference: "NAV 251", fileNumber: "FILE/2025-001", location: "BMS Store", date: "2025-06-15", remarks: "Oncharge via QCI" },
+        { storeName: "BMS", itemCode: "BMS-6204", itemName: "Bearing 6204 ZZ", category: "BMS", unit: "NOS", qty: 10, unitCost: 1850, totalCost: 18500, recordType: "Oncharge", navReference: "NAV 251", fileNumber: "FILE/2025-005", location: "BMS Store", date: "2025-06-20" },
+        { storeName: "Metal", itemCode: "MT-045", itemName: "Mild Steel Plate 6mm", category: "Metal", unit: "KG", qty: 850, unitCost: 245, totalCost: 208250, recordType: "Oncharge", navReference: "NAV 251", fileNumber: "FILE/2025-003", location: "Metal Store", date: "2025-06-18" },
+        { storeName: "Paint", itemCode: "PT-077", itemName: "Epoxy Primer Grey", category: "Paint", unit: "LTR", qty: 20, unitCost: 3200, totalCost: 64000, recordType: "OffCharge", navReference: "NAV 255", fileNumber: "FILE/2025-002", location: "Zone D", date: "2025-06-22", remarks: "Off-charge to Zone D Stores" },
+        { storeName: "Oil & Lubricant", itemCode: "LO-008", itemName: "Hydraulic Oil ISO 68", category: "Lubricant Oil", unit: "LTR", qty: 60, unitCost: 1850, totalCost: 111000, recordType: "Oncharge", navReference: "NAV 251", fileNumber: "FILE/2025-021", location: "Oil Store", date: "2025-06-10" },
+        { storeName: "General", itemCode: "GN-205", itemName: "Portland Cement 50kg", category: "General", unit: "BAG", qty: 45, unitCost: 1450, totalCost: 65250, recordType: "Oncharge", navReference: "NAV 251", fileNumber: "FILE/2025-011", location: "General Store", date: "2025-06-12" },
+      ],
+    });
+
+    // ── User Profiles ──
+    await db.userProfile.createMany({
+      data: [
+        { username: "rperera", displayName: "Cdr. R. Perera", email: "rperera@navy.lk", role: "Admin", department: "CSLOG" },
+        { username: "mfernando", displayName: "Lt. M. Fernando", email: "mfernando@navy.lk", role: "Officer", department: "CSLOG" },
+        { username: "pbandara", displayName: "PO Bandara", email: "pbandara@navy.lk", role: "Clerk", department: "CSLOG" },
+        { username: "tjaya", displayName: "Capt. T. Jayasuriya", email: "tjaya@navy.lk", role: "Manager", department: "CE" },
+      ],
+    });
+
+    // ── Store Settings ──
+    await db.storeSetting.createMany({
+      data: [
+        { storeName: "Zone A", storeType: "Zone", responsiblePerson: "PO Bandara", location: "Dockyard Block A" },
+        { storeName: "Zone B", storeType: "Zone", responsiblePerson: "LS Silva", location: "Dockyard Block B" },
+        { storeName: "BMS Area Store", storeType: "AreaStore", responsiblePerson: "PO Bandara", location: "CSLOG BMS Bay" },
+        { storeName: "Metal Area Store", storeType: "AreaStore", responsiblePerson: "LS Silva", location: "CSLOG Metal Bay" },
+        { storeName: "Paint Area Store", storeType: "AreaStore", responsiblePerson: "PO Bandara", location: "CSLOG Paint Bay" },
+        { storeName: "Oil & Lubricant Area Store", storeType: "AreaStore", responsiblePerson: "LS Silva", location: "CSLOG Oil Bay" },
+        { storeName: "Ready-Use Stores", storeType: "Ready-Use", responsiblePerson: "LS Silva", location: "Dockyard RU" },
       ],
     });
 

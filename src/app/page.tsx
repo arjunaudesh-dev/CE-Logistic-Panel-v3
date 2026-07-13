@@ -10,6 +10,7 @@ import { StoresModule } from "@/components/erp/modules/stores";
 import { RateFinderModule } from "@/components/erp/modules/rate-finder";
 import { CollectionModule } from "@/components/erp/modules/collection";
 import { StakeholdersModule } from "@/components/erp/modules/stakeholders";
+import { SettingsModule } from "@/components/erp/modules/settings";
 
 export default function Home() {
   const [active, setActive] = useState<ModuleId>("dashboard");
@@ -34,6 +35,7 @@ export default function Home() {
       {active === "rate-finder" && <RateFinderModule />}
       {active === "collection" && <CollectionModule />}
       {active === "stakeholders" && <StakeholdersModule />}
+      {active === "settings" && <SettingsModule />}
     </AppShell>
   );
 }

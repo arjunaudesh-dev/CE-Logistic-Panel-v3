@@ -39,13 +39,15 @@ export async function POST(
         supplier: item.rcSupplier,
         presentPosition: position,
         fileCategory: "General",
+        fileNumber: fileNumber,
         createdBy: body.createdBy || "Officer",
-        authorizedBy: null,
+        authorizedBy: body.authorizedBy || null,
+        responsiblePerson: body.responsiblePerson || null,
         logs: {
           create: {
             newPosition: position,
             changedBy: body.createdBy || "Officer",
-            comment: `File initiated from estimate (RC: ${item.isRC ? "Yes" : "No"})`,
+            comment: `File initiated from estimate (RC: ${item.isRC ? "Yes" : "No"})${body.authorizedBy ? ` · Authorized by ${body.authorizedBy}` : ""}`,
           },
         },
       },
@@ -67,6 +69,7 @@ export async function POST(
         presentPosition: position,
         fileCategory: "General",
         createdBy: body.createdBy || "Officer",
+        authorizedBy: body.authorizedBy || null,
         logs: {
           create: {
             newPosition: position,

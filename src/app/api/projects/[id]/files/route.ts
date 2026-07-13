@@ -44,8 +44,10 @@ export async function POST(
         supplier: body.supplier || null,
         presentPosition: position,
         fileCategory: body.fileCategory || "General",
+        fileNumber: body.fileNumber || null,
         createdBy: body.createdBy || "Officer",
         authorizedBy: body.authorizedBy || null,
+        responsiblePerson: body.responsiblePerson || null,
         logs: {
           create: {
             newPosition: position,

@@ -32,7 +32,9 @@ export async function PUT(
         supplier: body.supplier ?? existing.supplier,
         presentPosition: newPosition,
         fileCategory: body.fileCategory ?? existing.fileCategory,
+        fileNumber: body.fileNumber ?? existing.fileNumber,
         authorizedBy: body.authorizedBy ?? existing.authorizedBy,
+        responsiblePerson: body.responsiblePerson ?? existing.responsiblePerson,
       },
     });
 

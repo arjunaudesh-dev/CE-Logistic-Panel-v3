@@ -16,6 +16,14 @@ export async function PUT(
         svcNumber: body.svcNumber || null,
         appointment: body.appointment || null,
         department: body.department || "CSLOG",
+        category: body.category || "Officer",
+        seniority:
+          body.seniority !== undefined && body.seniority !== null && body.seniority !== ""
+            ? Number(body.seniority)
+            : null,
+        areaStoreLocation: body.areaStoreLocation || null,
+        subjectClerk: body.subjectClerk || null,
+        ilmsCced: body.ilmsCced || null,
         officeNumber: body.officeNumber || null,
         telephone: body.telephone || null,
         whatsapp: body.whatsapp || null,

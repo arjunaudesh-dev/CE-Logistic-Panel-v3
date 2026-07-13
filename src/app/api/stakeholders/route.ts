@@ -7,12 +7,14 @@ export async function GET(req: NextRequest) {
     const department = searchParams.get("department");
     const appointment = searchParams.get("appointment");
     const role = searchParams.get("role");
+    const category = searchParams.get("category");
     const search = searchParams.get("search");
 
     const where: Record<string, unknown> = {};
     if (department && department !== "all") where.department = department;
     if (appointment && appointment !== "all") where.appointment = appointment;
     if (role && role !== "all") where.role = role;
+    if (category && category !== "all") where.category = category;
     if (search) {
       where.OR = [
         { name: { contains: search } },
@@ -42,6 +44,14 @@ export async function POST(req: NextRequest) {
         svcNumber: body.svcNumber || null,
         appointment: body.appointment || null,
         department: body.department || "CSLOG",
+        category: body.category || "Officer",
+        seniority:
+          body.seniority !== undefined && body.seniority !== null && body.seniority !== ""
+            ? Number(body.seniority)
+            : null,
+        areaStoreLocation: body.areaStoreLocation || null,
+        subjectClerk: body.subjectClerk || null,
+        ilmsCced: body.ilmsCced || null,
         officeNumber: body.officeNumber || null,
         telephone: body.telephone || null,
         whatsapp: body.whatsapp || null,

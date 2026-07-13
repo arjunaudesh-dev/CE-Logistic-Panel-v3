@@ -20,6 +20,16 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -75,6 +85,10 @@ import {
   GitMerge,
   Sparkles,
   Copy,
+  Store,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  FileText,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -82,6 +96,10 @@ import {
   STORE_CATEGORIES,
   FILE_CATEGORIES,
   ZONES,
+  AREA_STORES,
+  AREA_STORE_CATEGORIES,
+  NAV_REFERENCES,
+  navRefColor,
   confidenceColor,
   itemMasterStatusColor,
   duplicateTypeColor,
@@ -215,6 +233,29 @@ interface MergeResponse {
   alternateNames: string | null;
 }
 
+// ─── Area Store Records (CSLOG — oncharge NAV 251 / off-charge NAV 255) ───
+interface AreaStoreRecord {
+  id: string;
+  storeName: string;
+  itemCode: string | null;
+  itemName: string;
+  category: string;
+  unit: string;
+  qty: number;
+  unitCost: number;
+  totalCost: number;
+  recordType: string; // "Oncharge" | "OffCharge"
+  navReference: string | null; // "NAV 251" | "NAV 255"
+  qcInspectionId: string | null;
+  fileNumber: string | null;
+  location: string | null;
+  date: string | null;
+  remarks: string | null;
+  createdAt: string;
+}
+
+type AreaRecordTypeFilter = "all" | "Oncharge" | "OffCharge";
+
 type StockFilter = "all" | "in" | "low" | "out" | "over";
 type SortKey = "description" | "qty" | "cost" | "category";
 
@@ -224,7 +265,7 @@ const PAGE_SIZE = 25;
 // Main component
 // ────────────────────────────────────────────────────────────
 export function StoresModule() {
-  const [tab, setTab] = useState<"zones" | "stores">("zones");
+  const [tab, setTab] = useState<"zones" | "stores" | "area">("zones");
 
   // Shared fetches
   const {
@@ -434,7 +475,7 @@ export function StoresModule() {
 
       <Tabs
         value={tab}
-        onValueChange={(v) => setTab(v as "zones" | "stores")}
+        onValueChange={(v) => setTab(v as "zones" | "stores" | "area")}
         className="w-full"
       >
         <TabsList>
@@ -443,6 +484,9 @@ export function StoresModule() {
           </TabsTrigger>
           <TabsTrigger value="stores" className="gap-1.5">
             <Package className="h-4 w-4" /> Stores
+          </TabsTrigger>
+          <TabsTrigger value="area" className="gap-1.5">
+            <Store className="h-4 w-4" /> Area Stores
           </TabsTrigger>
         </TabsList>
 
@@ -486,6 +530,11 @@ export function StoresModule() {
             onView={(it) => setViewing(it)}
             onAdd={openAdd}
           />
+        </TabsContent>
+
+        {/* ─── Area Stores tab ─── */}
+        <TabsContent value="area" className="mt-4">
+          <AreaStoresTab />
         </TabsContent>
       </Tabs>
 
@@ -3882,5 +3931,853 @@ function BulkUploadItemMasterSection() {
         </div>
       )}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Area Stores tab — CSLOG area store oncharge/off-charge records
+// ────────────────────────────────────────────────────────────
+function recordTypeColor(type: string): string {
+  switch (type) {
+    case "Oncharge":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "OffCharge":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+function AreaStoresTab() {
+  const [storeFilter, setStoreFilter] = useState<string>("all");
+  const [recordTypeFilter, setRecordTypeFilter] =
+    useState<AreaRecordTypeFilter>("all");
+  const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AreaStoreRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const { toast } = useToast();
+
+  // Build URL with server-side filter params (storeName, recordType, search)
+  const url = useMemo(() => {
+    const params = new URLSearchParams();
+    if (storeFilter !== "all") params.set("storeName", storeFilter);
+    if (recordTypeFilter !== "all") params.set("recordType", recordTypeFilter);
+    const s = search.trim();
+    if (s) params.set("search", s);
+    const q = params.toString();
+    return q ? `/api/area-stores?${q}` : "/api/area-stores";
+  }, [storeFilter, recordTypeFilter, search]);
+
+  const {
+    data,
+    loading,
+    error,
+    refresh,
+  } = useFetch<AreaStoreRecord[]>(url);
+
+  // Fetch ALL records (unfiltered) to compute per-area-store summary tiles
+  const { data: allRecords } = useFetch<AreaStoreRecord[]>("/api/area-stores");
+
+  // Per-area-store aggregates (always across ALL records)
+  const storeSummaries = useMemo(() => {
+    const map: Record<
+      string,
+      { onchargeValue: number; offChargeValue: number; itemCount: number }
+    > = {};
+    for (const store of AREA_STORES) {
+      map[store] = { onchargeValue: 0, offChargeValue: 0, itemCount: 0 };
+    }
+    for (const r of allRecords ?? []) {
+      if (!map[r.storeName]) {
+        map[r.storeName] = { onchargeValue: 0, offChargeValue: 0, itemCount: 0 };
+      }
+      if (r.recordType === "Oncharge") map[r.storeName].onchargeValue += r.totalCost;
+      else if (r.recordType === "OffCharge")
+        map[r.storeName].offChargeValue += r.totalCost;
+      map[r.storeName].itemCount += 1;
+    }
+    return map;
+  }, [allRecords]);
+
+  const filtered = useMemo(() => data ?? [], [data]);
+
+  const totals = useMemo(() => {
+    const onchargeValue = filtered
+      .filter((r) => r.recordType === "Oncharge")
+      .reduce((s, r) => s + r.totalCost, 0);
+    const offChargeValue = filtered
+      .filter((r) => r.recordType === "OffCharge")
+      .reduce((s, r) => s + r.totalCost, 0);
+    return {
+      onchargeValue,
+      offChargeValue,
+      netValue: onchargeValue - offChargeValue,
+      count: filtered.length,
+    };
+  }, [filtered]);
+
+  function exportCSV() {
+    const rows: string[][] = [
+      [
+        "Item Code",
+        "Description",
+        "Category",
+        "Qty",
+        "Unit",
+        "Unit Cost",
+        "Total Cost",
+        "Record Type",
+        "NAV Reference",
+        "File Number",
+        "Location",
+        "Date",
+      ],
+    ];
+    for (const r of filtered) {
+      rows.push([
+        r.itemCode ?? "",
+        r.itemName,
+        r.category,
+        String(r.qty),
+        r.unit,
+        String(r.unitCost),
+        String(r.totalCost),
+        r.recordType,
+        r.navReference ?? "",
+        r.fileNumber ?? "",
+        r.location ?? "",
+        r.date ?? "",
+      ]);
+    }
+    const csv = rows
+      .map((row) =>
+        row
+          .map((cell) => {
+            const needsQuote = /[",\n]/.test(cell);
+            const escaped = cell.replace(/"/g, '""');
+            return needsQuote ? `"${escaped}"` : escaped;
+          })
+          .join(",")
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const today = new Date().toISOString().slice(0, 10);
+    const fileName =
+      storeFilter !== "all"
+        ? `area-store-${storeFilter.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${today}.csv`
+        : `area-stores-${today}.csv`;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Export complete",
+      description: `${filtered.length} record(s) exported to ${fileName}`,
+    });
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await apiRequest(`/api/area-stores/${deleteTarget.id}`, "DELETE");
+    setDeleting(false);
+    if (res.ok) {
+      toast({ title: "Record deleted", description: deleteTarget.itemName });
+      setDeleteTarget(null);
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  if (loading) return <LoadingState label="Loading area store records..." />;
+  if (error) return <ErrorState message={error} />;
+
+  const filtersActive =
+    storeFilter !== "all" || recordTypeFilter !== "all" || search !== "";
+
+  return (
+    <div className="space-y-4">
+      {/* Header strip with explanation */}
+      <div className="bg-card border border-border rounded-xl p-4">
+        <div className="flex items-start gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Store className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">
+              Area Stores{" "}
+              <span className="text-muted-foreground font-normal">
+                — CSLOG stores with oncharge/off-charge tracking
+              </span>
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Area stores belong to CSLOG but records are kept here for easy
+              management. Items are received into area stores via QCI (Oncharge —
+              NAV 251) and transferred to Stores locations (Off-charge — NAV 255).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary tiles per area store (clickable filter) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {AREA_STORES.map((store) => {
+          const s = storeSummaries[store] ?? {
+            onchargeValue: 0,
+            offChargeValue: 0,
+            itemCount: 0,
+          };
+          const isActive = storeFilter === store;
+          return (
+            <button
+              key={store}
+              onClick={() => setStoreFilter(isActive ? "all" : store)}
+              className={cn(
+                "bg-card border rounded-xl p-3 text-left transition-all hover:shadow-md hover:shadow-black/20 hover:-translate-y-0.5",
+                isActive ? "border-primary ring-1 ring-primary/30" : "border-border"
+              )}
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-semibold text-foreground truncate">
+                  {store}
+                </p>
+                <CustomBadge className="bg-secondary/60 text-muted-foreground border-border text-[10px] px-1.5 py-0">
+                  {s.itemCount}
+                </CustomBadge>
+              </div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Oncharge
+              </p>
+              <p className="text-xs font-semibold text-emerald-400 tabular-nums mb-1">
+                {formatCurrency(s.onchargeValue)}
+              </p>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Off-charge
+              </p>
+              <p className="text-xs font-semibold text-blue-400 tabular-nums">
+                {formatCurrency(s.offChargeValue)}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Aggregate stats for current filter */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard
+          label="Oncharge Value"
+          value={formatCurrency(totals.onchargeValue)}
+          icon={ArrowDownToLine}
+          accent="green"
+          sub="NAV 251 — received via QCI"
+        />
+        <StatCard
+          label="Off-charge Value"
+          value={formatCurrency(totals.offChargeValue)}
+          icon={ArrowUpFromLine}
+          accent="blue"
+          sub="NAV 255 — transferred to Stores"
+        />
+        <StatCard
+          label="Net Stock Value"
+          value={formatCurrency(totals.netValue)}
+          icon={TrendingUp}
+          accent="amber"
+          sub="Oncharge − Off-charge"
+        />
+        <StatCard
+          label="Records"
+          value={totals.count}
+          icon={FileText}
+          accent="purple"
+          sub="Filtered records"
+        />
+      </div>
+
+      {/* Filter toolbar */}
+      <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by item name..."
+              className="pl-9 bg-background border-border"
+            />
+          </div>
+          <Select
+            value={recordTypeFilter}
+            onValueChange={(v) =>
+              setRecordTypeFilter(v as AreaRecordTypeFilter)
+            }
+          >
+            <SelectTrigger className="w-full sm:w-44 bg-background border-border">
+              <SelectValue placeholder="Record type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Records</SelectItem>
+              <SelectItem value="Oncharge">Oncharge (NAV 251)</SelectItem>
+              <SelectItem value="OffCharge">Off-charge (NAV 255)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={storeFilter} onValueChange={setStoreFilter}>
+            <SelectTrigger className="w-full sm:w-44 bg-background border-border">
+              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+              <SelectValue placeholder="All stores" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Area Stores</SelectItem>
+              {AREA_STORES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {filtersActive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStoreFilter("all");
+                setRecordTypeFilter("all");
+                setSearch("");
+              }}
+              className="h-9"
+            >
+              <X className="h-4 w-4" /> Clear
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCSV}
+            disabled={filtered.length === 0}
+            className="h-9 gap-1.5"
+          >
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+          <Button
+            onClick={() => setAddOpen(true)}
+            size="sm"
+            className="h-9 gap-1.5 sm:ml-auto"
+          >
+            <Plus className="h-4 w-4" /> Add Record
+          </Button>
+        </div>
+      </div>
+
+      {/* Records table */}
+      <div className="bg-card border border-border rounded-xl">
+        {!filtered.length ? (
+          <EmptyState
+            icon={Store}
+            title="No area store records"
+            description="No records match your filters. Add a record or clear the filters."
+            action={
+              <Button
+                size="sm"
+                onClick={() => setAddOpen(true)}
+                className="gap-1.5"
+              >
+                <Plus className="h-4 w-4" /> Add Record
+              </Button>
+            }
+          />
+        ) : (
+          <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="min-w-[180px]">Item</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Unit Cost</TableHead>
+                  <TableHead className="text-right">Total Cost</TableHead>
+                  <TableHead>Record Type</TableHead>
+                  <TableHead>NAV Ref</TableHead>
+                  <TableHead>File Number</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="min-w-[160px]">Remarks</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((r) => (
+                  <TableRow key={r.id} className="border-border">
+                    <TableCell>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-foreground font-medium truncate">
+                          {r.itemName}
+                        </span>
+                        {r.itemCode && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {r.itemCode}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <CategoryBadge category={r.category} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {r.unit}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-foreground">
+                      {formatNumber(r.qty)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {formatCurrency(r.unitCost)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-semibold text-foreground">
+                      {formatCurrency(r.totalCost)}
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge className={recordTypeColor(r.recordType)}>
+                        {r.recordType === "OffCharge"
+                          ? "Off-charge"
+                          : r.recordType}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell>
+                      {r.navReference ? (
+                        <CustomBadge className={navRefColor(r.navReference)}>
+                          {r.navReference}
+                        </CustomBadge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {r.fileNumber || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
+                        <MapPin className="h-3 w-3 mr-1" />
+                        {r.location || "—"}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {r.date || "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs max-w-[200px]">
+                      <span className="line-clamp-2">
+                        {r.remarks || "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                        onClick={() => setDeleteTarget(r)}
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+
+      {/* Add record dialog */}
+      {addOpen && (
+        <AreaStoreRecordFormDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onSaved={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+
+      {/* Delete confirm */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete area store record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the record for{" "}
+              <span className="text-foreground font-medium">
+                {deleteTarget?.itemName}
+              </span>{" "}
+              ({deleteTarget?.recordType}). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-500 hover:bg-red-600 text-white"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDelete();
+              }}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Area Store Record Form (Add)
+// ────────────────────────────────────────────────────────────
+interface AreaStoreRecordFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: () => void;
+}
+
+interface AreaStoreRecordForm {
+  storeName: string;
+  itemCode: string;
+  itemName: string;
+  category: string;
+  unit: string;
+  qty: string;
+  unitCost: string;
+  recordType: "Oncharge" | "OffCharge";
+  navReference: "NAV 251" | "NAV 255";
+  fileNumber: string;
+  location: string;
+  date: string;
+  remarks: string;
+}
+
+const DEFAULT_AREA_FORM: AreaStoreRecordForm = {
+  storeName: "BMS",
+  itemCode: "",
+  itemName: "",
+  category: "BMS",
+  unit: "NOS",
+  qty: "0",
+  unitCost: "0",
+  recordType: "Oncharge",
+  navReference: "NAV 251",
+  fileNumber: "",
+  location: "",
+  date: new Date().toISOString().slice(0, 10),
+  remarks: "",
+};
+
+function AreaStoreRecordFormDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: AreaStoreRecordFormProps) {
+  const [form, setForm] = useState<AreaStoreRecordForm>(DEFAULT_AREA_FORM);
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const qtyNum = Number(form.qty) || 0;
+  const unitCostNum = Number(form.unitCost) || 0;
+  const totalCost = qtyNum * unitCostNum;
+
+  const set = <K extends keyof AreaStoreRecordForm>(
+    k: K,
+    v: AreaStoreRecordForm[K]
+  ) => setForm((prev) => ({ ...prev, [k]: v }));
+
+  function onStoreChange(store: string) {
+    const cats = AREA_STORE_CATEGORIES[store] ?? ["General"];
+    setForm((prev) => ({
+      ...prev,
+      storeName: store,
+      category: cats[0] ?? "General",
+    }));
+  }
+
+  function onRecordTypeChange(rt: "Oncharge" | "OffCharge") {
+    // NAV ref follows record type: Oncharge → NAV 251, Off-charge → NAV 255
+    setForm((prev) => ({
+      ...prev,
+      recordType: rt,
+      navReference: rt === "Oncharge" ? "NAV 251" : "NAV 255",
+    }));
+  }
+
+  async function submit() {
+    if (!form.itemName.trim()) {
+      toast({ title: "Item name is required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      storeName: form.storeName,
+      itemCode: form.itemCode.trim() || null,
+      itemName: form.itemName.trim(),
+      category: form.category,
+      unit: form.unit || "NOS",
+      qty: qtyNum,
+      unitCost: unitCostNum,
+      recordType: form.recordType,
+      navReference: form.navReference,
+      fileNumber: form.fileNumber.trim() || null,
+      location: form.location.trim() || null,
+      date: form.date || new Date().toISOString().slice(0, 10),
+      remarks: form.remarks.trim() || null,
+    };
+    const res = await apiRequest("/api/area-stores", "POST", payload);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: "Record added",
+        description: `${payload.itemName} (${payload.recordType})`,
+      });
+      onSaved();
+    } else {
+      toast({
+        title: "Failed to add record",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  const categoryOptions =
+    AREA_STORE_CATEGORIES[form.storeName] ?? FILE_CATEGORIES;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground">
+            Add Area Store Record
+          </DialogTitle>
+          <DialogDescription>
+            Record items received into an area store (Oncharge — NAV 251) or
+            transferred to Stores locations (Off-charge — NAV 255).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+          <div className="space-y-1.5">
+            <Label>
+              Area Store <span className="text-red-400">*</span>
+            </Label>
+            <Select value={form.storeName} onValueChange={onStoreChange}>
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AREA_STORES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              Record Type <span className="text-red-400">*</span>
+            </Label>
+            <Select
+              value={form.recordType}
+              onValueChange={(v) =>
+                onRecordTypeChange(v as "Oncharge" | "OffCharge")
+              }
+            >
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Oncharge">
+                  Oncharge (received via QCI)
+                </SelectItem>
+                <SelectItem value="OffCharge">
+                  Off-charge (transferred to Stores)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              NAV Reference <span className="text-red-400">*</span>
+            </Label>
+            <Select
+              value={form.navReference}
+              onValueChange={(v) =>
+                set("navReference", v as "NAV 251" | "NAV 255")
+              }
+            >
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {NAV_REFERENCES.map((n) => (
+                  <SelectItem key={n} value={n}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Category</Label>
+            <Select
+              value={form.category}
+              onValueChange={(v) => set("category", v)}
+            >
+              <SelectTrigger className="bg-background border-border w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {categoryOptions.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>
+              Item Name <span className="text-red-400">*</span>
+            </Label>
+            <Input
+              value={form.itemName}
+              onChange={(e) => set("itemName", e.target.value)}
+              placeholder="e.g. Centrifugal Pump 15kW"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Item Code</Label>
+            <Input
+              value={form.itemCode}
+              onChange={(e) => set("itemCode", e.target.value)}
+              placeholder="e.g. BMS-220"
+              className="bg-background border-border font-mono"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Unit</Label>
+            <Input
+              value={form.unit}
+              onChange={(e) => set("unit", e.target.value)}
+              placeholder="NOS, KG, MTR..."
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Quantity</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={form.qty}
+              onChange={(e) => set("qty", e.target.value)}
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Unit Cost (Rs.)</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={form.unitCost}
+              onChange={(e) => set("unitCost", e.target.value)}
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Total Cost (auto-calculated)</Label>
+            <div className="h-9 px-3 rounded-md border border-border bg-secondary/40 flex items-center text-sm font-semibold text-foreground tabular-nums">
+              {formatCurrency(totalCost)}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>File Number</Label>
+            <Input
+              value={form.fileNumber}
+              onChange={(e) => set("fileNumber", e.target.value)}
+              placeholder="e.g. FILE/2025-001"
+              className="bg-background border-border font-mono"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Location</Label>
+            <Input
+              value={form.location}
+              onChange={(e) => set("location", e.target.value)}
+              placeholder="e.g. BMS Store, Zone D..."
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Date</Label>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(e) => set("date", e.target.value)}
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Remarks</Label>
+            <Textarea
+              value={form.remarks}
+              onChange={(e) => set("remarks", e.target.value)}
+              placeholder="Optional notes"
+              className="bg-background border-border min-h-[38px]"
+              rows={1}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={saving} className="gap-1.5">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Add Record
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

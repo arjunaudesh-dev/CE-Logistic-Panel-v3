@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { apiRequest } from "@/lib/use-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,8 +12,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { CustomBadge } from "@/components/erp/badges";
 import { useToast } from "@/hooks/use-toast";
-import { PROJECT_STATUSES, REFERENCE_TYPES, FILE_CATEGORIES } from "@/lib/constants";
+import {
+  PROJECT_STATUSES,
+  PROJECT_TYPES,
+  FINANCIAL_MEANS,
+  projectTypeColor,
+  financialMeanColor,
+} from "@/lib/constants";
 import { EstimateItemsTable } from "./estimate-items";
 import {
   Loader2,
@@ -26,6 +40,10 @@ import {
   Sparkles,
   Check,
   ClipboardList,
+  Download,
+  Upload,
+  AlertCircle,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -39,8 +57,10 @@ interface EstimateRow {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreated: (project: { id: string; name: string; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null }) => void;
+  onCreated: (project: { id: string; name: string; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null }) => void;
 }
+
+const UNITS = ["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"];
 
 export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -48,6 +68,8 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [createdEstimateId, setCreatedEstimateId] = useState<string | null>(null);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -58,7 +80,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     startDate: "",
     endDate: "", // EDC
     benefactor: "", // replaces Department
-    reference: "AOR",
+    reference: "", // manual text — how vote allocated
+    projectType: "New Construction",
+    financialMean: "Vote",
     projectOfficer: "",
     status: "Active",
     description: "",
@@ -73,6 +97,117 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     setEstimateRows(estimateRows.filter((_, i) => i !== idx));
   const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
     setEstimateRows(estimateRows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+
+  // Valid (filled) estimate rows — at least one is required to enable Step 2
+  const validEstimateRows = estimateRows.filter(
+    (r) => r.itemName.trim() && (Number(r.qty) > 0 || Number(r.estimateCost) > 0)
+  );
+  const hasValidEstimate = validEstimateRows.length > 0;
+
+  const isNonVote = form.financialMean && form.financialMean !== "Vote";
+
+  const downloadTemplate = () => {
+    const header = "ItemName,Qty,Unit,EstimateCost";
+    const sample = "Centrifugal Pump 15kW,2,NOS,185000";
+    const csv = `${header}\n${sample}\n`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "material-estimate-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Template downloaded", description: "Fill in ItemName, Qty, Unit, EstimateCost" });
+  };
+
+  // Simple CSV parser — handles quoted fields with commas
+  const parseCsv = (text: string): string[][] => {
+    const rows: string[][] = [];
+    let cur: string[] = [];
+    let field = "";
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"' && text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          field += ch;
+        }
+      } else {
+        if (ch === '"') inQuotes = true;
+        else if (ch === ",") {
+          cur.push(field);
+          field = "";
+        } else if (ch === "\n" || ch === "\r") {
+          if (ch === "\r" && text[i + 1] === "\n") i++;
+          cur.push(field);
+          rows.push(cur);
+          cur = [];
+          field = "";
+        } else {
+          field += ch;
+        }
+      }
+    }
+    if (field.length > 0 || cur.length > 0) {
+      cur.push(field);
+      rows.push(cur);
+    }
+    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast({ title: "Please upload a CSV file", variant: "destructive" });
+      e.target.value = "";
+      return;
+    }
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length === 0) {
+        toast({ title: "CSV file is empty", variant: "destructive" });
+        e.target.value = "";
+        return;
+      }
+      const header = rows[0].map((c) => c.trim().toLowerCase());
+      const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
+      const idxQty = header.findIndex((h) => h.includes("qty"));
+      const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
+      const idxCost = header.findIndex((h) => h.includes("cost") || h.includes("price"));
+      const dataRows = idxName >= 0 ? rows.slice(1) : rows;
+      const parsed: EstimateRow[] = dataRows
+        .map((r) => ({
+          itemName: idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim(),
+          qty: idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim(),
+          unit: (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS",
+          estimateCost: idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim(),
+        }))
+        .filter((r) => r.itemName);
+      if (parsed.length === 0) {
+        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+        e.target.value = "";
+        return;
+      }
+      setPreviewRows(parsed);
+    } catch {
+      toast({ title: "Failed to read CSV file", variant: "destructive" });
+    }
+    e.target.value = "";
+  };
+
+  const confirmImport = () => {
+    if (!previewRows) return;
+    setEstimateRows(previewRows);
+    toast({ title: `Imported ${previewRows.length} estimate rows` });
+    setPreviewRows(null);
+  };
 
   const handleSaveAndProcess = async () => {
     if (!form.name || !form.voteNumber) {
@@ -129,6 +264,8 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
         reference: form.reference || null,
         endDate: form.endDate || null,
         startDate: form.startDate || null,
+        projectType: form.projectType,
+        financialMean: form.financialMean,
       });
       // reset
       setStep(1);
@@ -136,7 +273,8 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       setCreatedEstimateId(null);
       setForm({
         name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
-        startDate: "", endDate: "", benefactor: "", reference: "AOR",
+        startDate: "", endDate: "", benefactor: "", reference: "",
+        projectType: "New Construction", financialMean: "Vote",
         projectOfficer: "", status: "Active", description: "",
       });
       setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
@@ -182,17 +320,71 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Vote Number *</Label>
-                  <Input value={form.voteNumber} onChange={(e) => setForm({ ...form, voteNumber: e.target.value })} placeholder="e.g. V-2025-001" className="bg-background border-border" />
+                  <Input
+                    value={form.voteNumber}
+                    onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+                    placeholder={isNonVote ? "NON-NAVAL or CONTRACTUAL" : "e.g. V-2025-001"}
+                    className="bg-background border-border"
+                  />
+                  {isNonVote && (
+                    <p className="text-[11px] text-amber-400 flex items-start gap-1">
+                      <Info className="h-3 w-3 mt-0.5 shrink-0" />
+                      Non-Vote funding — Vote Number can be &apos;NON-NAVAL&apos; or &apos;CONTRACTUAL&apos;
+                    </p>
+                  )}
                 </div>
+
+                {/* Project Type */}
                 <div className="space-y-1.5">
-                  <Label>Reference (Type)</Label>
-                  <Select value={form.reference} onValueChange={(v) => setForm({ ...form, reference: v })}>
-                    <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+                  <Label>Project Type *</Label>
+                  <Select value={form.projectType} onValueChange={(v) => setForm({ ...form, projectType: v })}>
+                    <SelectTrigger className="bg-background border-border">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      {REFERENCE_TYPES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      {PROJECT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {form.projectType && (
+                    <div className="pt-0.5">
+                      <CustomBadge className={cn("border", projectTypeColor(form.projectType))}>
+                        {form.projectType}
+                      </CustomBadge>
+                    </div>
+                  )}
                 </div>
+
+                {/* Financial Mean */}
+                <div className="space-y-1.5">
+                  <Label>Financial Mean *</Label>
+                  <Select value={form.financialMean} onValueChange={(v) => setForm({ ...form, financialMean: v })}>
+                    <SelectTrigger className="bg-background border-border">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FINANCIAL_MEANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {form.financialMean && (
+                    <div className="pt-0.5">
+                      <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
+                        {form.financialMean}
+                      </CustomBadge>
+                    </div>
+                  )}
+                </div>
+
+                {/* Reference — manual text entry (how vote allocated) */}
+                <div className="space-y-1.5">
+                  <Label>Reference (how vote allocated)</Label>
+                  <Input
+                    value={form.reference}
+                    onChange={(e) => setForm({ ...form, reference: e.target.value })}
+                    placeholder="e.g. Vote 2104 - Allocation 2025"
+                    className="bg-background border-border"
+                  />
+                </div>
+
                 <div className="space-y-1.5">
                   <Label>Vote Allocation (Rs.)</Label>
                   <Input type="number" value={form.voteAllocation} onChange={(e) => setForm({ ...form, voteAllocation: e.target.value })} placeholder="0" className="bg-background border-border" />
@@ -229,16 +421,44 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
               </div>
             </section>
 
-            {/* Material Estimate */}
+            {/* Material Estimate — MANDATORY */}
             <section className="bg-card border border-border rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <FileSpreadsheet className="h-4 w-4 text-primary" /> Material Estimate
-                </h3>
-                <Button onClick={addRow} size="sm" variant="outline" className="gap-1.5">
-                  <Plus className="h-4 w-4" /> Add Row
-                </Button>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <FileSpreadsheet className="h-4 w-4 text-primary" />
+                    Material Estimate
+                    <span className="text-[11px] font-normal text-amber-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Mandatory — required to create project material list
+                    </span>
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+                    <Download className="h-4 w-4" /> Download Template
+                  </Button>
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                  >
+                    <Upload className="h-4 w-4" /> Upload Estimate
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                  <Button onClick={addRow} size="sm" variant="outline" className="gap-1.5">
+                    <Plus className="h-4 w-4" /> Add Row
+                  </Button>
+                </div>
               </div>
+
               <div className="border border-border rounded-lg overflow-hidden">
                 <div className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
                   <span>Item Name</span>
@@ -255,7 +475,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                       <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
                         <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"].map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                          {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
@@ -266,18 +486,35 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   ))}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Tip: Estimate cost is per-unit. After saving, Step 2 will process these items with AI to match RC list & inventory.
+              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                Tip: Estimate cost is per-unit. After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+                {!hasValidEstimate && (
+                  <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
+                )}
               </p>
             </section>
 
             {/* Actions */}
             <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleSaveAndProcess} disabled={saving} className="gap-1.5">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                Export Estimate & Process (Step 2)
-              </Button>
+              <div className="flex items-center gap-2">
+                {!hasValidEstimate && (
+                  <span className="text-xs text-amber-400 hidden sm:flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Add estimate items to continue
+                  </span>
+                )}
+                <Button
+                  onClick={handleSaveAndProcess}
+                  disabled={saving || !hasValidEstimate}
+                  className="gap-1.5"
+                  title={!hasValidEstimate ? "Add at least one estimate item with item name + qty/cost" : undefined}
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Export Estimate &amp; Process (Step 2)
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -290,7 +527,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   <Sparkles className="h-4 w-4 text-primary" /> Processed Estimate — AI Matched Items
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Review matched items, then "Initiate File" to raise PRs. Initiated files forward to the Project Window.
+                  Review matched items, then &quot;Initiate File&quot; to raise PRs. Initiated files forward to the Project Window.
                 </p>
               </div>
               <EstimateItemsTable
@@ -310,6 +547,47 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
           </div>
         )}
       </div>
+
+      {/* CSV Import Preview Dialog */}
+      <Dialog open={!!previewRows} onOpenChange={(o) => !o && setPreviewRows(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-thin bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <Upload className="h-5 w-5 text-primary" />
+              Preview Imported Estimate ({previewRows?.length || 0} rows)
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-1">
+            Review the parsed CSV rows below. Confirming will <span className="font-medium text-foreground">replace</span> the current estimate rows.
+          </p>
+          {previewRows && previewRows.length > 0 && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <div className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+                <span>Item Name</span>
+                <span className="text-right">Qty</span>
+                <span>Unit</span>
+                <span className="text-right">Est. Cost</span>
+              </div>
+              <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
+                {previewRows.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-1.5 text-sm items-center">
+                    <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
+                    <span className="text-right">{r.qty || "—"}</span>
+                    <span className="text-xs">{r.unit || "NOS"}</span>
+                    <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewRows(null)}>Cancel</Button>
+            <Button onClick={confirmImport} disabled={!previewRows || previewRows.length === 0} className="gap-1.5">
+              <Check className="h-4 w-4" /> Confirm Import ({previewRows?.length || 0} rows)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

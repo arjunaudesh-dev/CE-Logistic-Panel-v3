@@ -31,8 +31,10 @@ export interface ProjectFile {
   supplier: string | null;
   presentPosition: string;
   fileCategory: string;
+  fileNumber?: string | null;
   createdBy: string | null;
   authorizedBy: string | null;
+  responsiblePerson?: string | null;
   createdAt: string;
   logs?: FileLog[];
 }
@@ -67,10 +69,12 @@ export function FileLogDialog({ file, open, onOpenChange }: Props) {
               <Detail label="Qty" value={String(file.qty)} />
               <Detail label="Unit Price" value={formatCurrency(file.unitPrice)} />
               <Detail label="File Cost" value={formatCurrency(file.fileCost)} highlight />
+              <Detail label="File Number" value={file.fileNumber || "—"} />
               <Detail label="Supplier" value={file.supplier || "—"} />
               <Detail label="Category" value={file.fileCategory} />
               <Detail label="Created By" value={file.createdBy || "—"} />
               <Detail label="Authorized By" value={file.authorizedBy || "—"} />
+              <Detail label="Responsible Person" value={file.responsiblePerson || "—"} />
               <Detail label="Created At" value={new Date(file.createdAt).toLocaleDateString("en-GB")} />
               <Detail label="Current Position" value={file.presentPosition} />
             </div>

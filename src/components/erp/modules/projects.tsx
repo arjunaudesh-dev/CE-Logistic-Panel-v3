@@ -24,6 +24,8 @@ import {
   formatCurrency,
   projectStatusColor,
   utilizationColor,
+  projectTypeColor,
+  financialMeanColor,
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -76,6 +78,8 @@ interface Project {
   department: string | null;
   benefactor: string | null;
   reference: string | null;
+  projectType?: string | null;
+  financialMean?: string | null;
   projectOfficer: string | null;
   status: string;
   description: string | null;
@@ -152,11 +156,24 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                       {p.voteNumber}
                       {p.benefactor ? ` · ${p.benefactor}` : p.department ? ` · ${p.department}` : ""}
                       {p.reference ? ` · ${p.reference}` : ""}
+                      {p.projectType ? ` · ${p.projectType}` : ""}
                     </p>
                   </div>
-                  <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
-                    {p.status}
-                  </CustomBadge>
+                  <div className="flex flex-wrap items-center gap-1 justify-end shrink-0">
+                    {p.financialMean && p.financialMean !== "Vote" && (
+                      <CustomBadge className={cn("border", financialMeanColor(p.financialMean))}>
+                        {p.financialMean}
+                      </CustomBadge>
+                    )}
+                    {p.projectType && (
+                      <CustomBadge className={cn("border", projectTypeColor(p.projectType))}>
+                        {p.projectType}
+                      </CustomBadge>
+                    )}
+                    <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
+                      {p.status}
+                    </CustomBadge>
+                  </div>
                 </div>
 
                 {/* Financial breakdown */}

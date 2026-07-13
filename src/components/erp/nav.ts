@@ -7,6 +7,7 @@ import {
   Search,
   PackageCheck,
   Users,
+  Settings,
   LucideIcon,
 } from "lucide-react";
 
@@ -17,7 +18,8 @@ export type ModuleId =
   | "stores"
   | "rate-finder"
   | "collection"
-  | "stakeholders";
+  | "stakeholders"
+  | "settings";
 
 export interface NavItem {
   id: ModuleId;
@@ -68,5 +70,11 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Stakeholders",
     icon: Users,
     description: "Officers, sailors & supplier directory",
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    icon: Settings,
+    description: "Users, store config & process flows",
   },
 ];
