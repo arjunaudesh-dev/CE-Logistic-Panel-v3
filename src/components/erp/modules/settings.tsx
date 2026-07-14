@@ -55,8 +55,14 @@ import {
   voteTypeColor,
   PROCESS_FLOW_TYPES,
   processFlowColor,
+  NUMBER_PREFIX_TYPES,
+  THEME_PROFILE_PRESETS,
+  type ThemeProfilePreset,
   formatCurrency,
 } from "@/lib/constants";
+import {
+  useThemeProfile,
+} from "@/lib/use-theme-profile";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -101,6 +107,14 @@ import {
   Fingerprint,
   Eye,
   EyeOff,
+  Hash,
+  Palette,
+  Check,
+  Type,
+  Sparkles,
+  Star,
+  RefreshCw,
+  PlusCircle,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────
@@ -175,6 +189,28 @@ interface SessionUser {
 interface SessionResponse {
   user: SessionUser | null;
   authenticated: boolean;
+}
+
+interface NumberPrefix {
+  id: string;
+  docType: string;
+  prefix: string;
+  suffix: string | null;
+  nextNumber: number;
+  description: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface ThemeProfileRecord {
+  id: string;
+  name: string;
+  mode: string;
+  primary: string;
+  accent: string;
+  isDefault: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -292,7 +328,9 @@ type SettingsTab =
   | "auth"
   | "votes"
   | "stores"
-  | "process";
+  | "process"
+  | "prefixes"
+  | "theme";
 
 export function SettingsModule() {
   const [tab, setTab] = useState<SettingsTab>("users");
@@ -345,6 +383,20 @@ export function SettingsModule() {
       short: "Process",
       icon: GitBranch,
       iconClass: "bg-sky-500/15 text-sky-400",
+    },
+    {
+      value: "prefixes",
+      label: "Number Prefixes",
+      short: "Prefixes",
+      icon: Hash,
+      iconClass: "bg-cyan-500/15 text-cyan-400",
+    },
+    {
+      value: "theme",
+      label: "Theme & Colors",
+      short: "Theme",
+      icon: Palette,
+      iconClass: "bg-fuchsia-500/15 text-fuchsia-400",
     },
   ];
 
@@ -402,6 +454,12 @@ export function SettingsModule() {
         </TabsContent>
         <TabsContent value="process" className="mt-4">
           <ProcessFlowsTab />
+        </TabsContent>
+        <TabsContent value="prefixes" className="mt-4">
+          <NumberPrefixesTab />
+        </TabsContent>
+        <TabsContent value="theme" className="mt-4">
+          <ThemeColorsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -4033,5 +4091,1203 @@ function Field({
       </Label>
       {children}
     </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// TAB 7 — Number Prefixes (document number prefix management)
+// ═════════════════════════════════════════════════════════
+function docTypeColor(docType: string): string {
+  switch (docType) {
+    case "PR":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "NAV255":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "NAV254":
+      return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
+    case "PO":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "FILE":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+function docTypeDotColor(docType: string): string {
+  switch (docType) {
+    case "PR":
+      return "bg-emerald-500";
+    case "NAV255":
+      return "bg-blue-500";
+    case "NAV254":
+      return "bg-cyan-500";
+    case "PO":
+      return "bg-amber-500";
+    case "FILE":
+      return "bg-violet-500";
+    default:
+      return "bg-slate-500";
+  }
+}
+
+function NumberPrefixesTab() {
+  const {
+    data: list,
+    loading,
+    error,
+    refresh,
+  } = useFetch<NumberPrefix[]>("/api/number-prefixes");
+  const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<NumberPrefix | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<NumberPrefix | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await apiRequest(
+      `/api/number-prefixes/${deleteTarget.id}`,
+      "DELETE"
+    );
+    setDeleting(false);
+    if (res.ok) {
+      toast({
+        title: "Prefix deleted",
+        description: `${deleteTarget.docType} prefix removed`,
+      });
+      setDeleteTarget(null);
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  if (loading) return <LoadingState label="Loading number prefixes..." />;
+  if (error) return <ErrorState message={error} />;
+
+  // Group by docType for the live preview cards (first config per type wins)
+  const byType: Record<string, NumberPrefix> = {};
+  (list ?? []).forEach((p) => {
+    if (!byType[p.docType]) byType[p.docType] = p;
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* Info Card */}
+      <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4 flex items-start gap-3">
+        <div className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0 bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+          <Info className="h-5 w-5" />
+        </div>
+        <div className="space-y-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            Document Number Prefixes
+          </p>
+          <p className="text-xs text-muted-foreground">
+            These prefixes are used when creating PRs, NAV 255/254 numbers,
+            Purchasing Orders, and File numbers. Only the end number is entered
+            during initiation — the prefix is auto-prepended.
+          </p>
+        </div>
+      </div>
+
+      {/* Live preview cards (one per docType) */}
+      <div>
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-2">
+          <Sparkles className="h-4 w-4 text-cyan-400" /> Live Preview
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {NUMBER_PREFIX_TYPES.map((t) => {
+            const configured = byType[t.docType];
+            const prefixPart = configured?.prefix || t.placeholder;
+            const endNum = configured
+              ? String(configured.nextNumber).padStart(4, "0")
+              : "0142";
+            const suffixPart = configured?.suffix ?? "";
+            const example = `${prefixPart}${endNum}${suffixPart}`;
+            return (
+              <div
+                key={t.docType}
+                className={cn(
+                  "rounded-lg border p-3 bg-card",
+                  configured
+                    ? "border-cyan-500/30"
+                    : "border-dashed border-border"
+                )}
+              >
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <CustomBadge className={cn("border", docTypeColor(t.docType))}>
+                    {t.docType}
+                  </CustomBadge>
+                  <span className="text-xs text-muted-foreground truncate">
+                    {t.label}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Example:</p>
+                <p className="font-mono text-sm text-foreground break-all flex items-center flex-wrap gap-1">
+                  <span className="text-foreground">{prefixPart}</span>
+                  <span className="text-cyan-500 dark:text-cyan-400">+</span>
+                  <span className="font-semibold text-emerald-500 dark:text-emerald-400">
+                    {endNum}
+                  </span>
+                  {suffixPart && (
+                    <>
+                      <span className="text-cyan-500 dark:text-cyan-400">+</span>
+                      <span className="text-foreground">{suffixPart}</span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground mx-1">=</span>
+                  <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-mono break-all">
+                    {example}
+                  </CustomBadge>
+                </p>
+                {!configured && (
+                  <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5">
+                    Not configured — uses placeholder above
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Hash className="h-4 w-4 text-cyan-400" /> Configured Prefixes
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Manage the predetermined prefix parts for document numbers.
+          </p>
+        </div>
+        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+          <Plus className="h-4 w-4" /> Add Prefix
+        </Button>
+      </div>
+
+      {/* Table */}
+      <div className="rounded-xl border border-border overflow-hidden bg-card">
+        <div className="overflow-x-auto scrollbar-thin">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
+                <TableHead className="text-xs">Document Type</TableHead>
+                <TableHead className="text-xs">Prefix</TableHead>
+                <TableHead className="text-xs">Suffix</TableHead>
+                <TableHead className="text-xs text-right">Next Number</TableHead>
+                <TableHead className="text-xs">Description</TableHead>
+                <TableHead className="text-xs text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!list || list.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="text-center text-muted-foreground py-8"
+                  >
+                    No number prefixes configured. Click &quot;Add Prefix&quot;
+                    to create one.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                list.map((p) => (
+                  <TableRow key={p.id} className="border-border">
+                    <TableCell>
+                      <CustomBadge className={cn("border", docTypeColor(p.docType))}>
+                        {p.docType}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-foreground bg-secondary/60 px-2 py-0.5 rounded-md text-sm">
+                        {p.prefix || "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm font-mono">
+                      {p.suffix || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className="font-mono font-semibold text-foreground">
+                        {String(p.nextNumber).padStart(4, "0")}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {p.description || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditTarget(p)}
+                          className="h-8 w-8 p-0"
+                          title="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeleteTarget(p)}
+                          className="h-8 w-8 p-0 hover:text-red-400"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      {addOpen && (
+        <PrefixFormDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          initial={null}
+          onSaved={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+      {editTarget && (
+        <PrefixFormDialog
+          open={!!editTarget}
+          onOpenChange={(o) => !o && setEditTarget(null)}
+          initial={editTarget}
+          onSaved={() => {
+            setEditTarget(null);
+            refresh();
+          }}
+        />
+      )}
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this prefix?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the{" "}
+              <span className="text-foreground font-medium">
+                {deleteTarget?.docType}
+              </span>{" "}
+              prefix configuration. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDelete();
+              }}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-1.5" /> Delete
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+interface PrefixFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  initial: NumberPrefix | null;
+  onSaved: () => void;
+}
+
+function PrefixFormDialog({
+  open,
+  onOpenChange,
+  initial,
+  onSaved,
+}: PrefixFormProps) {
+  const isEdit = !!initial;
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const [docType, setDocType] = useState<string>(initial?.docType ?? "PR");
+  const [prefix, setPrefix] = useState(initial?.prefix ?? "");
+  const [suffix, setSuffix] = useState(initial?.suffix ?? "");
+  const [nextNumber, setNextNumber] = useState<string>(
+    String(initial?.nextNumber ?? 1)
+  );
+  const [description, setDescription] = useState(initial?.description ?? "");
+
+  const selectedMeta =
+    NUMBER_PREFIX_TYPES.find((t) => t.docType === docType) ??
+    NUMBER_PREFIX_TYPES[0];
+  const previewEnd = String(Number(nextNumber) || 0).padStart(4, "0");
+  const previewFull = `${prefix || selectedMeta.placeholder}${previewEnd}${
+    suffix || ""
+  }`;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!docType) {
+      toast({ title: "Document type is required", variant: "destructive" });
+      return;
+    }
+    if (!prefix.trim()) {
+      toast({ title: "Prefix is required", variant: "destructive" });
+      return;
+    }
+    const nNum = Number(nextNumber);
+    if (isNaN(nNum) || nNum < 1) {
+      toast({
+        title: "Next number must be a positive integer",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaving(true);
+    const body = {
+      docType,
+      prefix: prefix.trim(),
+      suffix: suffix.trim() || null,
+      nextNumber: nNum,
+      description: description.trim() || null,
+    };
+    const res = isEdit
+      ? await apiRequest(`/api/number-prefixes/${initial!.id}`, "PUT", body)
+      : await apiRequest("/api/number-prefixes", "POST", body);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: isEdit ? "Prefix updated" : "Prefix created",
+        description: `${docType} · ${prefix}${previewEnd}${suffix || ""}`,
+      });
+      onSaved();
+    } else {
+      toast({
+        title: "Failed to save",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Hash className="h-5 w-5 text-cyan-400" />
+            {isEdit ? "Edit Number Prefix" : "Add Number Prefix"}
+          </DialogTitle>
+          <DialogDescription>
+            Configure the predetermined prefix used when initiating a document
+            of this type. Only the end number is entered during initiation —
+            the prefix is auto-prepended.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Field label="Document Type" required>
+            <Select
+              value={docType}
+              onValueChange={setDocType}
+              disabled={isEdit}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select document type" />
+              </SelectTrigger>
+              <SelectContent>
+                {NUMBER_PREFIX_TYPES.map((t) => (
+                  <SelectItem key={t.docType} value={t.docType}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2 w-2 rounded-full",
+                          docTypeDotColor(t.docType)
+                        )}
+                      />
+                      <span className="font-medium">{t.docType}</span>
+                      <span className="text-muted-foreground">
+                        — {t.label}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Prefix" required>
+            <Input
+              value={prefix}
+              onChange={(e) => setPrefix(e.target.value)}
+              placeholder={selectedMeta?.placeholder ?? "e.g. PR/2025/"}
+              className="bg-background font-mono"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              The predetermined prefix part. Use forward slashes to segment
+              (e.g. <span className="font-mono">PR/2025/</span>).
+            </p>
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Suffix (optional)">
+              <Input
+                value={suffix}
+                onChange={(e) => setSuffix(e.target.value)}
+                placeholder="e.g. /V1"
+                className="bg-background font-mono"
+              />
+            </Field>
+            <Field label="Next Number" required>
+              <Input
+                type="number"
+                min={1}
+                value={nextNumber}
+                onChange={(e) => setNextNumber(e.target.value)}
+                placeholder="1"
+                className="bg-background font-mono"
+                required
+              />
+            </Field>
+          </div>
+          <Field label="Description (optional)">
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. PR numbers for 2025 — Engineering Dept"
+              className="bg-background"
+            />
+          </Field>
+          {/* Live preview */}
+          <div className="rounded-lg border border-border bg-background/40 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Live Preview
+            </p>
+            <p className="font-mono text-sm text-foreground break-all flex items-center flex-wrap gap-1.5">
+              <span className="text-foreground">
+                {prefix || selectedMeta?.placeholder || "?"}
+              </span>
+              <span className="text-cyan-500 dark:text-cyan-400">+</span>
+              <span className="font-semibold text-emerald-500 dark:text-emerald-400">
+                {previewEnd}
+              </span>
+              {suffix && (
+                <>
+                  <span className="text-cyan-500 dark:text-cyan-400">+</span>
+                  <span className="text-foreground">{suffix}</span>
+                </>
+              )}
+              <span className="text-muted-foreground mx-1">=</span>
+              <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-mono break-all">
+                {previewFull}
+              </CustomBadge>
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" /> Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                  {isEdit ? "Save Changes" : "Create Prefix"}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// TAB 8 — Theme & Colors (theme profile management)
+// ═════════════════════════════════════════════════════════
+function ThemeColorsTab() {
+  const {
+    data: savedProfiles,
+    loading,
+    error,
+    refresh,
+  } = useFetch<ThemeProfileRecord[]>("/api/theme-profiles");
+  const { profile: activeProfile, setProfile } = useThemeProfile();
+  const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ThemeProfileRecord | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await apiRequest(
+      `/api/theme-profiles/${deleteTarget.id}`,
+      "DELETE"
+    );
+    setDeleting(false);
+    if (res.ok) {
+      toast({
+        title: "Theme profile deleted",
+        description: deleteTarget.name,
+      });
+      setDeleteTarget(null);
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleSetDefault(p: {
+    name: string;
+    mode: string;
+    primary: string;
+    accent: string;
+  }) {
+    const body = {
+      name: p.name,
+      mode: p.mode,
+      primary: p.primary,
+      accent: p.accent,
+      isDefault: true,
+    };
+    const existing = (savedProfiles ?? []).find(
+      (sp) => sp.name.toLowerCase() === p.name.toLowerCase()
+    );
+    const res = existing
+      ? await apiRequest(`/api/theme-profiles/${existing.id}`, "PUT", body)
+      : await apiRequest("/api/theme-profiles", "POST", body);
+    if (res.ok) {
+      setProfile({
+        name: p.name,
+        mode: p.mode as "dark" | "light",
+        primary: p.primary,
+        accent: p.accent,
+      });
+      toast({
+        title: "Default theme set",
+        description: `${p.name} is now the default profile.`,
+      });
+      refresh();
+    } else {
+      toast({
+        title: "Failed to set default",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  function handleApplyPreset(preset: ThemeProfilePreset) {
+    setProfile({
+      name: preset.name,
+      mode: preset.mode,
+      primary: preset.primary,
+      accent: preset.accent,
+    });
+    toast({
+      title: "Theme applied",
+      description: `${preset.name} — switch back anytime from the palette icon in the topbar.`,
+    });
+  }
+
+  function isPresetActive(p: ThemeProfilePreset): boolean {
+    return (
+      !!activeProfile &&
+      activeProfile.name === p.name &&
+      activeProfile.mode === p.mode &&
+      activeProfile.primary.toLowerCase() === p.primary.toLowerCase() &&
+      activeProfile.accent.toLowerCase() === p.accent.toLowerCase()
+    );
+  }
+
+  if (loading) return <LoadingState label="Loading theme profiles..." />;
+  if (error) return <ErrorState message={error} />;
+
+  return (
+    <div className="space-y-5">
+      {/* Info Card */}
+      <div className="rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/5 p-4 flex items-start gap-3">
+        <div className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0 bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30">
+          <Palette className="h-5 w-5" />
+        </div>
+        <div className="space-y-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">Theme Profiles</p>
+          <p className="text-xs text-muted-foreground">
+            Theme profiles let users choose color combinations. Users can also
+            switch instantly from the palette icon in the topbar.
+          </p>
+        </div>
+      </div>
+
+      {/* Active profile indicator */}
+      {activeProfile && (
+        <div className="rounded-lg border border-border bg-card p-3 flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span
+              className="h-8 w-8 rounded-md border border-border"
+              style={{ backgroundColor: activeProfile.primary }}
+              title="Primary"
+            />
+            <span
+              className="h-8 w-8 rounded-md border border-border"
+              style={{ backgroundColor: activeProfile.accent }}
+              title="Accent"
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">
+              {activeProfile.name}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Currently active · {activeProfile.mode} mode
+            </p>
+          </div>
+          <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <Check className="h-3 w-3 mr-1" /> Active
+          </CustomBadge>
+        </div>
+      )}
+
+      {/* Preset grid */}
+      <div>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-fuchsia-400" /> Preset Profiles
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Click a card to apply the theme instantly. Set as Default to
+              persist it as the system default for all users.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {THEME_PROFILE_PRESETS.map((preset) => {
+            const active = isPresetActive(preset);
+            const isDefault = (savedProfiles ?? []).some(
+              (sp) =>
+                sp.isDefault &&
+                sp.name.toLowerCase() === preset.name.toLowerCase()
+            );
+            return (
+              <button
+                key={preset.name}
+                type="button"
+                onClick={() => handleApplyPreset(preset)}
+                className={cn(
+                  "group relative rounded-xl border p-3 text-left transition-all hover:shadow-md",
+                  active
+                    ? "border-fuchsia-500/50 bg-fuchsia-500/5 ring-1 ring-fuchsia-500/30"
+                    : "border-border bg-card hover:border-fuchsia-500/30"
+                )}
+              >
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {preset.name}
+                  </span>
+                  <CustomBadge
+                    className={
+                      preset.mode === "dark"
+                        ? "bg-slate-700/60 text-slate-200 border-slate-500/30"
+                        : "bg-amber-100 text-amber-900 border-amber-300/40 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30"
+                    }
+                  >
+                    {preset.mode}
+                  </CustomBadge>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span
+                    className="h-8 w-8 rounded-md border border-border shadow-sm"
+                    style={{ backgroundColor: preset.primary }}
+                    title={`Primary: ${preset.primary}`}
+                  />
+                  <span
+                    className="h-8 w-8 rounded-md border border-border shadow-sm"
+                    style={{ backgroundColor: preset.accent }}
+                    title={`Accent: ${preset.accent}`}
+                  />
+                  <span className="font-mono text-[10px] text-muted-foreground ml-1 truncate">
+                    {preset.primary} · {preset.accent}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  {active ? (
+                    <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                      <Check className="h-3 w-3 mr-1" /> Active
+                    </CustomBadge>
+                  ) : isDefault ? (
+                    <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                      <Star className="h-3 w-3 mr-1 fill-current" /> Default
+                    </CustomBadge>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      Click to apply
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isDefault ? "secondary" : "outline"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSetDefault({
+                        name: preset.name,
+                        mode: preset.mode,
+                        primary: preset.primary,
+                        accent: preset.accent,
+                      });
+                    }}
+                    className="h-7 text-xs gap-1"
+                  >
+                    {isDefault ? (
+                      <>
+                        <Star className="h-3 w-3 fill-current" /> Default
+                      </>
+                    ) : (
+                      <>
+                        <Star className="h-3 w-3" /> Set as Default
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Saved custom profiles */}
+      <div>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Type className="h-4 w-4 text-fuchsia-400" /> Saved &amp; Custom
+              Profiles
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Database-persisted profiles. Marked defaults apply system-wide.
+            </p>
+          </div>
+          <Button
+            onClick={() => setAddOpen(true)}
+            variant="outline"
+            className="gap-1.5"
+          >
+            <Plus className="h-4 w-4" /> Create Custom Profile
+          </Button>
+        </div>
+        {!savedProfiles || savedProfiles.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-sm text-muted-foreground">
+            No saved profiles yet. Use the preset cards above or click
+            &quot;Create Custom Profile&quot;.
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border overflow-hidden bg-card">
+            <div className="overflow-x-auto scrollbar-thin">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
+                    <TableHead className="text-xs">Name</TableHead>
+                    <TableHead className="text-xs">Mode</TableHead>
+                    <TableHead className="text-xs">Colors</TableHead>
+                    <TableHead className="text-xs">Status</TableHead>
+                    <TableHead className="text-xs text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {savedProfiles.map((p) => {
+                    const isActive =
+                      activeProfile?.name === p.name &&
+                      activeProfile?.mode === p.mode &&
+                      activeProfile?.primary.toLowerCase() ===
+                        p.primary.toLowerCase();
+                    return (
+                      <TableRow key={p.id} className="border-border">
+                        <TableCell className="text-foreground text-sm font-medium">
+                          {p.name}
+                        </TableCell>
+                        <TableCell>
+                          <CustomBadge
+                            className={
+                              p.mode === "dark"
+                                ? "bg-slate-700/60 text-slate-200 border-slate-500/30"
+                                : "bg-amber-100 text-amber-900 border-amber-300/40 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30"
+                            }
+                          >
+                            {p.mode}
+                          </CustomBadge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="h-5 w-5 rounded-md border border-border"
+                              style={{ backgroundColor: p.primary }}
+                              title={`Primary: ${p.primary}`}
+                            />
+                            <span
+                              className="h-5 w-5 rounded-md border border-border"
+                              style={{ backgroundColor: p.accent }}
+                              title={`Accent: ${p.accent}`}
+                            />
+                            <span className="font-mono text-[10px] text-muted-foreground ml-1">
+                              {p.primary} · {p.accent}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {p.isDefault && (
+                              <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                <Star className="h-3 w-3 mr-1 fill-current" /> Default
+                              </CustomBadge>
+                            )}
+                            {isActive && (
+                              <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                                <Check className="h-3 w-3 mr-1" /> Active
+                              </CustomBadge>
+                            )}
+                            {!p.isDefault && !isActive && (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-xs gap-1"
+                              onClick={() =>
+                                setProfile({
+                                  name: p.name,
+                                  mode: p.mode as "dark" | "light",
+                                  primary: p.primary,
+                                  accent: p.accent,
+                                })
+                              }
+                            >
+                              <Palette className="h-3.5 w-3.5" /> Apply
+                            </Button>
+                            {!p.isDefault && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-xs gap-1"
+                                onClick={() =>
+                                  handleSetDefault({
+                                    name: p.name,
+                                    mode: p.mode,
+                                    primary: p.primary,
+                                    accent: p.accent,
+                                  })
+                                }
+                              >
+                                <Star className="h-3.5 w-3.5" /> Set Default
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeleteTarget(p)}
+                              className="h-8 w-8 p-0 hover:text-red-400"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {addOpen && (
+        <CustomThemeFormDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onSaved={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this theme profile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the{" "}
+              <span className="text-foreground font-medium">
+                {deleteTarget?.name}
+              </span>{" "}
+              theme profile. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDelete();
+              }}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-1.5" /> Delete
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+interface CustomThemeFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: () => void;
+}
+
+function CustomThemeFormDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: CustomThemeFormProps) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"dark" | "light">("dark");
+  const [primary, setPrimary] = useState("#3b82f6");
+  const [accent, setAccent] = useState("#8b5cf6");
+  const [isDefault, setIsDefault] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      toast({ title: "Name is required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const body = {
+      name: name.trim(),
+      mode,
+      primary,
+      accent,
+      isDefault,
+    };
+    const res = await apiRequest("/api/theme-profiles", "POST", body);
+    setSaving(false);
+    if (res.ok) {
+      toast({ title: "Theme profile created", description: name.trim() });
+      onSaved();
+    } else {
+      toast({
+        title: "Failed to create",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <PlusCircle className="h-5 w-5 text-fuchsia-400" />
+            Create Custom Theme Profile
+          </DialogTitle>
+          <DialogDescription>
+            Define a custom color combination. Users can apply this profile
+            from the palette icon in the topbar.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Field label="Profile Name" required>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Brand Indigo Dark"
+              className="bg-background"
+              required
+            />
+          </Field>
+          <Field label="Mode" required>
+            <Select
+              value={mode}
+              onValueChange={(v) => setMode(v as "dark" | "light")}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dark">Dark</SelectItem>
+                <SelectItem value="light">Light</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Primary Color" required>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={primary}
+                  onChange={(e) => setPrimary(e.target.value)}
+                  className="h-9 w-12 rounded-md border border-border bg-background cursor-pointer p-0.5"
+                  aria-label="Primary color picker"
+                />
+                <Input
+                  value={primary}
+                  onChange={(e) => setPrimary(e.target.value)}
+                  className="bg-background font-mono"
+                />
+              </div>
+            </Field>
+            <Field label="Accent Color" required>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={accent}
+                  onChange={(e) => setAccent(e.target.value)}
+                  className="h-9 w-12 rounded-md border border-border bg-background cursor-pointer p-0.5"
+                  aria-label="Accent color picker"
+                />
+                <Input
+                  value={accent}
+                  onChange={(e) => setAccent(e.target.value)}
+                  className="bg-background font-mono"
+                />
+              </div>
+            </Field>
+          </div>
+          <label
+            htmlFor="default-profile"
+            className={cn(
+              "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+              isDefault
+                ? "border-amber-500/50 bg-amber-500/5"
+                : "border-border bg-secondary/30 hover:bg-secondary/50"
+            )}
+          >
+            <Checkbox
+              id="default-profile"
+              checked={isDefault}
+              onCheckedChange={(v) => setIsDefault(v === true)}
+              className="mt-0.5 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5">
+                <Star className="h-3.5 w-3.5 text-amber-400" />
+                <span className="text-sm font-medium text-foreground">
+                  Set as Default
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Marks this profile as the system default for all new sessions.
+              </p>
+            </div>
+          </label>
+          {/* Live preview */}
+          <div className="rounded-lg border border-border bg-background/40 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Live Preview
+            </p>
+            <div className="flex items-center gap-3">
+              <span
+                className="h-10 w-10 rounded-md border border-border shadow-sm"
+                style={{ backgroundColor: primary }}
+                title="Primary"
+              />
+              <span
+                className="h-10 w-10 rounded-md border border-border shadow-sm"
+                style={{ backgroundColor: accent }}
+                title="Accent"
+              />
+              <span
+                className="ml-auto inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium text-white"
+                style={{ backgroundColor: primary }}
+              >
+                Primary Button
+              </span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" /> Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 mr-1" /> Create Profile
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

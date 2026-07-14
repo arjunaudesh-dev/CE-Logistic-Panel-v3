@@ -32,6 +32,7 @@ export interface ProjectFile {
   presentPosition: string;
   fileCategory: string;
   fileNumber?: string | null;
+  fileGroupKey?: string | null;
   createdBy: string | null;
   authorizedBy: string | null;
   responsiblePerson?: string | null;

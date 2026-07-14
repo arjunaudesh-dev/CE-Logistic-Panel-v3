@@ -99,6 +99,7 @@ import {
   FileUp,
   Ship,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import {
   BarChart,
@@ -3506,6 +3507,7 @@ function NavyListSection({
   const [viewOpen, setViewOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const count = navyList?.length ?? 0;
 
@@ -3534,6 +3536,24 @@ function NavyListSection({
       ).length,
     [stakeholders]
   );
+
+  // Manually refresh both the Navy List and the Stakeholders directory after
+  // an upload (or any other time the user wants to re-sync). This is
+  // also done automatically by the upload's onImported callback — the
+  // explicit button gives the user a visible "re-pull latest" affordance.
+  async function handleRefresh() {
+    setRefreshing(true);
+    nlRefresh();
+    onStakeholdersRefresh();
+    // Tiny delay so the spinner is visible even on fast networks.
+    setTimeout(() => {
+      setRefreshing(false);
+      toast({
+        title: "Directory refreshed",
+        description: `${count} Navy List records · ${officerCount} officers (${rankedCount} ranked).`,
+      });
+    }, 350);
+  }
 
   async function handleClear() {
     setClearing(true);
@@ -3589,11 +3609,24 @@ function NavyListSection({
           </CustomBadge>
           <Button
             size="sm"
-            variant="outline"
             onClick={() => setUploadOpen(true)}
             className="gap-1.5"
+            title="Upload a Navy List CSV to define officer seniority"
           >
             <Upload className="h-4 w-4" /> Upload Navy List
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-1.5"
+            title="Re-fetch the Navy List & officer directory from the server"
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", refreshing && "animate-spin")}
+            />
+            {refreshing ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
             size="sm"

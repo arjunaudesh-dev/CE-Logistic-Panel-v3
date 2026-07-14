@@ -569,3 +569,28 @@ model StoreSetting {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
+
+// ───────────────────────── NUMBER PREFIXES (Settings — default prefix parts) ─────────────────────────
+// Default/predetermined prefix parts for document numbers. During initiation, only the end number is entered.
+// e.g. PR prefix "PR/2025/" → user enters "0142" → full number "PR/2025/0142"
+model NumberPrefix {
+  id          String   @id @default(cuid())
+  docType     String   @unique // PR | NAV255 | NAV254 | PO | FILE
+  prefix      String   @default("") // e.g. "PR/2025/" or "NAV/255/2025/"
+  suffix      String?  // optional suffix
+  nextNumber  Int      @default(1) // auto-increment suggestion
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── THEME PROFILE (user-selected theme/color) ─────────────────────────
+model ThemeProfile {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. "Ocean Blue", "Emerald", "Sunset", "Royal Purple"
+  mode        String   @default("dark") // dark | light
+  primary     String   @default("#3b82f6")
+  accent      String   @default("#8b5cf6")
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}

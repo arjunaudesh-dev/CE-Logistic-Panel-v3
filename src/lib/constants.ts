@@ -362,6 +362,41 @@ export function processFlowColor(flow: string): string {
 // ─── User Roles ───
 export const USER_ROLES = ["Admin", "Manager", "Officer", "Clerk", "Viewer"] as const;
 
+// ─── Number Prefix Document Types ───
+export const NUMBER_PREFIX_TYPES = [
+  { docType: "PR", label: "PR Number", placeholder: "e.g. PR/2025/" },
+  { docType: "NAV255", label: "NAV 255 Number", placeholder: "e.g. NAV/255/2025/" },
+  { docType: "NAV254", label: "NAV 254 Number", placeholder: "e.g. NAV/254/2025/" },
+  { docType: "PO", label: "Purchasing Order Number", placeholder: "e.g. PO/2025/" },
+  { docType: "FILE", label: "File Number", placeholder: "e.g. FILE/2025/" },
+] as const;
+
+// ─── Theme Profiles (preset color combinations) ───
+export interface ThemeProfilePreset {
+  name: string;
+  mode: "dark" | "light";
+  primary: string;
+  accent: string;
+  // secondary chart colors derived from primary/accent
+}
+
+export const THEME_PROFILE_PRESETS: ThemeProfilePreset[] = [
+  // Dark profiles
+  { name: "Ocean Blue (Dark)", mode: "dark", primary: "#3b82f6", accent: "#8b5cf6" },
+  { name: "Emerald (Dark)", mode: "dark", primary: "#10b981", accent: "#06b6d4" },
+  { name: "Sunset (Dark)", mode: "dark", primary: "#f59e0b", accent: "#ef4444" },
+  { name: "Royal Purple (Dark)", mode: "dark", primary: "#8b5cf6", accent: "#ec4899" },
+  { name: "Crimson (Dark)", mode: "dark", primary: "#dc2626", accent: "#f59e0b" },
+  { name: "Teal (Dark)", mode: "dark", primary: "#14b8a6", accent: "#3b82f6" },
+  // Light profiles
+  { name: "Ocean Blue (Light)", mode: "light", primary: "#2563eb", accent: "#7c3aed" },
+  { name: "Emerald (Light)", mode: "light", primary: "#059669", accent: "#0891b2" },
+  { name: "Sunset (Light)", mode: "light", primary: "#d97706", accent: "#dc2626" },
+  { name: "Royal Purple (Light)", mode: "light", primary: "#7c3aed", accent: "#db2777" },
+  { name: "Crimson (Light)", mode: "light", primary: "#b91c1c", accent: "#c2410c" },
+  { name: "Teal (Light)", mode: "light", primary: "#0d9488", accent: "#2563eb" },
+];
+
 export function userRoleColor(role: string): string {
   switch (role) {
     case "Admin":

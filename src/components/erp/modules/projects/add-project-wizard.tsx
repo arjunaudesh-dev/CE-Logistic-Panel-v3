@@ -72,6 +72,12 @@ interface EstimateRow {
   qty: string;
   unit: string;
   estimateCost: string;
+  /** Total cost for the row — from CSV's TotalCost column when present,
+   *  otherwise computed as Qty × EstimateCost. Stored on the row so the
+   *  CSV-supplied value is preserved until the user edits Qty/EstimateCost
+   *  (which auto-recomputes the total). Used for display only — the API still
+   *  stores EstimateCost as the per-unit cost. */
+  totalCost: string;
 }
 
 interface Props {
@@ -114,7 +120,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     description: "",
   });
   const [estimateRows, setEstimateRows] = useState<EstimateRow[]>([
-    { itemName: "", qty: "", unit: "NOS", estimateCost: "" },
+    { itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" },
   ]);
 
   const selectedVote = votes?.find((v) => v.id === selectedVoteId);
@@ -168,11 +174,31 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       : "Non-Public Fund — Vote Number can be 'NON-NAVAL' or the fund reference.";
 
   const addRow = () =>
-    setEstimateRows([...estimateRows, { itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+    setEstimateRows([
+      ...estimateRows,
+      { itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" },
+    ]);
   const removeRow = (idx: number) =>
     setEstimateRows(estimateRows.filter((_, i) => i !== idx));
+
+  // Update a single field on a row. When Qty or EstimateCost changes,
+  // recompute the row's TotalCost automatically (= Qty × EstimateCost) so the
+  // editable grid always shows a live total. Manual edits to TotalCost itself
+  // (or other fields) leave the total as-is.
   const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
-    setEstimateRows(estimateRows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+    setEstimateRows(
+      estimateRows.map((r, i) => {
+        if (i !== idx) return r;
+        const next = { ...r, [field]: value };
+        if (field === "qty" || field === "estimateCost") {
+          const q = Number(next.qty);
+          const c = Number(next.estimateCost);
+          next.totalCost =
+            !isNaN(q) && !isNaN(c) && q > 0 && c > 0 ? String(q * c) : "";
+        }
+        return next;
+      })
+    );
 
   // Valid (filled) estimate rows — at least one is required to enable Step 2
   const validEstimateRows = estimateRows.filter(
@@ -181,9 +207,12 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const hasValidEstimate = validEstimateRows.length > 0;
 
   const downloadTemplate = () => {
-    const header = "ItemName,Qty,Unit,EstimateCost";
-    const sample = "Centrifugal Pump 15kW,2,NOS,185000";
-    const csv = `${header}\n${sample}\n`;
+    // Template now includes a TotalCost column. The sample row demonstrates
+    // the relationship TotalCost = Qty × EstimateCost (2 × 185000 = 370000).
+    const header = "ItemName,Qty,Unit,EstimateCost,TotalCost";
+    const sample = "Centrifugal Pump 15kW,2,NOS,185000,370000";
+    const sample2 = ",,NOS,,";
+    const csv = `${header}\n${sample}\n${sample2}\n`;
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -191,7 +220,11 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     a.download = "material-estimate-template.csv";
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "Template downloaded", description: "Fill in ItemName, Qty, Unit, EstimateCost" });
+    toast({
+      title: "Template downloaded",
+      description:
+        "Columns: ItemName, Qty, Unit, EstimateCost (per unit), TotalCost (= Qty × EstimateCost — leave blank to auto-compute).",
+    });
   };
 
   // Simple CSV parser — handles quoted fields with commas
@@ -254,15 +287,37 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
       const idxQty = header.findIndex((h) => h.includes("qty"));
       const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
-      const idxCost = header.findIndex((h) => h.includes("cost") || h.includes("price"));
+      const idxCost = header.findIndex(
+        (h) =>
+          (h.includes("cost") || h.includes("price")) &&
+          !h.includes("total")
+      );
+      const idxTotal = header.findIndex(
+        (h) => h.includes("total") && (h.includes("cost") || h.includes("price"))
+      );
       const dataRows = idxName >= 0 ? rows.slice(1) : rows;
       const parsed: EstimateRow[] = dataRows
-        .map((r) => ({
-          itemName: idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim(),
-          qty: idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim(),
-          unit: (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS",
-          estimateCost: idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim(),
-        }))
+        .map((r) => {
+          const itemName = idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim();
+          const qty = idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim();
+          const unit = (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS";
+          const estimateCost = idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim();
+          // TotalCost: prefer the CSV's TotalCost column when present & non-blank,
+          // otherwise compute it as Qty × EstimateCost (per the task spec).
+          const totalRaw =
+            idxTotal >= 0 ? (r[idxTotal] || "").trim() : "";
+          let totalCost = "";
+          if (totalRaw && !isNaN(Number(totalRaw))) {
+            totalCost = totalRaw;
+          } else {
+            const q = Number(qty);
+            const c = Number(estimateCost);
+            if (!isNaN(q) && !isNaN(c) && q > 0 && c > 0) {
+              totalCost = String(q * c);
+            }
+          }
+          return { itemName, qty, unit, estimateCost, totalCost };
+        })
         .filter((r) => r.itemName);
       if (parsed.length === 0) {
         toast({ title: "No valid rows found in CSV", variant: "destructive" });
@@ -361,7 +416,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
         projectType: "New Construction", financialMean: "Vote/Funds",
         projectOfficer: "", status: "Active", description: "",
       });
-      setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+      setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" }]);
       setCustomVoteNumber(false);
       setSelectedVoteId("");
     }
@@ -651,40 +706,67 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                 </div>
               </div>
 
-              <div className="border border-border rounded-lg overflow-hidden">
-                <div className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
-                  <span>Item Name</span>
-                  <span className="text-right">Qty</span>
-                  <span>Deno</span>
-                  <span className="text-right">Est. Cost (Rs.)</span>
-                  <span></span>
-                </div>
-                <div className="divide-y divide-border">
-                  {estimateRows.map((row, idx) => (
-                    <div key={idx} className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 items-center">
-                      <Input value={row.itemName} onChange={(e) => updateRow(idx, "itemName", e.target.value)} placeholder="e.g. Centrifugal Pump 15kW" className="bg-background border-border h-8 text-sm" />
-                      <Input type="number" value={row.qty} onChange={(e) => updateRow(idx, "qty", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
-                      <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
-                        <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
-                      <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
+              <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+                <div className="min-w-[640px]">
+                  <div className="grid grid-cols-[1fr_70px_80px_120px_130px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+                    <span>Item Name</span>
+                    <span className="text-right">Qty</span>
+                    <span>Deno</span>
+                    <span className="text-right">Est. Cost / Unit (Rs.)</span>
+                    <span className="text-right">Total Cost (Rs.)</span>
+                    <span></span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {estimateRows.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-[1fr_70px_80px_120px_130px_40px] gap-2 px-3 py-2 items-center">
+                        <Input value={row.itemName} onChange={(e) => updateRow(idx, "itemName", e.target.value)} placeholder="e.g. Centrifugal Pump 15kW" className="bg-background border-border h-8 text-sm" />
+                        <Input type="number" value={row.qty} onChange={(e) => updateRow(idx, "qty", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+                        <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
+                          <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+                        <Input
+                          type="number"
+                          value={row.totalCost}
+                          onChange={(e) => updateRow(idx, "totalCost", e.target.value)}
+                          placeholder="0"
+                          readOnly
+                          tabIndex={-1}
+                          className="bg-secondary/40 border-border h-8 text-sm text-right font-medium text-emerald-500 dark:text-emerald-400 cursor-not-allowed focus-visible:ring-0"
+                          title="Total Cost = Qty × Estimate Cost (auto-computed)"
+                        />
+                        <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                 <Info className="h-3 w-3" />
-                Tip: Estimate cost is per-unit. After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+                Tip: Estimate cost is per-unit; Total Cost auto-computes as Qty × Estimate Cost (or use the CSV TotalCost column). After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
                 {!hasValidEstimate && (
                   <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
                 )}
               </p>
+              {estimateRows.some((r) => r.totalCost && Number(r.totalCost) > 0) && (
+                <div className="mt-2 flex items-center justify-end gap-2 text-sm">
+                  <span className="text-muted-foreground">Grand Total (Total Cost):</span>
+                  <span className="font-semibold text-emerald-500 dark:text-emerald-400 font-mono">
+                    Rs.{" "}
+                    {estimateRows
+                      .reduce(
+                        (sum, r) => sum + (Number(r.totalCost) || 0),
+                        0
+                      )
+                      .toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
             </section>
 
             {/* Actions */}
@@ -753,22 +835,28 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
             Review the parsed CSV rows below. Confirming will <span className="font-medium text-foreground">replace</span> the current estimate rows.
           </p>
           {previewRows && previewRows.length > 0 && (
-            <div className="border border-border rounded-lg overflow-hidden">
-              <div className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
-                <span>Item Name</span>
-                <span className="text-right">Qty</span>
-                <span>Unit</span>
-                <span className="text-right">Est. Cost</span>
-              </div>
-              <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
-                {previewRows.map((r, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-1.5 text-sm items-center">
-                    <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
-                    <span className="text-right">{r.qty || "—"}</span>
-                    <span className="text-xs">{r.unit || "NOS"}</span>
-                    <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
-                  </div>
-                ))}
+            <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+              <div className="min-w-[560px]">
+                <div className="grid grid-cols-[1fr_70px_70px_100px_120px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+                  <span>Item Name</span>
+                  <span className="text-right">Qty</span>
+                  <span>Unit</span>
+                  <span className="text-right">Est. Cost / Unit</span>
+                  <span className="text-right">Total Cost</span>
+                </div>
+                <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
+                  {previewRows.map((r, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_70px_70px_100px_120px] gap-2 px-3 py-1.5 text-sm items-center">
+                      <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
+                      <span className="text-right">{r.qty || "—"}</span>
+                      <span className="text-xs">{r.unit || "NOS"}</span>
+                      <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+                      <span className="text-right font-medium text-emerald-500 dark:text-emerald-400">
+                        {r.totalCost ? Number(r.totalCost).toLocaleString("en-IN") : "—"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

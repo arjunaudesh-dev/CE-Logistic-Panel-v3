@@ -1,0 +1,763 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import {
+     5→  Table,
+     6→  TableBody,
+     7→  TableCell,
+     8→  TableHead,
+     9→  TableHeader,
+    10→  TableRow,
+    11→} from "@/components/ui/table";
+    12→import { Button } from "@/components/ui/button";
+    13→import { CustomBadge } from "@/components/erp/badges";
+    14→import { LoadingState, EmptyState } from "@/components/erp/states";
+    15→import { InitiateFileDialog, EstimateItem } from "./initiate-file";
+    16→import { formatCurrency, estimateStatusColor } from "@/lib/constants";
+    17→import { useToast } from "@/hooks/use-toast";
+    18→import {
+    19→  Loader2,
+    20→  Sparkles,
+    21→  FileSignature,
+    22→  CheckCircle2,
+    23→  PackageSearch,
+    24→  AlertCircle,
+    25→  ShieldCheck,
+    26→  FileText,
+    27→  ScrollText,
+    28→  ChevronUp,
+    29→  ChevronDown,
+    30→  ChevronsUpDown,
+    31→  Group as GroupIcon,
+    32→  Files,
+    33→  ChevronRight,
+    34→} from "lucide-react";
+    35→import { cn } from "@/lib/utils";
+    36→
+    37→interface Props {
+    38→  estimateId: string;
+    39→  /** whether to show the AI "Process" button (wizard step 2) or just the table (PR from Estimate tab) */
+    40→  showProcessButton?: boolean;
+    41→  onChanged?: () => void;
+    42→}
+    43→
+    44→interface EstimateWithProject {
+    45→  id: string;
+    46→  status: string;
+    47→  items: EstimateItem[];
+    48→  project?: {
+    49→    projectType?: string | null;
+    50→    financialMean?: string | null;
+    51→  } | null;
+    52→}
+    53→
+    54→type SectionVariant = "rc" | "non-rate" | "contractual";
+    55→type ThemeKey = "emerald" | "amber" | "violet";
+    56→type SortKey = "srNo" | "itemName" | "itemCode" | "qty" | "approxCost";
+    57→type SortDir = "asc" | "desc";
+    58→
+    59→const SECTION_THEME: Record<SectionVariant, { key: ThemeKey; bar: string; title: string; summary: string; desc: string }> = {
+    60→  rc: {
+    61→    key: "emerald",
+    62→    bar: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    63→    title: "text-emerald-300",
+    64→    summary: "text-emerald-400",
+    65→    desc: "bg-emerald-500/5 text-emerald-400/90",
+    66→  },
+    67→  "non-rate": {
+    68→    key: "amber",
+    69→    bar: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    70→    title: "text-amber-300",
+    71→    summary: "text-amber-400",
+    72→    desc: "bg-amber-500/5 text-amber-400/90",
+    73→  },
+    74→  contractual: {
+    75→    key: "violet",
+    76→    bar: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+    77→    title: "text-violet-300",
+    78→    summary: "text-violet-400",
+    79→    desc: "bg-violet-500/5 text-violet-400/90",
+    80→  },
+    81→};
+    82→
+    83→export function EstimateItemsTable({ estimateId, showProcessButton = false, onChanged }: Props) {
+    84→  const { data: estimate, loading, refresh } = useFetch<EstimateWithProject>(
+    85→    `/api/estimates/${estimateId}`
+    86→  );
+    87→  const [processing, setProcessing] = useState(false);
+    88→  const [initiateItem, setInitiateItem] = useState<EstimateItem | null>(null);
+    89→  const { toast } = useToast();
+    90→
+    91→  // Sorting state — shared across all 3 sections (single preference)
+    92→  const [sortKey, setSortKey] = useState<SortKey>("srNo");
+    93→  const [sortDir, setSortDir] = useState<SortDir>("asc");
+    94→  // Group-by-file toggle — applies within each section
+    95→  const [groupByFile, setGroupByFile] = useState(false);
+    96→
+    97→  const handleSort = (key: SortKey) => {
+    98→    if (key === sortKey) {
+    99→      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+   100→    } else {
+   101→      setSortKey(key);
+   102→      setSortDir("asc");
+   103→    }
+   104→  };
+   105→
+   106→  const items = estimate?.items || [];
+   107→  const pendingItems = items.filter((i) => i.status === "Pending");
+   108→  const initiatedItems = items.filter((i) => i.status === "Initiated");
+   109→
+   110→  // Determine if the project context is contractual — infer from project type OR financial mean.
+   111→  const projectType = estimate?.project?.projectType;
+   112→  const financialMean = estimate?.project?.financialMean;
+   113→  const isProjectContractual =
+   114→    projectType === "Contractual Job" || financialMean === "Contractual";
+   115→
+   116→  // Split items into 3 groups according to type
+   117→  const rcItems = items.filter((i) => i.isRC);
+   118→  const contractualItems = items.filter((i) => !i.isRC && isProjectContractual);
+   119→  const nonRateItems = items.filter((i) => !i.isRC && !isProjectContractual);
+   120→
+   121→  const handleProcess = async () => {
+   122→    setProcessing(true);
+   123→    const res = await apiRequest(`/api/estimates/${estimateId}/process`, "POST");
+   124→    setProcessing(false);
+   125→    if (res.ok) {
+   126→      toast({ title: "Estimate processed with AI", description: `${items.length} items matched to RC list & inventory` });
+   127→      refresh();
+   128→      onChanged?.();
+   129→    } else {
+   130→      toast({ title: "AI processing failed", description: res.error, variant: "destructive" });
+   131→    }
+   132→  };
+   133→
+   134→  if (loading) return <LoadingState label="Loading estimate..." />;
+   135→
+   136→  return (
+   137→    <div className="space-y-3">
+   138→      {showProcessButton && (
+   139→        <div className="flex items-center justify-between gap-3 flex-wrap">
+   140→          <div className="flex items-center gap-2">
+   141→            <CustomBadge className={cn("border-0", estimateStatusColor(estimate?.status || "Draft"))}>
+   142→              {estimate?.status || "Draft"}
+   143→            </CustomBadge>
+   144→            <span className="text-xs text-muted-foreground">
+   145→              {items.length} items · {pendingItems.length} pending · {initiatedItems.length} initiated
+   146→            </span>
+   147→          </div>
+   148→          {estimate?.status !== "Processed" && (
+   149→            <Button onClick={handleProcess} disabled={processing} size="sm" className="gap-1.5">
+   150→              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   151→              Process with AI
+   152→            </Button>
+   153→          )}
+   154→        </div>
+   155→      )}
+   156→
+   157→      {/* summary tiles — kept identical to original */}
+   158→      {items.length > 0 && (
+   159→        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+   160→          <SummaryTile
+   161→            label="Total Approx Cost"
+   162→            value={formatCurrency(items.reduce((s, i) => s + (i.approxCost || 0), 0))}
+   163→            tone="text-blue-400"
+   164→            icon={<PackageSearch className="h-4 w-4" />}
+   165→          />
+   166→          <SummaryTile
+   167→            label="RC Items"
+   168→            value={String(rcItems.length)}
+   169→            tone="text-emerald-400"
+   170→            icon={<CheckCircle2 className="h-4 w-4" />}
+   171→          />
+   172→          <SummaryTile
+   173→            label="Stock Available"
+   174→            value={String(items.filter((i) => i.availableStock > 0).length)}
+   175→            tone="text-amber-400"
+   176→            icon={<AlertCircle className="h-4 w-4" />}
+   177→          />
+   178→          <SummaryTile
+   179→            label="Initiated PRs"
+   180→            value={String(initiatedItems.length)}
+   181→            tone="text-violet-400"
+   182→            icon={<FileSignature className="h-4 w-4" />}
+   183→          />
+   184→        </div>
+   185→      )}
+   186→
+   187→      {/* Group-by-file toggle — only enabled when at least one item has been initiated */}
+   188→      {items.length > 0 && (
+   189→        <div className="flex items-center justify-between gap-3 flex-wrap">
+   190→          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+   191→            <GroupIcon className="h-3 w-3" />
+   192→            Sortable headers · {initiatedItems.length > 0
+   193→              ? "Toggle to group multiple items sharing the same PR/File number"
+   194→              : "Initiate files to enable the group-by-file view"}
+   195→          </p>
+   196→          <Button
+   197→            size="sm"
+   198→            variant={groupByFile ? "default" : "outline"}
+   199→            onClick={() => setGroupByFile((v) => !v)}
+   200→            disabled={initiatedItems.length === 0}
+   201→            className="gap-1.5"
+   202→            title={initiatedItems.length === 0 ? "No initiated items to group" : "Toggle group-by-file view"}
+   203→          >
+   204→            <GroupIcon className="h-4 w-4" />
+   205→            {groupByFile ? "Ungroup View" : "Group by File"}
+   206→          </Button>
+   207→        </div>
+   208→      )}
+   209→
+   210→      {items.length === 0 ? (
+   211→        <EmptyState
+   212→          icon={PackageSearch}
+   213→          title="No estimate items"
+   214→          description="Add material estimate items in Step 1, then process with AI."
+   215→        />
+   216→      ) : (
+   217→        <div className="space-y-4">
+   218→          {rcItems.length > 0 && (
+   219→            <ItemsSection
+   220→              title="RC (Rate Contract) Items"
+   221→              icon={<ShieldCheck className="h-4 w-4" />}
+   222→              variant="rc"
+   223→              description="Items matched to an active Rate Contract — procurement can proceed at the locked RC rate."
+   224→              items={rcItems}
+   225→              onInitiate={(it) => setInitiateItem(it)}
+   226→              sortKey={sortKey}
+   227→              sortDir={sortDir}
+   228→              onSort={handleSort}
+   229→              groupByFile={groupByFile}
+   230→            />
+   231→          )}
+   232→          {nonRateItems.length > 0 && (
+   233→            <ItemsSection
+   234→              title="Non-Rate Items (Tender/Quotation Required)"
+   235→              icon={<FileText className="h-4 w-4" />}
+   236→              variant="non-rate"
+   237→              description="These items are not on an active Rate Contract — they require a tender or quotation process."
+   238→              items={nonRateItems}
+   239→              onInitiate={(it) => setInitiateItem(it)}
+   240→              sortKey={sortKey}
+   241→              sortDir={sortDir}
+   242→              onSort={handleSort}
+   243→              groupByFile={groupByFile}
+   244→            />
+   245→          )}
+   246→          {contractualItems.length > 0 && (
+   247→            <ItemsSection
+   248→              title="Contractual Items (ARO Flow)"
+   249→              icon={<ScrollText className="h-4 w-4" />}
+   250→              variant="contractual"
+   251→              description="These items follow the ARO (Annual Requirement Order) contractual process flow."
+   252→              items={contractualItems}
+   253→              onInitiate={(it) => setInitiateItem(it)}
+   254→              sortKey={sortKey}
+   255→              sortDir={sortDir}
+   256→              onSort={handleSort}
+   257→              groupByFile={groupByFile}
+   258→            />
+   259→          )}
+   260→        </div>
+   261→      )}
+   262→
+   263→      {initiateItem && (
+   264→        <InitiateFileDialog
+   265→          key={initiateItem.id}
+   266→          item={initiateItem}
+   267→          open
+   268→          onOpenChange={(o) => !o && setInitiateItem(null)}
+   269→          onInitiated={() => {
+   270→            setInitiateItem(null);
+   271→            refresh();
+   272→            onChanged?.();
+   273→          }}
+   274→        />
+   275→      )}
+   276→    </div>
+   277→  );
+   278→}
+   279→
+   280→/** Sortable column header with chevron indicator. */
+   281→function SortHeader({
+   282→  label,
+   283→  sortKey,
+   284→  currentSortKey,
+   285→  currentSortDir,
+   286→  onSort,
+   287→  className,
+   288→  align,
+   289→}: {
+   290→  label: string;
+   291→  sortKey: SortKey;
+   292→  currentSortKey: SortKey;
+   293→  currentSortDir: SortDir;
+   294→  onSort: (key: SortKey) => void;
+   295→  className?: string;
+   296→  align?: "left" | "right";
+   297→}) {
+   298→  const active = sortKey === currentSortKey;
+   299→  return (
+   300→    <TableHead className={cn("text-muted-foreground", className)}>
+   301→      <button
+   302→        type="button"
+   303→        onClick={() => onSort(sortKey)}
+   304→        className={cn(
+   305→          "inline-flex items-center gap-1 hover:text-foreground transition-colors",
+   306→          align === "right" && "flex-row-reverse",
+   307→          active && "text-foreground"
+   308→        )}
+   309→      >
+   310→        {label}
+   311→        {active ? (
+   312→          currentSortDir === "asc" ? (
+   313→            <ChevronUp className="h-3 w-3" />
+   314→          ) : (
+   315→            <ChevronDown className="h-3 w-3" />
+   316→          )
+   317→        ) : (
+   318→          <ChevronsUpDown className="h-3 w-3 opacity-40" />
+   319→        )}
+   320→      </button>
+   321→    </TableHead>
+   322→  );
+   323→}
+   324→
+   325→function ItemsSection({
+   326→  title,
+   327→  icon,
+   328→  variant,
+   329→  description,
+   330→  items,
+   331→  onInitiate,
+   332→  sortKey,
+   333→  sortDir,
+   334→  onSort,
+   335→  groupByFile,
+   336→}: {
+   337→  title: string;
+   338→  icon: React.ReactNode;
+   339→  variant: SectionVariant;
+   340→  description: string;
+   341→  items: EstimateItem[];
+   342→  onInitiate: (item: EstimateItem) => void;
+   343→  sortKey: SortKey;
+   344→  sortDir: SortDir;
+   345→  onSort: (key: SortKey) => void;
+   346→  groupByFile: boolean;
+   347→}) {
+   348→  const theme = SECTION_THEME[variant];
+   349→  const showRcCols = variant === "rc";
+   350→  const DescIcon = variant === "rc" ? CheckCircle2 : AlertCircle;
+   351→
+   352→  // Sort items — sort is applied within each section
+   353→  const sortedItems = useMemo(() => {
+   354→    const arr = [...items];
+   355→    arr.sort((a, b) => {
+   356→      let cmp = 0;
+   357→      switch (sortKey) {
+   358→        case "srNo":
+   359→          cmp = a.srNo - b.srNo;
+   360→          break;
+   361→        case "itemName":
+   362→          cmp = (a.itemName || "").localeCompare(b.itemName || "");
+   363→          break;
+   364→        case "itemCode":
+   365→          cmp = (a.itemCode || "").localeCompare(b.itemCode || "");
+   366→          break;
+   367→        case "qty":
+   368→          cmp = a.qty - b.qty;
+   369→          break;
+   370→        case "approxCost":
+   371→          cmp = a.approxCost - b.approxCost;
+   372→          break;
+   373→      }
+   374→      return sortDir === "asc" ? cmp : -cmp;
+   375→    });
+   376→    return arr;
+   377→  }, [items, sortKey, sortDir]);
+   378→
+   379→  // Group items by prNumber (or fileNumber) when groupByFile is enabled.
+   380→  // Items without a prNumber/fileNumber remain as individual rows.
+   381→  // Groups of 2+ items become expandable group cards; single-initiated items
+   382→  // render as individual rows so the user still sees the PR badge inline.
+   383→  const groupedView = useMemo(() => {
+   384→    if (!groupByFile) {
+   385→      return { groups: [] as { key: string; items: EstimateItem[] }[], individuals: sortedItems };
+   386→    }
+   387→    const groupsMap = new Map<string, EstimateItem[]>();
+   388→    const individuals: EstimateItem[] = [];
+   389→    for (const it of sortedItems) {
+   390→      const key = it.prNumber || it.fileNumber;
+   391→      if (key) {
+   392→        const existing = groupsMap.get(key);
+   393→        if (existing) existing.push(it);
+   394→        else groupsMap.set(key, [it]);
+   395→      } else {
+   396→        individuals.push(it);
+   397→      }
+   398→    }
+   399→    const realGroups: { key: string; items: EstimateItem[] }[] = [];
+   400→    for (const [key, groupItems] of groupsMap) {
+   401→      if (groupItems.length >= 2) {
+   402→        realGroups.push({ key, items: groupItems });
+   403→      } else {
+   404→        individuals.push(groupItems[0]);
+   405→      }
+   406→    }
+   407→    return { groups: realGroups, individuals };
+   408→  }, [sortedItems, groupByFile]);
+   409→
+   410→  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+   411→  const groupedItemCount = groupedView.groups.reduce((s, g) => s + g.items.length, 0);
+   412→
+   413→  return (
+   414→    <div className="border border-border rounded-lg overflow-hidden">
+   415→      {/* Colored header bar — icon + title + count + total cost */}
+   416→      <div className={cn("flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border flex-wrap", theme.bar)}>
+   417→        <div className="flex items-center gap-2 min-w-0">
+   418→          <span className="shrink-0">{icon}</span>
+   419→          <h4 className={cn("text-sm font-semibold", theme.title)}>{title}</h4>
+   420→          <span className="text-[11px] px-1.5 py-0.5 rounded bg-background/40 font-mono">
+   421→            {items.length}
+   422→          </span>
+   423→        </div>
+   424→        <div className="text-xs">
+   425→          <span className="opacity-80">Total Approx Cost: </span>
+   426→          <span className={cn("font-semibold", theme.summary)}>{formatCurrency(totalCost)}</span>
+   427→        </div>
+   428→      </div>
+   429→
+   430→      {/* Variant description strip */}
+   431→      <div className={cn("px-4 py-1.5 border-b border-border flex items-center gap-1.5 text-[11px]", theme.desc)}>
+   432→        <DescIcon className="h-3 w-3 shrink-0" />
+   433→        {description}
+   434→      </div>
+   435→
+   436→      {/* Group cards — only when groupByFile is enabled and there are multi-item groups */}
+   437→      {groupByFile && groupedView.groups.length > 0 && (
+   438→        <div className="p-3 space-y-2 bg-secondary/10 border-b border-border">
+   439→          <p className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+   440→            <Files className="h-3 w-3" />
+   441→            {groupedView.groups.length} grouped file(s) · {groupedItemCount} items
+   442→          </p>
+   443→          {groupedView.groups.map((g) => (
+   444→            <GroupCard
+   445→              key={g.key}
+   446→              groupKey={g.key}
+   447→              items={g.items}
+   448→              variant={variant}
+   449→              onInitiate={onInitiate}
+   450→            />
+   451→          ))}
+   452→        </div>
+   453→      )}
+   454→
+   455→      {/* Individual items table — show ALL items (no pagination limit) in a scrollable container */}
+   456→      {groupedView.individuals.length > 0 ? (
+   457→        <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+   458→          <Table>
+   459→            <TableHeader className="sticky top-0 z-10 bg-secondary/95 backdrop-blur">
+   460→              <TableRow className="hover:bg-transparent border-border">
+   461→                <SortHeader
+   462→                  label="Sr"
+   463→                  sortKey="srNo"
+   464→                  currentSortKey={sortKey}
+   465→                  currentSortDir={sortDir}
+   466→                  onSort={onSort}
+   467→                  className="w-12"
+   468→                />
+   469→                <SortHeader
+   470→                  label="Item Name"
+   471→                  sortKey="itemName"
+   472→                  currentSortKey={sortKey}
+   473→                  currentSortDir={sortDir}
+   474→                  onSort={onSort}
+   475→                />
+   476→                <SortHeader
+   477→                  label="Item Code"
+   478→                  sortKey="itemCode"
+   479→                  currentSortKey={sortKey}
+   480→                  currentSortDir={sortDir}
+   481→                  onSort={onSort}
+   482→                />
+   483→                <SortHeader
+   484→                  label="Qty"
+   485→                  sortKey="qty"
+   486→                  currentSortKey={sortKey}
+   487→                  currentSortDir={sortDir}
+   488→                  onSort={onSort}
+   489→                  className="text-right"
+   490→                  align="right"
+   491→                />
+   492→                <TableHead className="text-muted-foreground">Deno</TableHead>
+   493→                <SortHeader
+   494→                  label="Approx Cost"
+   495→                  sortKey="approxCost"
+   496→                  currentSortKey={sortKey}
+   497→                  currentSortDir={sortDir}
+   498→                  onSort={onSort}
+   499→                  className="text-right"
+   500→                  align="right"
+   501→                />
+   502→                {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+   503→                {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+   504→                <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
+   505→                <TableHead className="text-muted-foreground">Available Stock</TableHead>
+   506→                <TableHead className="text-muted-foreground text-right">Action</TableHead>
+   507→              </TableRow>
+   508→            </TableHeader>
+   509→            <TableBody>
+   510→              {groupedView.individuals.map((it) => (
+   511→                <ItemRow
+   512→                  key={it.id}
+   513→                  it={it}
+   514→                  showRcCols={showRcCols}
+   515→                  onInitiate={onInitiate}
+   516→                />
+   517→              ))}
+   518→            </TableBody>
+   519→          </Table>
+   520→        </div>
+   521→      ) : (
+   522→        groupByFile &&
+   523→        groupedView.groups.length > 0 && (
+   524→          <div className="p-6 text-center text-xs text-muted-foreground">
+   525→            All items in this section are part of file groups above.
+   526→          </div>
+   527→        )
+   528→      )}
+   529→    </div>
+   530→  );
+   531→}
+   532→
+   533→/** Expandable group card — multiple items sharing a single PR/File number. */
+   534→function GroupCard({
+   535→  groupKey,
+   536→  items,
+   537→  variant,
+   538→  onInitiate,
+   539→}: {
+   540→  groupKey: string;
+   541→  items: EstimateItem[];
+   542→  variant: SectionVariant;
+   543→  onInitiate: (item: EstimateItem) => void;
+   544→}) {
+   545→  const [expanded, setExpanded] = useState(false);
+   546→  const theme = SECTION_THEME[variant];
+   547→  const showRcCols = variant === "rc";
+   548→
+   549→  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+   550→  const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
+   551→
+   552→  // Common attributes across the group (only show if all items share the same value)
+   553→  const suppliers = new Set(items.map((i) => i.rcSupplier).filter(Boolean));
+   554→  const commonSupplier = suppliers.size === 1 ? Array.from(suppliers)[0] : null;
+   555→  const rcNumbers = new Set(items.map((i) => i.rcNumber).filter(Boolean));
+   556→  const commonRcNumber = rcNumbers.size === 1 ? Array.from(rcNumbers)[0] : null;
+   557→  const units = new Set(items.map((i) => i.unit));
+   558→  const commonUnit = units.size === 1 ? Array.from(units)[0] : null;
+   559→  const fileNumbers = new Set(items.map((i) => i.fileNumber).filter(Boolean));
+   560→  const commonFileNumber = fileNumbers.size === 1 ? Array.from(fileNumbers)[0] : null;
+   561→
+   562→  return (
+   563→    <div className="border border-border rounded-lg overflow-hidden bg-background">
+   564→      {/* Group header — clickable to expand/collapse */}
+   565→      <button
+   566→        type="button"
+   567→        onClick={() => setExpanded((e) => !e)}
+   568→        className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40 transition-colors text-left"
+   569→      >
+   570→        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+   571→          <Files className={cn("h-4 w-4 shrink-0", theme.title)} />
+   572→          <CustomBadge className={cn("border-0 bg-primary/15 text-primary font-mono")}>
+   573→            {groupKey}
+   574→          </CustomBadge>
+   575→          <span className="text-xs text-muted-foreground">
+   576→            {items.length} items · {totalQty} {commonUnit || "units"} total
+   577→          </span>
+   578→          {commonSupplier && (
+   579→            <span className="text-xs text-muted-foreground hidden sm:inline truncate">
+   580→              · Supplier: <span className="text-foreground/80">{commonSupplier}</span>
+   581→            </span>
+   582→          )}
+   583→          {commonRcNumber && showRcCols && (
+   584→            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400 font-mono">
+   585→              {commonRcNumber}
+   586→            </CustomBadge>
+   587→          )}
+   588→          {commonFileNumber && (
+   589→            <span className="text-[11px] text-muted-foreground hidden md:inline font-mono">
+   590→              · {commonFileNumber}
+   591→            </span>
+   592→          )}
+   593→        </div>
+   594→        <div className="flex items-center gap-3 shrink-0">
+   595→          <div className="text-right">
+   596→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">File Total</p>
+   597→            <p className={cn("text-sm font-semibold", theme.summary)}>{formatCurrency(totalCost)}</p>
+   598→          </div>
+   599→          {expanded ? (
+   600→            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   601→          ) : (
+   602→            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   603→          )}
+   604→        </div>
+   605→      </button>
+   606→
+   607→      {/* Expanded individual items */}
+   608→      {expanded && (
+   609→        <div className="border-t border-border bg-secondary/20">
+   610→          <div className="overflow-x-auto scrollbar-thin">
+   611→            <Table>
+   612→              <TableHeader>
+   613→                <TableRow className="hover:bg-transparent border-border">
+   614→                  <TableHead className="text-muted-foreground w-12">Sr</TableHead>
+   615→                  <TableHead className="text-muted-foreground">Item Name</TableHead>
+   616→                  <TableHead className="text-muted-foreground">Item Code</TableHead>
+   617→                  <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+   618→                  <TableHead className="text-muted-foreground">Deno</TableHead>
+   619→                  <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
+   620→                  {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+   621→                  {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+   622→                  <TableHead className="text-muted-foreground text-right">Action</TableHead>
+   623→                </TableRow>
+   624→              </TableHeader>
+   625→              <TableBody>
+   626→                {items.map((it) => (
+   627→                  <ItemRow
+   628→                    key={it.id}
+   629→                    it={it}
+   630→                    showRcCols={showRcCols}
+   631→                    onInitiate={onInitiate}
+   632→                    compact
+   633→                  />
+   634→                ))}
+   635→              </TableBody>
+   636→            </Table>
+   637→          </div>
+   638→        </div>
+   639→      )}
+   640→    </div>
+   641→  );
+   642→}
+   643→
+   644→/** Single item row — shared between the main table and the expanded group view. */
+   645→function ItemRow({
+   646→  it,
+   647→  showRcCols,
+   648→  onInitiate,
+   649→  compact,
+   650→}: {
+   651→  it: EstimateItem;
+   652→  showRcCols: boolean;
+   653→  onInitiate: (item: EstimateItem) => void;
+   654→  compact?: boolean;
+   655→}) {
+   656→  const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
+   657→  return (
+   658→    <TableRow className="border-border">
+   659→      <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
+   660→      <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
+   661→      <TableCell className="font-mono text-xs">
+   662→        {it.itemCode ? (
+   663→          <span className="text-blue-400">{it.itemCode}</span>
+   664→        ) : (
+   665→          <span className="text-muted-foreground italic">TBC</span>
+   666→        )}
+   667→      </TableCell>
+   668→      <TableCell className="text-right">{it.qty}</TableCell>
+   669→      <TableCell className="text-xs">{it.unit}</TableCell>
+   670→      <TableCell className="text-right font-medium text-foreground">
+   671→        {formatCurrency(it.approxCost)}
+   672→        {it.isRC && (
+   673→          <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
+   674→        )}
+   675→        {!it.isRC && (
+   676→          <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
+   677→        )}
+   678→      </TableCell>
+   679→      {showRcCols && (
+   680→        <TableCell>
+   681→          {it.isRC ? (
+   682→            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
+   683→          ) : (
+   684→            <span className="text-muted-foreground text-xs">—</span>
+   685→          )}
+   686→        </TableCell>
+   687→      )}
+   688→      {showRcCols && (
+   689→        <TableCell className="text-xs text-muted-foreground">
+   690→          {it.rcSupplier || "—"}
+   691→        </TableCell>
+   692→      )}
+   693→      {!compact && (
+   694→        <>
+   695→          <TableCell className="text-right text-xs">
+   696→            {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
+   697→          </TableCell>
+   698→          <TableCell>
+   699→            {it.availableStock > 0 ? (
+   700→              <div className="text-xs">
+   701→                <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
+   702→                {it.stockLocation && (
+   703→                  <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
+   704→                )}
+   705→                {it.nonMovingStock > 0 && (
+   706→                  <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
+   707→                )}
+   708→              </div>
+   709→            ) : (
+   710→              <span className="text-muted-foreground text-xs">0</span>
+   711→            )}
+   712→          </TableCell>
+   713→        </>
+   714→      )}
+   715→      <TableCell className="text-right">
+   716→        {it.status === "Initiated" ? (
+   717→          <div className="flex flex-col items-end gap-0.5">
+   718→            <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
+   719→              <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
+   720→            </CustomBadge>
+   721→            {it.fileNumber && (
+   722→              <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
+   723→            )}
+   724→          </div>
+   725→        ) : (
+   726→          <Button
+   727→            size="sm"
+   728→            variant="outline"
+   729→            onClick={() => onInitiate(it)}
+   730→            className="gap-1.5 h-7"
+   731→          >
+   732→            <FileSignature className="h-3.5 w-3.5" /> Initiate File
+   733→          </Button>
+   734→        )}
+   735→      </TableCell>
+   736→    </TableRow>
+   737→  );
+   738→}
+   739→
+   740→function SummaryTile({
+   741→  label,
+   742→  value,
+   743→  tone,
+   744→  icon,
+   745→}: {
+   746→  label: string;
+   747→  value: string;
+   748→  tone: string;
+   749→  icon: React.ReactNode;
+   750→}) {
+   751→  return (
+   752→    <div className="bg-secondary/40 rounded-lg p-3 flex items-center gap-2.5">
+   753→      <div className={cn("h-8 w-8 rounded-md flex items-center justify-center bg-background/50", tone)}>
+   754→        {icon}
+   755→      </div>
+   756→      <div className="min-w-0">
+   757→        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+   758→        <p className={cn("text-sm font-semibold truncate", tone)}>{value}</p>
+   759→      </div>
+   760→    </div>
+   761→  );
+   762→}
+   763→

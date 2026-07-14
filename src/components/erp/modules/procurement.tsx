@@ -1,10 +1,10 @@
 "use client";
-import { useState, useMemo } from "react";
+import { Fragment, useState, useMemo } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
 import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
-import { PositionBadge, CategoryBadge } from "@/components/erp/badges";
+import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,11 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -51,6 +56,9 @@ import {
   User,
   MessageSquare,
   Truck,
+  RefreshCw,
+  Files,
+  ArrowRight,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -130,10 +138,24 @@ export function ProcurementModule() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
 
+  // Group-by-File (default ON) — merges items sharing the same PR number into a single row.
+  // ProcurementFile has no fileGroupKey field, so grouping is strictly by prNumber.
+  const [groupByFile, setGroupByFile] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
   // Dialogs
   const [addOpen, setAddOpen] = useState(false);
   const [logFile, setLogFile] = useState<ProcurementFile | null>(null);
   const [positionFile, setPositionFile] = useState<ProcurementFile | null>(null);
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   // Derive unique suppliers & projects from data
   const suppliers = useMemo(() => {
@@ -216,10 +238,87 @@ export function ProcurementModule() {
     sortDir,
   ]);
 
+  // Group files by prNumber when groupByFile is ON. ProcurementFile has no
+  // fileGroupKey field, so grouping is strictly by prNumber. Items with a
+  // unique prNumber fall back to a normal single-item row.
+  interface ProcFileGroup {
+    key: string;
+    items: ProcurementFile[];
+    totalCost: number;
+    totalQty: number;
+    commonSupplier: string | null;
+    commonCategory: string | null;
+    commonPosition: string | null;
+    commonUnit: string | null;
+    commonProjectName: string | null;
+    commonVoteNumber: string | null;
+    firstCreatedAt: string;
+  }
+
+  const groupedView = useMemo<{ groups: ProcFileGroup[]; singles: ProcurementFile[] }>(() => {
+    if (!groupByFile) return { groups: [], singles: filteredFiles };
+    const map = new Map<string, ProcurementFile[]>();
+    for (const f of filteredFiles) {
+      const k = f.prNumber;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(f);
+    }
+    const groups: ProcFileGroup[] = [];
+    const singles: ProcurementFile[] = [];
+    for (const [key, items] of map) {
+      if (items.length >= 2) {
+        const totalCost = items.reduce((s, f) => s + (f.fileCost || 0), 0);
+        const totalQty = items.reduce((s, f) => s + (f.qty || 0), 0);
+        const suppliers = new Set(items.map((f) => f.supplier).filter(Boolean));
+        const categories = new Set(items.map((f) => f.fileCategory));
+        const positions = new Set(items.map((f) => f.presentPosition));
+        const units = new Set(items.map((f) => f.unit));
+        const projectNames = new Set(items.map((f) => f.projectName).filter(Boolean));
+        const voteNumbers = new Set(items.map((f) => f.voteNumber).filter(Boolean));
+        const firstCreatedAt = items
+          .map((f) => f.createdAt)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+        groups.push({
+          key,
+          items,
+          totalCost,
+          totalQty,
+          commonSupplier: suppliers.size === 1 ? Array.from(suppliers)[0]! : null,
+          commonCategory: categories.size === 1 ? items[0]!.fileCategory : null,
+          commonPosition: positions.size === 1 ? items[0]!.presentPosition : null,
+          commonUnit: units.size === 1 ? items[0]!.unit : null,
+          commonProjectName: projectNames.size === 1 ? Array.from(projectNames)[0]! : null,
+          commonVoteNumber: voteNumbers.size === 1 ? Array.from(voteNumbers)[0]! : null,
+          firstCreatedAt,
+        });
+      } else {
+        singles.push(items[0]!);
+      }
+    }
+    return { groups, singles };
+  }, [filteredFiles, groupByFile]);
+
+  // Unified paginated row list — when groupByFile is ON each group counts as
+  // one row (expanded child rows do NOT count against the page size, so a
+  // fully expanded page just gets taller). When OFF, behave as before.
+  type DisplayRow =
+    | { type: "group"; group: ProcFileGroup }
+    | { type: "single"; file: ProcurementFile };
+
+  const displayRows = useMemo<DisplayRow[]>(() => {
+    if (!groupByFile) {
+      return filteredFiles.map((f) => ({ type: "single" as const, file: f }));
+    }
+    return [
+      ...groupedView.groups.map((g) => ({ type: "group" as const, group: g })),
+      ...groupedView.singles.map((f) => ({ type: "single" as const, file: f })),
+    ];
+  }, [filteredFiles, groupedView, groupByFile]);
+
   // Reset page when filters change
-  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pagedFiles = filteredFiles.slice(
+  const pagedRows = displayRows.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   );
@@ -292,9 +391,21 @@ export function ProcurementModule() {
         description="All ongoing procurement files across projects"
         icon={FileText}
         actions={
-          <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
-            <Plus className="h-4 w-4" /> Add File
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant={groupByFile ? "default" : "outline"}
+              onClick={() => { setGroupByFile((v) => !v); setPage(1); }}
+              size="sm"
+              className="gap-1.5"
+              title="Toggle grouping multiple items sharing the same PR number into a single row"
+            >
+              <Files className="h-4 w-4" />
+              {groupByFile ? "Grouped by File" : "Group by File"}
+            </Button>
+            <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
+              <Plus className="h-4 w-4" /> Add File
+            </Button>
+          </div>
         }
       />
 
@@ -582,88 +693,250 @@ export function ProcurementModule() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagedFiles.map((f) => (
-                  <TableRow
-                    key={f.id}
-                    className="border-border cursor-pointer hover:bg-secondary/40"
-                    onClick={() => setLogFile(f)}
-                  >
-                    <TableCell className="font-mono text-xs text-foreground whitespace-nowrap">
-                      {f.prNumber}
-                    </TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">
-                      <div className="flex flex-col">
-                        <span className="text-foreground truncate max-w-[160px]">
-                          {f.projectName || "—"}
-                        </span>
-                        {f.voteNumber && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {f.voteNumber}
+                {pagedRows.map((row) => {
+                  if (row.type === "group") {
+                    const g = row.group;
+                    const expanded = expandedGroups.has(g.key);
+                    return (
+                      <Fragment key={`g-${g.key}`}>
+                        {/* Merged group header row */}
+                        <TableRow
+                          className="border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50"
+                          onClick={() => toggleGroup(g.key)}
+                        >
+                          <TableCell className="font-mono text-xs text-foreground whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleGroup(g.key); }}
+                                className="text-muted-foreground hover:text-foreground shrink-0"
+                                aria-label={expanded ? "Collapse group" : "Expand group"}
+                              >
+                                {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </button>
+                              <Files className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="truncate">{g.key}</span>
+                              <CustomBadge className="border-0 bg-primary/15 text-primary">{g.items.length} items</CustomBadge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <span className={cn("truncate max-w-[160px]", g.commonProjectName ? "text-foreground" : "text-muted-foreground")}>
+                                {g.commonProjectName || (g.items.some((f) => f.projectName) ? "multiple" : "—")}
+                              </span>
+                              {g.commonVoteNumber && (
+                                <span className="text-[10px] text-muted-foreground">{g.commonVoteNumber}</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground italic whitespace-nowrap">multiple</TableCell>
+                          <TableCell className="text-foreground text-xs">
+                            {g.items[0]!.itemName}
+                            {g.items.length > 1 && (
+                              <span className="text-muted-foreground"> +{g.items.length - 1} more</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground italic whitespace-nowrap">{g.commonUnit || "varies"}</TableCell>
+                          <TableCell className="text-right text-xs whitespace-nowrap">{g.totalQty}</TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground italic whitespace-nowrap">varies</TableCell>
+                          <TableCell className="text-right font-bold text-foreground whitespace-nowrap">{formatCurrency(g.totalCost)}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">
+                            {g.commonSupplier ? (
+                              g.commonSupplier
+                            ) : (
+                              <span className="text-muted-foreground italic">multiple</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {g.commonPosition ? (
+                              <PositionBadge position={g.commonPosition} />
+                            ) : (
+                              <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">mixed</CustomBadge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {g.commonCategory ? (
+                              <CategoryBadge category={g.commonCategory} />
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">multiple</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right whitespace-nowrap">
+                            <div
+                              className="flex items-center justify-end gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ProcurementQuickUpdatePopover
+                                files={g.items}
+                                onSaved={() => refresh()}
+                                isGroup
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => toggleGroup(g.key)}
+                                title={expanded ? "Collapse items" : "Expand items"}
+                              >
+                                {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {/* Expanded child rows */}
+                        {expanded && g.items.map((f) => (
+                          <TableRow
+                            key={f.id}
+                            className="border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30"
+                            onClick={() => setLogFile(f)}
+                          >
+                            <TableCell className="pl-8 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5">
+                                <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
+                                {f.prNumber}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">
+                              <div className="flex flex-col">
+                                <span className="text-foreground truncate max-w-[160px]">{f.projectName || "—"}</span>
+                                {f.voteNumber && (
+                                  <span className="text-[10px] text-muted-foreground">{f.voteNumber}</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs whitespace-nowrap">{f.itemCode}</TableCell>
+                            <TableCell className="text-foreground text-xs">{f.itemName}</TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">{f.unit}</TableCell>
+                            <TableCell className="text-right text-xs whitespace-nowrap">{f.qty}</TableCell>
+                            <TableCell className="text-right text-xs whitespace-nowrap">{formatCurrency(f.unitPrice)}</TableCell>
+                            <TableCell className="text-right text-xs font-medium whitespace-nowrap">{formatCurrency(f.fileCost)}</TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">{f.supplier || "—"}</TableCell>
+                            <TableCell><PositionBadge position={f.presentPosition} /></TableCell>
+                            <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
+                            <TableCell className="text-right whitespace-nowrap">
+                              <div
+                                className="flex items-center justify-end gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ProcurementQuickUpdatePopover files={[f]} onSaved={() => refresh()} />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  title="Update Position (full dialog)"
+                                  onClick={() => setPositionFile(f)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  title="View Log"
+                                  onClick={() => setLogFile(f)}
+                                >
+                                  <History className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  title="Export CSV"
+                                  onClick={() => exportRowCsv(f)}
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    );
+                  }
+                  const f = row.file;
+                  return (
+                    <TableRow
+                      key={f.id}
+                      className="border-border cursor-pointer hover:bg-secondary/40"
+                      onClick={() => setLogFile(f)}
+                    >
+                      <TableCell className="font-mono text-xs text-foreground whitespace-nowrap">
+                        {f.prNumber}
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="text-foreground truncate max-w-[160px]">
+                            {f.projectName || "—"}
                           </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs whitespace-nowrap">
-                      {f.itemCode}
-                    </TableCell>
-                    <TableCell className="text-foreground">{f.itemName}</TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">
-                      {f.unit}
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {f.qty}
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {formatCurrency(f.unitPrice)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium text-foreground whitespace-nowrap">
-                      {formatCurrency(f.fileCost)}
-                    </TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">
-                      {f.supplier || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <PositionBadge position={f.presentPosition} />
-                    </TableCell>
-                    <TableCell>
-                      <CategoryBadge category={f.fileCategory} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div
-                        className="flex items-center justify-end gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Update Position"
-                          onClick={() => setPositionFile(f)}
+                          {f.voteNumber && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {f.voteNumber}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
+                        {f.itemCode}
+                      </TableCell>
+                      <TableCell className="text-foreground">{f.itemName}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {f.unit}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {f.qty}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {formatCurrency(f.unitPrice)}
+                      </TableCell>
+                      <TableCell className="text-right font-medium text-foreground whitespace-nowrap">
+                        {formatCurrency(f.fileCost)}
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {f.supplier || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <PositionBadge position={f.presentPosition} />
+                      </TableCell>
+                      <TableCell>
+                        <CategoryBadge category={f.fileCategory} />
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <div
+                          className="flex items-center justify-end gap-1"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="View Log"
-                          onClick={() => setLogFile(f)}
-                        >
-                          <History className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Export CSV"
-                          onClick={() => exportRowCsv(f)}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          <ProcurementQuickUpdatePopover files={[f]} onSaved={() => refresh()} />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Update Position (full dialog)"
+                            onClick={() => setPositionFile(f)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="View Log"
+                            onClick={() => setLogFile(f)}
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Export CSV"
+                            onClick={() => exportRowCsv(f)}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -674,13 +947,13 @@ export function ProcurementModule() {
               Showing{" "}
               <span className="text-foreground font-medium">
                 {(currentPage - 1) * PAGE_SIZE + 1}–
-                {Math.min(currentPage * PAGE_SIZE, filteredFiles.length)}
+                {Math.min(currentPage * PAGE_SIZE, displayRows.length)}
               </span>{" "}
               of{" "}
               <span className="text-foreground font-medium">
-                {filteredFiles.length}
+                {displayRows.length}
               </span>{" "}
-              files · Click any row to view the file log
+              {groupByFile ? `row(s) (${filteredFiles.length} items · ${groupedView.groups.length} grouped file(s))` : "files"} · Click any row to view the file log
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -1351,5 +1624,191 @@ function Detail({
         {value}
       </p>
     </div>
+  );
+}
+
+// ─── Quick Update Position Popover (inline, lightweight) ───
+// Sits beside the existing pencil/Edit (full dialog) button on every procurement
+// row + every merged-group row. For groups, prompts the user to confirm updating
+// all N items at once (since they share a position).
+function ProcurementQuickUpdatePopover({
+  files,
+  onSaved,
+  isGroup,
+}: {
+  files: ProcurementFile[];
+  onSaved: () => void;
+  isGroup?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newPosition, setNewPosition] = useState<string>(
+    files[0]?.presentPosition || "PR Raised"
+  );
+  const [comment, setComment] = useState("");
+  const [changedBy, setChangedBy] = useState("Officer");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const currentPosition = files[0]?.presentPosition || "";
+  const positionChanged = newPosition !== currentPosition;
+  const isMultiFile = isGroup && files.length > 1;
+
+  const submit = async () => {
+    if (!newPosition) {
+      toast({ title: "Select a new position", variant: "destructive" });
+      return;
+    }
+    if (isMultiFile) {
+      const ok = window.confirm(
+        `Update position for all ${files.length} items in this file?`
+      );
+      if (!ok) return;
+    }
+    setSaving(true);
+    const defaultComment = positionChanged
+      ? `Position changed: ${currentPosition} → ${newPosition}`
+      : "Position updated";
+    const results = await Promise.all(
+      files.map((f) =>
+        apiRequest(`/api/procurement/${f.id}`, "PUT", {
+          presentPosition: newPosition,
+          comment: comment.trim() || defaultComment,
+          changedBy: changedBy.trim() || "Officer",
+        })
+      )
+    );
+    setSaving(false);
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length === 0) {
+      toast({
+        title: isMultiFile
+          ? `Position updated for ${files.length} items`
+          : "Position updated",
+        description: positionChanged
+          ? `${currentPosition} → ${newPosition}`
+          : undefined,
+      });
+      setOpen(false);
+      setComment("");
+      setChangedBy("Officer");
+      onSaved();
+    } else {
+      toast({
+        title: `${failed.length} of ${files.length} update(s) failed`,
+        description: failed[0]?.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          title={
+            isMultiFile
+              ? `Quick Update Position (all ${files.length} items)`
+              : "Quick Update Position"
+          }
+          onClick={(e) => e.stopPropagation()}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-80 bg-popover text-popover-foreground border-border"
+        align="end"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 text-primary" />
+            <h4 className="text-sm font-semibold text-foreground">
+              Quick Update Position
+            </h4>
+          </div>
+          <div className="bg-secondary/40 rounded-md p-2.5 text-xs space-y-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-muted-foreground">Current:</span>
+              <PositionBadge position={currentPosition} />
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {files[0]?.prNumber} · {files[0]?.itemName}
+              {isMultiFile && (
+                <span className="text-foreground">
+                  {" "}· {files.length} items in this file
+                </span>
+              )}
+            </div>
+            {isMultiFile && (
+              <p className="text-amber-400 flex items-center gap-1 pt-0.5">
+                <Files className="h-3 w-3" />
+                Applies the new position to all {files.length} items in this file.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">New Position</Label>
+            <Select value={newPosition} onValueChange={setNewPosition}>
+              <SelectTrigger className="bg-background border-border h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRESENT_POSITIONS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Changed By</Label>
+            <Input
+              value={changedBy}
+              onChange={(e) => setChangedBy(e.target.value)}
+              placeholder="Your name / rank"
+              className="bg-background border-border h-9 text-sm"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">
+              Comment (optional)
+            </Label>
+            <Input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={
+                positionChanged
+                  ? `Position changed: ${currentPosition} → ${newPosition}`
+                  : "Optional note for log"
+              }
+              className="bg-background border-border h-9 text-sm"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={saving}
+              className="gap-1.5"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              Save
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

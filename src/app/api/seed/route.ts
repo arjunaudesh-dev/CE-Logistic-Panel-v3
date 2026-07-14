@@ -36,6 +36,8 @@ export async function POST() {
     await db.storeSetting.deleteMany();
     await db.vote.deleteMany();
     await db.navyListImport.deleteMany();
+    await db.numberPrefix.deleteMany();
+    await db.themeProfile.deleteMany();
     await db.project.deleteMany();
 
     // ── Projects (Real Vote Data) ──
@@ -815,6 +817,17 @@ export async function POST() {
         { name: "Lt. M. Fernando", rank: "Lieutenant", svcNumber: "SVC/2345", appointment: "CLOGD", seniority: 5, department: "CSLOG", category: "CSLOG Officer" },
         { name: "Lt. D. Rajapaksa", rank: "Lieutenant", svcNumber: "SVC/3333", appointment: "SCE(M)", seniority: 6, department: "CE", category: "CCED Officer" },
         { name: "Lt. N. Gunawardena", rank: "Lieutenant", svcNumber: "SVC/4444", appointment: "SCE(P&P)", seniority: 7, department: "CE", category: "CCED Officer" },
+      ],
+    });
+
+    // ── Number Prefixes (default prefix parts for document numbers) ──
+    await db.numberPrefix.createMany({
+      data: [
+        { docType: "PR", prefix: "PR/2025/", nextNumber: 1, description: "Purchase Request numbers" },
+        { docType: "NAV255", prefix: "NAV/255/2025/", nextNumber: 1, description: "NAV 255 off-charge numbers" },
+        { docType: "NAV254", prefix: "NAV/254/2025/", nextNumber: 1, description: "NAV 254 oncharge numbers" },
+        { docType: "PO", prefix: "PO/2025/", nextNumber: 1, description: "Purchasing Order numbers" },
+        { docType: "FILE", prefix: "FILE/2025/", nextNumber: 1, description: "File numbers" },
       ],
     });
 

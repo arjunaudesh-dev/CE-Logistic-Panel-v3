@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { NAV_ITEMS, ModuleId } from "./nav";
 import { cn } from "@/lib/utils";
-import { Anchor, Menu, Bell, ChevronDown, Sun, Moon } from "lucide-react";
+import { Anchor, Menu, Bell, ChevronDown, Sun, Moon, Palette, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -18,8 +18,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatCurrency } from "@/lib/constants";
-import { useTheme } from "next-themes";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatCurrency, THEME_PROFILE_PRESETS } from "@/lib/constants";
+import { useThemeProfile } from "@/lib/use-theme-profile";
 
 interface Stats {
   net: number;
@@ -106,24 +107,62 @@ function SidebarContent({ active, onNavigate, onItemClick }: SidebarContentProps
 }
 
 function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
+  const { profile, setProfile } = useThemeProfile();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
-  if (!mounted) return null;
-  const isDark = theme === "dark";
+  if (!mounted || !profile) return <Button variant="ghost" size="icon" className="h-9 w-9"><Palette className="h-4.5 w-4.5" /></Button>;
+
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      title={isDark ? "Switch to Light Theme" : "Switch to Dark Theme"}
-      className="h-9 w-9"
-    >
-      {isDark ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
-    </Button>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" title="Theme & Color Settings" className="h-9 w-9 relative">
+          <Palette className="h-4.5 w-4.5" />
+          <span
+            className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
+            style={{ backgroundColor: profile.primary }}
+          />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-3">
+        <div className="flex items-center gap-2 mb-3">
+          <Palette className="h-4 w-4 text-primary" />
+          <p className="text-sm font-semibold text-foreground">Theme & Color Profile</p>
+        </div>
+        <p className="text-[10px] text-muted-foreground mb-2 uppercase tracking-wide">Current: {profile.name}</p>
+        <div className="grid grid-cols-1 gap-1 max-h-64 overflow-y-auto scrollbar-thin">
+          {THEME_PROFILE_PRESETS.map((preset) => {
+            const isActive = profile.name === preset.name;
+            return (
+              <button
+                key={preset.name}
+                onClick={() => setProfile(preset)}
+                className={cn(
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs font-medium transition-colors border",
+                  isActive
+                    ? "bg-primary/10 border-primary/40 text-foreground"
+                    : "border-transparent hover:bg-secondary text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <div className="flex gap-1 shrink-0">
+                  <span className="h-4 w-4 rounded-full border border-border" style={{ backgroundColor: preset.primary }} />
+                  <span className="h-4 w-4 rounded-full border border-border" style={{ backgroundColor: preset.accent }} />
+                </div>
+                <span className="flex-1 truncate">{preset.name}</span>
+                <span className="text-[9px] uppercase text-muted-foreground">{preset.mode}</span>
+                {isActive && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 pt-2 border-t border-border flex items-center gap-1.5">
+          <Sun className="h-3.5 w-3.5 text-amber-400" />
+          <span className="text-[10px] text-muted-foreground">Click a profile to apply instantly. Light/Dark + color combinations.</span>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
