@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/constants";
-import { Loader2, FileSignature, CheckCircle2, UserCheck, User } from "lucide-react";
+import { Loader2, FileSignature, CheckCircle2, UserCheck, User, Layers, Info, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface EstimateItem {
@@ -71,9 +71,11 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
   const [form, setForm] = useState({
     prNumber: "",
     fileNumber: `FILE/${today}`,
+    fileGroupKey: "",
     createdBy: "",
     authorizedBy: "",
   });
+  const [usePrAsGroupKey, setUsePrAsGroupKey] = useState(true);
   const { toast } = useToast();
 
   // Fetch stakeholders once (only when dialog opens) and split into officers and sailors
@@ -117,12 +119,16 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
       return;
     }
     setSaving(true);
+    // fileGroupKey defaults to prNumber when not provided or when user opted to mirror the PR number
+    const effectiveGroupKey =
+      usePrAsGroupKey || !form.fileGroupKey.trim() ? form.prNumber : form.fileGroupKey.trim();
     const res = await apiRequest(
       `/api/estimates/${item.estimateId}/items/${item.id}`,
       "POST",
       {
         prNumber: form.prNumber,
         fileNumber: form.fileNumber,
+        fileGroupKey: effectiveGroupKey,
         createdBy: selectedSailor ? `${selectedSailor.name}${selectedSailor.appointment ? ` (${selectedSailor.appointment})` : ""}` : form.createdBy,
         authorizedBy: selectedOfficer ? `${selectedOfficer.name}${selectedOfficer.appointment ? ` (${selectedOfficer.appointment})` : ""}` : form.authorizedBy,
         responsiblePerson: selectedOfficer ? `${selectedOfficer.name}${selectedOfficer.appointment ? ` (${selectedOfficer.appointment})` : ""}` : null,
@@ -131,7 +137,8 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
     setSaving(false);
     if (res.ok) {
       toast({ title: `File initiated — ${form.prNumber}`, description: "PR raised and forwarded to project window" });
-      setForm({ prNumber: "", fileNumber: `FILE/${today}`, createdBy: "", authorizedBy: "" });
+      setForm({ prNumber: "", fileNumber: `FILE/${today}`, fileGroupKey: "", createdBy: "", authorizedBy: "" });
+      setUsePrAsGroupKey(true);
       onInitiated();
     } else {
       toast({ title: "Failed to initiate file", description: res.error, variant: "destructive" });
@@ -217,6 +224,45 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
                 className="bg-background border-border"
               />
             </div>
+          </div>
+
+          {/* File Group Key (optional) — defaults to PR number so multiple items can share a file */}
+          <div className="space-y-1.5">
+            <Label className="text-xs flex items-center gap-1">
+              <Layers className="h-3 w-3 text-primary" />
+              File Group Key (optional)
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                value={usePrAsGroupKey ? form.prNumber : form.fileGroupKey}
+                onChange={(e) => {
+                  setUsePrAsGroupKey(false);
+                  setForm({ ...form, fileGroupKey: e.target.value });
+                }}
+                placeholder={form.prNumber || "Defaults to PR Number"}
+                className="bg-background border-border"
+              />
+              {!usePrAsGroupKey && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUsePrAsGroupKey(true);
+                    setForm({ ...form, fileGroupKey: "" });
+                  }}
+                  className="gap-1.5 shrink-0"
+                >
+                  <RotateCcw className="h-3 w-3" /> Reset
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+              <Info className="h-3 w-3 mt-0.5 shrink-0" />
+              {usePrAsGroupKey
+                ? `Currently mirroring the PR Number (${form.prNumber || "—"}). Initiating another item with the same PR will group them under one file.`
+                : "Custom group key set. Items initiated with the same key will be grouped together in the file register."}
+            </p>
           </div>
 
           {/* Authorized By (Officer) — Select from stakeholders */}

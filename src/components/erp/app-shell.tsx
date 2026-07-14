@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { NAV_ITEMS, ModuleId } from "./nav";
 import { cn } from "@/lib/utils";
-import { Anchor, Menu, Bell, ChevronDown } from "lucide-react";
+import { Anchor, Menu, Bell, ChevronDown, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatCurrency } from "@/lib/constants";
+import { useTheme } from "next-themes";
 
 interface Stats {
   net: number;
@@ -33,8 +34,6 @@ interface AppShellProps {
   stats: Stats | null;
   children: React.ReactNode;
 }
-
-const ZONES = ["OTW", "Zone B", "Zone C", "Zone D", "All Zones"];
 
 interface SidebarContentProps {
   active: ModuleId;
@@ -106,10 +105,31 @@ function SidebarContent({ active, onNavigate, onItemClick }: SidebarContentProps
   );
 }
 
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+  if (!mounted) return null;
+  const isDark = theme === "dark";
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      title={isDark ? "Switch to Light Theme" : "Switch to Dark Theme"}
+      className="h-9 w-9"
+    >
+      {isDark ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+    </Button>
+  );
+}
+
 export function AppShell({ active, onNavigate, stats, children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
-  const [zone, setZone] = useState("OTW");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -178,26 +198,9 @@ export function AppShell({ active, onNavigate, stats, children }: AppShellProps)
             <QuickStat label="TEAM" value={stats ? String(stats.team) : "—"} tone="purple" />
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Zone selector */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="hidden sm:flex gap-1.5">
-                  <span className="text-xs text-muted-foreground">Zone:</span>
-                  <span className="font-medium">{zone}</span>
-                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Select Zone</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {ZONES.map((z) => (
-                  <DropdownMenuItem key={z} onClick={() => setZone(z)}>
-                    {z}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="flex items-center gap-1.5">
+            {/* Theme toggle */}
+            <ThemeToggle />
 
             {/* Notifications */}
             <Button variant="ghost" size="icon" className="relative">
@@ -248,10 +251,10 @@ function QuickStat({
   tone: "blue" | "amber" | "green" | "purple";
 }) {
   const tones = {
-    blue: "text-blue-400",
-    amber: "text-amber-400",
-    green: "text-emerald-400",
-    purple: "text-violet-400",
+    blue: "text-blue-500 dark:text-blue-400",
+    amber: "text-amber-500 dark:text-amber-400",
+    green: "text-emerald-500 dark:text-emerald-400",
+    purple: "text-violet-500 dark:text-violet-400",
   };
   return (
     <div className="flex flex-col items-end px-3 py-1 rounded-lg bg-secondary/60">

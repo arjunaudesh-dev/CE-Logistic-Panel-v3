@@ -31,30 +31,42 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(body)) {
       const created = await db.rateContract.createMany({
         data: body.map((b) => ({
-          itemCode: b.itemCode,
-          description: b.description,
+          rateCode: b.rateCode || b["Rate code"] || b.ratecode || null,
+          itemCode: b.itemCode || b.itemcode || "",
+          description: b.description || b.item || "",
           unit: b.unit || "NOS",
-          rcPrice: Number(b.rcPrice) || 0,
-          supplier: b.supplier || null,
+          rcPrice: Number(b.rcPrice ?? b.rate ?? b["rate(Rs)"] ?? 0) || 0,
+          vat: Number(b.vat ?? b.VAT ?? 0) || 0,
+          warranty: b.warranty || null,
+          brand: b.brand || b.Brand || null,
+          makeModel: b.makeModel || b["make model"] || b.makeModel || null,
+          category: b.category || b.Category || "General",
+          subCategory: b.subCategory || b["sub category"] || b.subcategory || null,
+          supplier: b.supplier || b["RC supplier"] || b.rcSupplier || null,
           rcYear: b.rcYear || String(new Date().getFullYear()),
           validFrom: b.validFrom || null,
-          validUntil: b.validUntil || null,
-          category: b.category || "General",
+          validUntil: b.validUntil || b["validity up to"] || b.validity || null,
         })),
       });
       return NextResponse.json(created, { status: 201 });
     }
     const item = await db.rateContract.create({
       data: {
+        rateCode: body.rateCode || null,
         itemCode: body.itemCode,
         description: body.description,
         unit: body.unit || "NOS",
         rcPrice: Number(body.rcPrice) || 0,
+        vat: Number(body.vat) || 0,
+        warranty: body.warranty || null,
+        brand: body.brand || null,
+        makeModel: body.makeModel || null,
+        category: body.category || "General",
+        subCategory: body.subCategory || null,
         supplier: body.supplier || null,
         rcYear: body.rcYear || String(new Date().getFullYear()),
         validFrom: body.validFrom || null,
         validUntil: body.validUntil || null,
-        category: body.category || "General",
       },
     });
     return NextResponse.json(item, { status: 201 });

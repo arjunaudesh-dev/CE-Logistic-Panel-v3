@@ -89,6 +89,7 @@ import {
   Send,
   Store,
   MapPin,
+  FileText,
 } from "lucide-react";
 import {
   LineChart,
@@ -2883,6 +2884,15 @@ function QCInspectionTab() {
                                 {transferred.navReference}
                               </CustomBadge>
                             )}
+                            {transferred.fileNumber && (
+                              <CustomBadge
+                                className="bg-blue-500/10 text-blue-500 dark:text-blue-400 border-blue-500/30 font-mono"
+                                title="NAV 255 Number"
+                              >
+                                <FileText className="h-3 w-3 mr-1" />
+                                {transferred.fileNumber}
+                              </CustomBadge>
+                            )}
                           </div>
                         ) : passing ? (
                           <Button
@@ -3541,6 +3551,15 @@ function SendToAreaStoreDialog({
       });
       return;
     }
+    if (!fileNumber.trim()) {
+      toast({
+        title: "NAV 255 Number is required",
+        description:
+          "Enter the NAV 255 document number that authorises this transfer to the area store.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSubmitting(true);
     const body = {
       storeName,
@@ -3553,7 +3572,7 @@ function SendToAreaStoreDialog({
       recordType: "Oncharge",
       navReference,
       qcInspectionId: inspection.id,
-      fileNumber: fileNumber.trim() || null,
+      fileNumber: fileNumber.trim(),
       location: location.trim() || null,
       date: date || todayISO(),
       remarks: remarks.trim() || null,
@@ -3582,7 +3601,10 @@ function SendToAreaStoreDialog({
           <DialogDescription>
             Transfer this passing QCI item into an area store as an{" "}
             <span className="text-foreground font-medium">Oncharge</span> record
-            (NAV 255 — off-charge from shipping stores into the area store).
+            (NAV 255 — off-charge from shipping stores into the area store). A
+            specific{" "}
+            <span className="text-foreground font-medium">NAV 255 Number</span>{" "}
+            is required to authorise this transfer.
           </DialogDescription>
         </DialogHeader>
 
@@ -3755,15 +3777,26 @@ function SendToAreaStoreDialog({
             </Select>
           </div>
 
-          {/* File Number */}
-          <div className="space-y-1.5">
-            <Label>File Number</Label>
+          {/* NAV 255 Number (mandatory — saved as AreaStoreRecord.fileNumber) */}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="flex items-center gap-1">
+              NAV 255 Number
+              <span className="text-destructive">*</span>
+            </Label>
             <Input
               value={fileNumber}
               onChange={(e) => setFileNumber(e.target.value)}
-              placeholder="QCI file number"
-              className="font-mono"
+              placeholder="e.g. NAV/255/2025/0142"
+              className={cn(
+                "font-mono",
+                !fileNumber.trim() && "border-amber-500/60 focus-visible:border-amber-500"
+              )}
+              required
             />
+            <p className="text-[11px] text-muted-foreground">
+              The specific NAV 255 document/reference number that authorises
+              this transfer. Saved as the area-store record&apos;s file number.
+            </p>
           </div>
 
           {/* Location */}

@@ -21,6 +21,11 @@ export async function POST(
     const project = item.estimate.project;
     const prNumber = body.prNumber || `PR-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const fileNumber = body.fileNumber || `FILE/${new Date().toISOString().slice(0, 10)}`;
+    // fileGroupKey defaults to prNumber so multiple items initiated under the same PR get grouped
+    const fileGroupKey =
+      typeof body.fileGroupKey === "string" && body.fileGroupKey.trim()
+        ? body.fileGroupKey.trim()
+        : prNumber;
     const unitPrice = item.isRC ? item.rcRate : item.approxCost;
     const fileCost = item.qty * unitPrice;
     const position = "PR Raised";
@@ -40,6 +45,7 @@ export async function POST(
         presentPosition: position,
         fileCategory: "General",
         fileNumber: fileNumber,
+        fileGroupKey,
         createdBy: body.createdBy || "Officer",
         authorizedBy: body.authorizedBy || null,
         responsiblePerson: body.responsiblePerson || null,

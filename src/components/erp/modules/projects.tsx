@@ -16,7 +16,17 @@ import {
   FileText,
   Layers,
   Sparkles,
+  PieChart as PieChartIcon,
+  Activity,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ModuleId } from "../nav";
@@ -29,6 +39,35 @@ import {
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+
+// Donut palette — distinct, accessible in both light & dark themes.
+const DONUT_COLORS = [
+  "#3b82f6", // blue
+  "#f59e0b", // amber
+  "#8b5cf6", // violet
+  "#64748b", // slate
+  "#22c55e", // emerald
+  "#ec4899", // pink
+  "#06b6d4", // cyan
+  "#ef4444", // red
+];
+
+// Buckets for the by-type donut — uses the standard PROJECT_TYPES ordering.
+const TYPE_BUCKET_DEFS: { name: string; color: string }[] = [
+  { name: "New Construction", color: "#3b82f6" },
+  { name: "Renovation", color: "#f59e0b" },
+  { name: "Maintenance", color: "#8b5cf6" },
+  { name: "General Requirement", color: "#64748b" },
+  { name: "Contractual Job", color: "#22c55e" },
+  { name: "Continue", color: "#06b6d4" },
+];
+
+const STATUS_BUCKET_DEFS: { name: string; color: string }[] = [
+  { name: "Active", color: "#22c55e" },
+  { name: "On Hold", color: "#f59e0b" },
+  { name: "Completed", color: "#3b82f6" },
+  { name: "Cancelled", color: "#ef4444" },
+];
 
 interface ProjectFile {
   id: string;
@@ -104,6 +143,23 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   const activeCount = projects?.filter((p) => p.status === "Active").length ?? 0;
   const totalFiles = projects?.reduce((s, p) => s + (p.fileCount || 0), 0) ?? 0;
 
+  // ── Donut 1: Projects by Type ──
+  // Each defined bucket gets a slice (count of projects of that type).
+  const typeData = TYPE_BUCKET_DEFS.map((b) => ({
+    name: b.name,
+    value: (projects ?? []).filter((p) => p.projectType === b.name).length,
+    color: b.color,
+  })).filter((d) => d.value > 0);
+  const totalTyped = typeData.reduce((s, d) => s + d.value, 0);
+
+  // ── Donut 2: Projects by Status ──
+  const statusData = STATUS_BUCKET_DEFS.map((b) => ({
+    name: b.name,
+    value: (projects ?? []).filter((p) => p.status === b.name).length,
+    color: b.color,
+  })).filter((d) => d.value > 0);
+  const totalStatused = statusData.reduce((s, d) => s + d.value, 0);
+
   return (
     <div>
       <PageHeader
@@ -124,6 +180,159 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         <StatCard label="Total Actual Spent" value={formatCurrency(totalSpent)} icon={TrendingDown} accent="red" />
         <StatCard label="Active Projects" value={activeCount} icon={FolderKanban} accent="green" sub={`${totalFiles} files`} />
       </div>
+
+      {/* Donut charts: Projects by Type + Projects by Status */}
+      {projects && projects.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          {/* Donut — Projects by Type */}
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <PieChartIcon className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">
+                Projects by Type
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Distribution of projects across the project-type categories
+            </p>
+            {totalTyped > 0 ? (
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={typeData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={3}
+                    >
+                      {typeData.map((entry, i) => (
+                        <Cell
+                          key={`type-${i}`}
+                          fill={entry.color}
+                          stroke="var(--background, #0f1420)"
+                          strokeWidth={1.5}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--card, #1a1f2e)",
+                        border: "1px solid var(--border, #2d3548)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                      formatter={(value: number, name: string) => [
+                        `${value} project${value === 1 ? "" : "s"}`,
+                        name,
+                      ]}
+                    />
+                    <Legend
+                      layout="vertical"
+                      align="right"
+                      verticalAlign="middle"
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: 11, lineHeight: "18px" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Total
+                  </span>
+                  <span className="text-lg font-bold text-foreground leading-tight">
+                    {totalTyped}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                    {typeData.length} type{typeData.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground py-10 text-center">
+                No typed projects yet
+              </p>
+            )}
+          </div>
+
+          {/* Donut — Projects by Status */}
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Activity className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">
+                Projects by Status
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Active / On Hold / Completed / Cancelled distribution
+            </p>
+            {totalStatused > 0 ? (
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={statusData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={3}
+                    >
+                      {statusData.map((entry, i) => (
+                        <Cell
+                          key={`status-${i}`}
+                          fill={entry.color}
+                          stroke="var(--background, #0f1420)"
+                          strokeWidth={1.5}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--card, #1a1f2e)",
+                        border: "1px solid var(--border, #2d3548)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                      formatter={(value: number, name: string) => [
+                        `${value} project${value === 1 ? "" : "s"}`,
+                        name,
+                      ]}
+                    />
+                    <Legend
+                      layout="vertical"
+                      align="right"
+                      verticalAlign="middle"
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: 11, lineHeight: "18px" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Total
+                  </span>
+                  <span className="text-lg font-bold text-foreground leading-tight">
+                    {totalStatused}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                    {statusData.length} status{statusData.length === 1 ? "" : "es"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground py-10 text-center">
+                No statused projects yet
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Project cards */}
       {!projects || projects.length === 0 ? (

@@ -696,3 +696,144 @@ Stage Summary:
 - Vote Management: 4 custom gradient stat cards (Total/Capital/Recurring/Total Allocation with formatCurrency); amber hint card explaining Capital vs Recurring; full CRUD table (voteNumber mono badge, type badge, formatted allocation, financial year, active status, edit/delete actions); VoteFormDialog with all fields including voteType Select with color dot, allocation, financialYear, active checkbox, and Capital vs Recurring info callout.
 - All existing User Profiles CRUD, Store Management CRUD, and Process Flows timeline functionality preserved untouched.
 - Lint-clean (0 errors, 0 warnings). Runtime-clean. Uses only shared ERP components (StatCard, CustomBadge, PageHeader, LoadingState/ErrorState/EmptyState, useFetch/apiRequest, useToast) + shadcn/ui primitives (Tabs, Dialog, AlertDialog, Button, Input, Label, Select, Table family, Checkbox, ScrollArea) + lucide-react icons. Dark theme tokens honoured throughout. Fully responsive (mobile-first, gradient banners, max-h scroll containers, hidden short labels on mobile).
+
+---
+Task ID: 1-theme-schema
+Agent: Main (Theme system + Schema + Zone removal)
+Task: Light/dark theme toggle, RC new fields, file grouping, remove zone selector
+
+Work Log:
+- Added light theme CSS variables to globals.css (:root = light, .dark = dark); added gradient utility classes
+- Created ThemeProvider (next-themes, defaultTheme=dark, attribute=class); updated layout.tsx to wrap with ThemeProvider and removed forced dark class
+- Updated AppShell: REMOVED zone selector dropdown; ADDED ThemeToggle button (Sun/Moon icons) using next-themes useTheme
+- Updated QuickStat tones to work in both light/dark (text-blue-500 dark:text-blue-400)
+- Schema: RateContract new fields (rateCode, vat, warranty, brand, makeModel, subCategory); ProjectFile new field fileGroupKey
+- Updated /api/rate-finder/rc POST to accept new CSV column aliases (Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand, make model, Category, sub category, RC supplier)
+- Re-seeded RateContract data with new fields (rateCode, brand, makeModel, subCategory, warranty)
+- Constants already have FINANCIAL_MEANS with "Vote/Funds"
+
+Stage Summary:
+- Theme toggle works (dark default, switch to light). Zone selector removed from topbar.
+- Backend ready for: Projects Step1 Funds checkbox + vote conditional mandatory, Step2 show-all + sorting + group-by-file, Rate Finder RC CSV new format, Navy List, Collection QCI NAV 255, donut charts
+
+---
+Task ID: 2
+Agent: Projects Step1 Funds + Step2 Show All + Group By File
+Task: Update the Projects module wizard — Funds checkbox (Step 1, not mandatory; Vote Number mandatory unless Funds ticked) + show-all sortable items + group-by-file view (Step 2) + fileGroupKey support (Initiate File).
+
+Work Log:
+- Read worklog.md (esp. Task 1-theme-schema foundation: fileGroupKey field on ProjectFile, FINANCIAL_MEANS constant already updated, light/dark theme tokens) and the 3 target files in full (add-project-wizard.tsx 740 lines, estimate-items.tsx 390 lines, initiate-file.tsx 314 lines) plus the API route at /api/estimates/[id]/items/[itemId]/route.ts.
+- Confirmed available shared components: Checkbox (shadcn), Select/Input/Label/Table/Dialog/Button, CustomBadge, useFetch/apiRequest, useToast, formatCurrency, financialMeanColor, voteTypeColor, estimateStatusColor, projectTypeColor. Confirmed ProjectFile model has `fileGroupKey String?` field (added by Task 1-theme-schema).
+
+PART C — Initiate File fileGroupKey support (initiate-file.tsx + API route):
+- Added `fileGroupKey: ""` to dialog form state + `usePrAsGroupKey: true` boolean state.
+- New "File Group Key (optional)" field (Layers icon) below the PR/File Number row. While `usePrAsGroupKey` is true, the input visibly mirrors `form.prNumber` (so it stays in sync as the user types the PR). Editing the field directly flips `usePrAsGroupKey` to false and reveals a "Reset" button (RotateCcw) to restore the mirror.
+- Helper text dynamically describes the current mode (mirroring PR Number vs custom key).
+- Submit computes `effectiveGroupKey = usePrAsGroupKey || !form.fileGroupKey.trim() ? form.prNumber : form.fileGroupKey.trim()` and sends it in the POST body.
+- Both `form.fileGroupKey` and `usePrAsGroupKey` reset after successful submit.
+- Updated `/api/estimates/[id]/items/[itemId]/route.ts` POST handler: reads `body.fileGroupKey` (defaults to `prNumber` when empty) and passes it to `db.projectFile.create({ data: { ..., fileGroupKey } })`. ProcurementFile mirror is unchanged (no fileGroupKey column on that model).
+- Curl-tested POST with `fileGroupKey: "PR-2025-001"` → 201; verified via `GET /api/projects/[id]/files` that the created ProjectFile has `fileGroupKey: "PR-2025-001"` persisted. Test record cleaned up via DELETE.
+
+PART A — Funds checkbox + conditional Vote Number (add-project-wizard.tsx):
+- Replaced the "Financial Mean *" Select dropdown with a "Funds" Checkbox (NOT mandatory). Imports updated: added `Checkbox` from shadcn/ui, added `Wallet` lucide icon, removed unused `FINANCIAL_MEANS` import. Added `FUND_OPTIONS = ["Malima Fund", "Non-Public Fund", "Contractual"]`.
+- Added `fundsChecked` boolean state. `handleFundsToggle(checked)` updates the state and sets `form.financialMean` to "Malima Fund" (when checked, default) or "Vote/Funds" (when unchecked), and clears `voteNumber` / `voteAllocation` / `selectedVoteId` / `customVoteNumber`.
+- When Funds CHECKED: shows a small fund Select (Malima/Non-Public/Contractual) + a live `financialMeanColor` badge. Vote Number label drops the "*" and shows "(optional)"; the vote sub-select dropdown is HIDDEN; instead a manual text input is shown with placeholder ("CONTRACTUAL" or "NON-NAVAL") + amber Landmark hint.
+- When Funds UNCHECKED: keeps the existing vote sub-select dropdown (fetches /api/votes), "Enter custom vote number" toggle, and the manual input fallback. Vote Number label shows "*".
+- Updated `handleSaveAndProcess` validation: (1) `form.name` required; (2) `!fundsChecked && !form.voteNumber.trim()` → blocks submit with toast "Vote Number is required" + description "Tick the Funds checkbox for non-vote funding (Malima/Non-Public/Contractual)." — matches spec wording; (3) at least one valid estimate row required.
+- `handleGoToProject` reset now also resets `fundsChecked` to false.
+- All other Step 1 fields (Project Type, Reference, Vote Allocation, Benefactor, Start/EDC, Officer, Status, Description) and the Material Estimate section (download template, upload CSV with preview, add/remove rows, mandatory-estimate enforcement) preserved untouched. Step 2 (EstimateItemsTable with AI Process + Go to Project Window) preserved.
+
+PART B — Show-all + sorting + group-by-file (estimate-items.tsx):
+- Removed the shadcn `ScrollArea` wrapper (was capping visible rows on long lists). Replaced with `<div className="max-h-[60vh] overflow-auto scrollbar-thin">` as required — every item is now rendered and every "Initiate File" button is reachable.
+- Added sortable column headers (Sr, Item Name, Item Code, Qty, Approx Cost) via a new `SortHeader` helper showing `ChevronUp`/`ChevronDown`/`ChevronsUpDown` (dimmed when inactive). Default sort: Sr No asc. Click toggles asc/desc when same column; switches column with asc default otherwise. Sort state (`sortKey`, `sortDir`) lives in EstimateItemsTable and is passed to each ItemsSection — single preference across the 3 sections.
+- Sticky table header (`sticky top-0 z-10 bg-secondary/95 backdrop-blur`) keeps columns visible while scrolling.
+- Added "Group by File" toggle button — disabled when no initiated items; toggles `groupByFile` state. When enabled, items WITH a `prNumber` (or `fileNumber`) get grouped into expandable group cards; items WITHOUT a `prNumber` remain as individual rows.
+- New `GroupCard` component: clickable header showing common PR/File Number (primary mono badge), item count, total qty, common RC Supplier (if shared), common RC Number (if shared, RC section only), common File Number (if shared), total file cost. ChevronRight/ChevronDown expand toggle. Expanded view renders a compact item sub-table.
+- Groups of 2+ items become group cards; single-initiated items render as individual rows. When all items in a section are part of file groups, an "All items in this section are part of file groups above" hint is shown.
+- Extracted shared `ItemRow` component (used by both the main table and the expanded group view) with a `compact` prop to hide Last Purchase / Available Stock in the expanded view.
+- Preserved: 3-table separation (RC / Non-Rate / Contractual), colored section header bars, description strips, section total cost, RC No. + RC Supplier columns (RC section only), summary tiles (Total Approx Cost / RC Items / Stock Available / Initiated PRs), AI Process button + status badge.
+- InitiateFileDialog is now conditionally rendered (`{initiateItem && <InitiateFileDialog key={initiateItem.id} ... />}`) so the form state (including the new `usePrAsGroupKey` state from PART C) initializes fresh each time the dialog opens for a new item — no setState-in-effect, lint-clean.
+
+Verification:
+- `bun run lint` → 0 errors, 0 warnings across the whole project. `npx eslint` on the 4 modified files → 0 errors (clean exit).
+- Dev server log: clean compiles after one intermediate error (`FileMultiple` icon doesn't exist in lucide-react → replaced with `Files`). All recent compile entries show success; `GET / 200`, `GET /api/votes 200`, `GET /api/estimates 200` confirmed via curl.
+- Intermediate issue: had a typo `from "lib/use-fetch"` (missing `@/` prefix) which caused Module not found errors during dev — fixed immediately. All recent dev.log entries show successful compiles after the fix.
+- Tested POST `/api/estimates/[id]/items/[itemId]` with `fileGroupKey` in body → 201 with `{ok:true, fileId, prNumber}`. Verified the created ProjectFile has `fileGroupKey` persisted. Test record cleaned up via DELETE.
+
+Stage Summary:
+- 4 files touched: initiate-file.tsx (PART C — fileGroupKey field + mirror-PR toggle), API route (PART C — fileGroupKey added to ProjectFile.create), add-project-wizard.tsx (PART A — Funds checkbox + conditional vote mandatory + validation), estimate-items.tsx (PART B — sortable headers + show-all scrollable table + group-by-file toggle + expandable group cards).
+- All components retain their named exports (`AddProjectWizard`, `EstimateItemsTable`, `InitiateFileDialog`) and `"use client"` directive. Existing functionality preserved: Step 2 AI processing, 3-table RC/Non-Rate/Contractual separation, Initiate File dialog with officer/sailor selects, estimate template upload/preview, mandatory-estimate enforcement.
+- Lint-clean (0 errors, 0 warnings). Runtime-clean. Uses only shared ERP components (CustomBadge, LoadingState, EmptyState, useFetch, apiRequest, useToast, formatCurrency, voteTypeColor, estimateStatusColor, financialMeanColor, projectTypeColor) + shadcn/ui primitives (Checkbox, Select, Input, Label, Table family, Dialog, Button) + lucide-react icons. Dark/light theme tokens honoured throughout (bg-card, border-border, text-foreground, etc.). Responsive (mobile-first, flex-wrap toolbars, max-h scroll containers with scrollbar-thin, sticky table headers). No TODOs/placeholders, no extra dependencies installed.
+
+---
+Task ID: 3-4
+Agent: RC CSV + Navy List + QCI 255 + Donut Charts
+Task: Rate Finder RC CSV new format, Navy List auto-identify place, QCI NAV 255 mandatory number, donut chart infographics on Dashboard & Projects
+
+Work Log:
+- Read worklog.md (esp. Task 1-theme-schema foundation — RC new fields already in schema + /api/rate-finder/rc POST alias support, theme tokens, etc.) and constants.ts to confirm available helpers (RATE_CATEGORIES, AREA_STORES, AREA_STORE_CATEGORIES, NAV_REFERENCES, navRefColor, projectTypeColor, projectStatusColor, STAKEHOLDER_CATEGORIES, formatCurrency, formatNumber, utilizationColor).
+- Read all 5 target files in full (rate-finder 1752 → 1919 lines, stakeholders 4078 → 4322 lines, collection 3851 → 3873 lines, dashboard 378 → 535 lines, projects 256 → 433 lines) plus the navy-list + rate-finder RC API routes to understand existing structure.
+- Verified Prisma schema: RateContract has rateCode/vat/warranty/brand/makeModel/subCategory; AreaStoreRecord has navReference + fileNumber; NavyListImport has category/department; Stakeholder has category/department/areaStoreLocation/seniority.
+
+PART A — rate-finder.tsx (RC CSV new format):
+- Extended RCItem interface to include rateCode, vat, warranty, brand, makeModel, subCategory.
+- Updated RC_TEMPLATE constant to the new exact column headers: "Rate code,item,rate(Rs),VAT,warranty,validity up to,Brand,make model,Category,sub category,RC supplier" with 2 sample rows (Brass Valve 50mm, Copper Pipe 1m).
+- Rewrote UploadRCDialog.handleFile to use a columnAliases map (rateCode←["rate code","ratecode"], description←["item","description"], rcPrice←["rate(rs)","rate","rcprice"], vat←["vat"], warranty←["warranty"], validUntil←["validity up to","validuntil"], brand←["brand"], makeModel←["make model","makemodel"], category←["category"], subCategory←["sub category","subcategory"], supplier←["rc supplier","supplier"], itemCode←["itemcode","item code"], rcYear←["rcyear","rc year"], validFrom←["validfrom","valid from"], unit←["unit"]). Only the "item"/"description" column is required; everything else falls back to sensible defaults. The parser still produces camelCase field names so the existing API POST body shape is preserved.
+- Widened UploadRCDialog to max-w-4xl and rebuilt the preview table with 11 columns (Rate Code, Item, Rate (Rs), VAT, Warranty, Valid Until, Brand, Make/Model, Category, Sub Cat, Supplier) — all using whitespace-nowrap + scrollbar-thin for horizontal overflow.
+- Rebuilt the RC display table (RCTab) with the same 11 columns + RC Year + Actions (Compare button still works, now keyed by rateCode || itemCode). Description cell shows description + unit subtext; Rate cell is right-aligned; VAT shows with % suffix; Category uses CategoryBadge; empty cells render —.
+- Updated the RCTab search filter to also match against rateCode, brand, makeModel, supplier (in addition to itemCode + description).
+- Rebuilt AddRCDialog with the new fields: Rate Code *, Item Code (defaults to Rate Code), Item (Description) *, Rate (Rs.), VAT (%), Warranty, Unit, Brand, Make/Model, Category, Sub Category, RC Supplier, RC Year, Valid From, Valid Until. Submit now POSTs all new fields (rateCode, vat, warranty, brand, makeModel, subCategory, supplier) with proper null/Number coercion.
+- Patched /api/rate-finder/rc POST to also accept the missing CSV aliases: rateCode←b["Rate code"], brand←b.Brand (previously the bulk POST only handled b.brand, dropping the capitalized "Brand" alias). curl-tested both the camelCase body (frontend flow) and the alias body — both persist brand correctly now.
+
+PART B — stakeholders.tsx (Navy List auto-identify place):
+- Added two new module-level helpers above buildNavyListTemplate():
+  * autoIdentifyCategory(appointment, rank, fallbackDept) — returns one of STAKEHOLDER_CATEGORIES based on appointment + rank:
+    - CCED(E)/CCEO(E)/SCE(M)/SCE(P&P) → "CCED Officer" (or "CCED Sailor" if rank contains Petty Officer/Leading/Able/Ordinary)
+    - CSLOG/CLOGD/ASO(E) → "CSLOG Officer" (or "CSLOG Sailor" if sailor-rank)
+    - APO(E)/AAPO(PT) → "CSLOG Sailor" (or "CSLOG Officer")
+    - Falls back to department + rank, then to "Officer-in-Area" if appointment but no rank match, else null
+  * autoIdentifyDepartment(appointment) — returns "CE" for CCED/CCEO/SCE/AOE/SO(CE) appointments, "CSLOG" for CSLOG/CLOGD/ASO/APO/AAPO/LOGO/SO(LOG), else null
+- Extended ParsedNavyRecord interface with categoryAutoFilled + departmentAutoFilled boolean flags.
+- Rewrote the UploadNavyListDialog CSV parser loop to compute rawDepartment/rawCategory from the CSV, then if blank call autoIdentifyDepartment → autoIdentifyCategory and set the autoFilled flags. The records pushed include both the resolved values and the flags.
+- Rebuilt the preview table's Department + Category cells to render auto-filled values inside an amber-highlighted chip (border-amber-500/30 bg-amber-500/10 text-amber-500 dark:text-amber-400) with a Sparkles icon + tooltip "Auto-identified from appointment" / "Auto-identified from appointment & rank". Plain (CSV-supplied) values render in muted text as before. Added a small legend in the preview header (amber dot = auto-identified, ShieldCheck = matches stakeholder).
+- Added 2 extra sample rows to buildNavyListTemplate() that leave Department + Category blank to demonstrate the auto-identification (Lt. Cdr. K. Silva / CCED(E) → CE / CCED Officer; PO S. Bandara / Petty Officer + ASO(E) → CSLOG / CSLOG Sailor).
+- Updated the dialog description + NavyListSection header text to mention the auto-identification behaviour ("identify each person's place — Department & Category — auto-identified from Appointment & Rank when blank").
+- Updated the success toast to include "auto-identified N categories & M departments" when any auto-fill happened.
+- Imported Sparkles icon from lucide-react.
+- Patched /api/navy-list POST to ALSO update Stakeholder.category + Stakeholder.department (in addition to seniority) where name matches, plus auto-suggest areaStoreLocation for sailors based on appointment keywords (BMS/Plumbing → BMS, Metal/Aluminium → Metal, Paint → Paint, Oil/Lub → Oil & Lubricant, Station → Stationary, default → General). Both the bulk-array path and the single-object path now update stakeholders.
+
+PART C — collection.tsx (QCI NAV 255 Number mandatory):
+- Relabelled the SendToAreaStoreDialog "File Number" field to "NAV 255 Number *" (with red asterisk + flex gap layout). Made it span sm:col-span-2 (full width on desktop). Added a help-text line: "The specific NAV 255 document/reference number that authorises this transfer. Saved as the area-store record's file number." The input has an amber focus border when empty (border-amber-500/60) so the user can see it's pending required input.
+- Updated the dialog description to explicitly call out "A specific NAV 255 Number is required to authorise this transfer."
+- Added validation in handleSubmit: if fileNumber is empty, block submit with toast title "NAV 255 Number is required" + description explaining the NAV 255 document number authorises the transfer. Validation runs AFTER the existing storeName/itemName/qty checks.
+- The submitted body now always sends fileNumber: fileNumber.trim() (no longer nullable) — the value persists into AreaStoreRecord.fileNumber as documented.
+- Updated the QCI table's "Area Store" cell so transferred records show a third badge (in addition to "Sent to {store}" + NAV-ref badge) — a blue mono-font badge with FileText icon + the fileNumber, titled "NAV 255 Number". This is rendered only when transferred.fileNumber is set.
+- Imported FileText icon from lucide-react.
+
+PART D — Donut Chart Infographics (dashboard.tsx + projects.tsx):
+- Dashboard: imported PieChart as PieChartIcon + Gauge icons from lucide-react; imported PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend from recharts; added a new Project interface and DONUT_COLORS (12-colour palette) + UTILIZATION_COLORS map. Fetched /api/projects via useFetch to drive both donuts. Built:
+  * Donut 1 "Project Allocation Distribution" — each project's voteAllocation is one slice (value = Rs. Millions); center overlay shows total in "Rs. XM" + "N projects"; slice cells use DONUT_COLORS with a thin var(--background) stroke for separation; tooltip shows "Rs. XM (Rs. X,XXX,XXX)" + project name; vertical legend on the right.
+  * Donut 2 "Project Utilization" — 4 buckets (Under 50% / 50-70% / 70-90% / Over 90%) with project counts in each bucket; center overlay shows total projects counted; slice cells use the bucket's UTILIZATION_COLORS value; tooltip shows "N projects" + bucket name.
+  Both donuts use innerRadius=50 outerRadius=80 paddingAngle=3 per the task spec. Both fall back to a muted "No data" message when empty. Placed in a 2-col grid (lg:grid-cols-2) above the existing secondary charts section.
+- Projects: imported PieChart as PieChartIcon + Activity icons; imported PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend from recharts; defined TYPE_BUCKET_DEFS (6 types — New Construction blue, Renovation amber, Maintenance violet, General Requirement slate, Contractual Job emerald, Continue cyan) and STATUS_BUCKET_DEFS (4 statuses — Active emerald, On Hold amber, Completed blue, Cancelled red). Built two donuts in a 2-col grid (lg:grid-cols-2) above the project cards (only rendered when projects.length > 0):
+  * Donut "Projects by Type" — counts projects per type bucket; center shows total + "N types"; vertical legend on the right.
+  * Donut "Projects by Status" — counts projects per status bucket; center shows total + "N statuses".
+  Both donuts use innerRadius=50 outerRadius=80 paddingAngle=3 + slice stroke = var(--background). Tooltips show "N project(s)" + bucket name. Empty-bucket slices are filtered out so the donut only renders meaningful slices.
+
+Verification:
+- `bun run lint` → 0 errors, 0 warnings across the whole project after all 5 file edits + 2 API route patches.
+- Verified dev.log: clean compiles, GET / 200, all API endpoints 200 OK, no errors or exceptions.
+- curl-tested POST /api/rate-finder/rc with the new CSV column aliases directly (Brand, Rate code, item, rate(Rs), VAT, warranty, validity up to, make model, Category, sub category, RC supplier) → 201 with all fields persisted correctly (rateCode, brand, makeModel, subCategory, supplier, etc. all populated). Cleaned up test records.
+- curl-tested POST /api/rate-finder/rc with the camelCase body (frontend flow) → 201 with all fields persisted correctly. Cleaned up.
+- curl-verified GET /api/projects returns projectType + utilization + status fields needed by both donut charts.
+- Verified home page renders without errors (HTTP 200, ~39KB HTML, no "Application error" / "Failed to compile" markers).
+- Re-seeded database after Navy List bulk POST test (which is destructive by design — wipes + replaces the entire Navy List).
+
+Stage Summary:
+- 5 frontend files enhanced in place; 2 API routes patched. All retain named exports + "use client" directive (frontend) / NextRequest handlers (API).
+- rate-finder.tsx (~1.9k lines): RC CSV template + parser + preview table + display table + Add RC dialog all migrated to the new 11-column CSV format (Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand, make model, Category, sub category, RC supplier). Existing Compare dialog, Discontinued tab, single-RC delete, search/category/year/supplier filters all preserved untouched.
+- stakeholders.tsx (~4.3k lines): Navy List upload now auto-identifies Department (CE/CSLOG) and Category (CCED/CSLOG Officer/Sailor, Officer-in-Area) from Appointment + Rank when those CSV columns are blank, with amber-highlighted chips + Sparkles icon in the preview. CSV template includes 2 sample rows demonstrating auto-fill. Success toast reports auto-identified counts. /api/navy-list POST now updates Stakeholder.category + Stakeholder.department + (for sailors) areaStoreLocation in addition to seniority, where names match. Existing 5 categorised sections, Suppliers tab, supplier details pop-up, contacts/nominations/ratings CRUD, seniority badges, view/clear dialogs all preserved untouched.
+- collection.tsx (~3.9k lines): QCI "Send to Area Store" dialog now requires a mandatory "NAV 255 Number *" field (saved as AreaStoreRecord.fileNumber); blocks submit with a clear toast if empty; the transferred record shows a third badge (mono blue FileText icon + file number) on the QCI table after send. All existing Dashboard / Part Supply / Daily Collection / QC Inspection tabs, filters, supplier ratings, CRUD dialogs, matched-store-item hints preserved untouched.
+- dashboard.tsx (~540 lines): Added 2 new donut charts in a 2-col grid above the existing secondary charts — "Project Allocation Distribution" (per-project voteAllocation slice + center total) and "Project Utilization" (4 utilization buckets with project counts). Uses recharts PieChart with innerRadius=50 outerRadius=80 paddingAngle=3 + DONUT_COLORS palette + UTILIZATION_COLORS + absolute-positioned center labels. Existing Most Active / Valued Projects panel + secondary bar/pie charts + module quick links preserved untouched.
+- projects.tsx (~430 lines): Added 2 compact donut charts (220px height) above the project cards in a 2-col grid — "Projects by Type" (6 type buckets with fixed color per type) and "Projects by Status" (4 status buckets). Both have absolute-positioned center labels showing total count + bucket count. Donuts only render when projects.length > 0. Existing summary stat cards, project cards grid, present-position dialog, Add Project wizard all preserved untouched.
+- All edits use semantic Tailwind classes (bg-card, text-foreground, border-border, text-muted-foreground, var(--background)/var(--card)/var(--border) for recharts strokes) so they adapt to light/dark theme. Fully responsive (mobile-first grids, flex-wrap toolbars, max-h scroll containers with scrollbar-thin). Uses only shared ERP components + shadcn/ui primitives + lucide-react icons + recharts. Lint-clean, runtime-clean. No TODOs/placeholders.

@@ -404,29 +404,35 @@ export async function POST() {
       });
     }
 
-    // ── Rate Contracts ──
+    // ── Rate Contracts (with new fields: rateCode, vat, warranty, brand, makeModel, subCategory) ──
     const rcDefs = [
-      ["BMS-220", "Centrifugal Pump 15kW", "NOS", 385000, "Marine Pumps Ltd", "2025", "BMS"],
-      ["BMS-220", "Centrifugal Pump 15kW", "NOS", 372000, "Marine Pumps Ltd", "2024", "BMS"],
-      ["MT-045", "Mild Steel Plate 6mm", "KG", 245, "Ceylon Steel", "2025", "Metal"],
-      ["MT-045", "Mild Steel Plate 6mm", "KG", 232, "Ceylon Steel", "2024", "Metal"],
-      ["EL-301", "LED Flood Light 200W", "NOS", 18500, "Electro Lanka", "2025", "Electrical"],
-      ["PT-077", "Epoxy Primer Grey", "LTR", 3200, "Asian Paints", "2025", "Paint"],
-      ["PL-118", "GI Pipe 50mm", "MTR", 4200, "Steel Centre", "2025", "Plumbing"],
-      ["LO-008", "Hydraulic Oil ISO 68", "LTR", 1850, "Lubricant Hub", "2025", "Lubricant Oil"],
+      ["RC-BMS-001", "BMS-220", "Centrifugal Pump 15kW", "NOS", 385000, 0, "2 Years", "Grundfos", "CR-15", "BMS", "Pumps", "Marine Pumps Ltd", "2025"],
+      ["RC-BMS-001", "BMS-220", "Centrifugal Pump 15kW", "NOS", 372000, 0, "2 Years", "Grundfos", "CR-15", "BMS", "Pumps", "Marine Pumps Ltd", "2024"],
+      ["RC-MT-001", "MT-045", "Mild Steel Plate 6mm", "KG", 245, 0, null, "Lanka Steel", "MS-Plate-6", "Metal", "MS Plates", "Ceylon Steel", "2025"],
+      ["RC-MT-001", "MT-045", "Mild Steel Plate 6mm", "KG", 232, 0, null, "Lanka Steel", "MS-Plate-6", "Metal", "MS Plates", "Ceylon Steel", "2024"],
+      ["RC-EL-001", "EL-301", "LED Flood Light 200W", "NOS", 18500, 0, "3 Years", "Philips", "Flood-200", "Electrical", "Lighting", "Electro Lanka", "2025"],
+      ["RC-PT-001", "PT-077", "Epoxy Primer Grey", "LTR", 3200, 0, null, "Asian Paints", "Epoxy-Grey", "Paint", "Primers", "Asian Paints", "2025"],
+      ["RC-PL-001", "PL-118", "GI Pipe 50mm", "MTR", 4200, 0, null, "Jindal", "GI-50", "Plumbing", "Pipes", "Steel Centre", "2025"],
+      ["RC-LO-001", "LO-008", "Hydraulic Oil ISO 68", "LTR", 1850, 0, null, "Shell", "Tellus-68", "Lubricant Oil", "Oils", "Lubricant Hub", "2025"],
     ] as const;
     for (const r of rcDefs) {
       await db.rateContract.create({
         data: {
-          itemCode: r[0] as string,
-          description: r[1] as string,
-          unit: r[2] as string,
-          rcPrice: r[3] as number,
-          supplier: r[4] as string,
-          rcYear: r[5] as string,
-          category: r[6] as string,
-          validFrom: `${r[5]}-01-01`,
-          validUntil: `${r[5]}-12-31`,
+          rateCode: r[0] as string,
+          itemCode: r[1] as string,
+          description: r[2] as string,
+          unit: r[3] as string,
+          rcPrice: r[4] as number,
+          vat: r[5] as number,
+          warranty: r[6] as string | null,
+          brand: r[7] as string,
+          makeModel: r[8] as string,
+          category: r[9] as string,
+          subCategory: r[10] as string,
+          supplier: r[11] as string,
+          rcYear: r[12] as string,
+          validFrom: `${r[12]}-01-01`,
+          validUntil: `${r[12]}-12-31`,
         },
       });
     }

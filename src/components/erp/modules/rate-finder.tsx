@@ -63,15 +63,21 @@ import {
 
 interface RCItem {
   id: string;
+  rateCode: string | null;
   itemCode: string;
   description: string;
   unit: string;
   rcPrice: number;
+  vat: number;
+  warranty: string | null;
+  brand: string | null;
+  makeModel: string | null;
+  category: string;
+  subCategory: string | null;
   supplier: string | null;
   rcYear: string;
   validFrom: string | null;
   validUntil: string | null;
-  category: string;
 }
 
 interface DiscontinuedItem {
@@ -171,10 +177,12 @@ function splitAlternatives(s: string | null): string[] {
     .filter(Boolean);
 }
 
+// New CSV format — exact column headers expected by the importer & API.
+// Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand, make model, Category, sub category, RC supplier
 const RC_TEMPLATE =
-  "ItemCode,Description,Unit,RCPrice,Supplier,RCYear,ValidFrom,ValidUntil,Category\n" +
-  "RC-2025-001,Sample Item A,NOS,1500,ABC Suppliers,2025,2025-01-01,2025-12-31,General\n" +
-  "RC-2025-002,Sample Item B,MTR,3200,XYZ Traders,2025,2025-04-01,2026-03-31,Electrical\n";
+  "Rate code,item,rate(Rs),VAT,warranty,validity up to,Brand,make model,Category,sub category,RC supplier\n" +
+  "RC-2025-001,Brass Valve 50mm,1500,15,12 months,2025-12-31,ABC Brands,Model BV-50,Plumbing,Valves,ABC Suppliers\n" +
+  "RC-2025-002,Copper Pipe 1m,3200,15,24 months,2026-03-31,XYZ Metals,CP-1000,Electrical,Cables,XYZ Traders\n";
 
 const DISCONTINUED_TEMPLATE =
   "ItemCode,Description,Unit,LastRCPrice,LastRCYear,DiscontinuedDate,Reason,Alternatives\n" +
@@ -305,8 +313,12 @@ function RCTab({ items, loading, error, refresh }: RCTabProps) {
       if (debouncedSearch) {
         const q = debouncedSearch.toLowerCase();
         if (
+          !(i.rateCode ?? "").toLowerCase().includes(q) &&
           !i.itemCode.toLowerCase().includes(q) &&
-          !i.description.toLowerCase().includes(q)
+          !i.description.toLowerCase().includes(q) &&
+          !(i.brand ?? "").toLowerCase().includes(q) &&
+          !(i.makeModel ?? "").toLowerCase().includes(q) &&
+          !(i.supplier ?? "").toLowerCase().includes(q)
         )
           return false;
       }
@@ -314,13 +326,14 @@ function RCTab({ items, loading, error, refresh }: RCTabProps) {
     });
   }, [items, category, year, supplier, debouncedSearch]);
 
-  // Group by itemCode for compare feature
+  // Group by rateCode (preferred) or itemCode for compare feature
   const groupedByCode = useMemo(() => {
     const m = new Map<string, RCItem[]>();
     items?.forEach((i) => {
-      const arr = m.get(i.itemCode) ?? [];
+      const key = i.rateCode || i.itemCode;
+      const arr = m.get(key) ?? [];
       arr.push(i);
-      m.set(i.itemCode, arr);
+      m.set(key, arr);
     });
     return m;
   }, [items]);
@@ -462,14 +475,18 @@ function RCTab({ items, loading, error, refresh }: RCTabProps) {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Item Code</TableHead>
-                  <TableHead className="text-muted-foreground">Description</TableHead>
-                  <TableHead className="text-muted-foreground">Unit</TableHead>
-                  <TableHead className="text-muted-foreground">RC Price</TableHead>
-                  <TableHead className="text-muted-foreground">Supplier</TableHead>
-                  <TableHead className="text-muted-foreground">RC Year</TableHead>
+                  <TableHead className="text-muted-foreground">Rate Code</TableHead>
+                  <TableHead className="text-muted-foreground">Item</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Rate (Rs)</TableHead>
+                  <TableHead className="text-muted-foreground">VAT</TableHead>
+                  <TableHead className="text-muted-foreground">Warranty</TableHead>
                   <TableHead className="text-muted-foreground">Valid Until</TableHead>
+                  <TableHead className="text-muted-foreground">Brand</TableHead>
+                  <TableHead className="text-muted-foreground">Make/Model</TableHead>
                   <TableHead className="text-muted-foreground">Category</TableHead>
+                  <TableHead className="text-muted-foreground">Sub Category</TableHead>
+                  <TableHead className="text-muted-foreground">RC Supplier</TableHead>
+                  <TableHead className="text-muted-foreground">RC Year</TableHead>
                   <TableHead className="text-muted-foreground text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -479,20 +496,45 @@ function RCTab({ items, loading, error, refresh }: RCTabProps) {
                   const multiYear = group.length > 1;
                   return (
                     <TableRow key={item.id} className="border-border">
-                      <TableCell className="font-medium text-foreground">
-                        {item.itemCode}
+                      <TableCell className="font-mono text-foreground whitespace-nowrap">
+                        {item.rateCode || item.itemCode || "—"}
                       </TableCell>
                       <TableCell
-                        className="max-w-[280px] truncate text-muted-foreground"
+                        className="max-w-[280px] truncate text-foreground"
                         title={item.description}
                       >
-                        {item.description}
+                        <div className="flex flex-col">
+                          <span className="font-medium">{item.description}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {item.unit}
+                          </span>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{item.unit}</TableCell>
-                      <TableCell className="font-semibold text-foreground">
+                      <TableCell className="font-semibold text-foreground text-right whitespace-nowrap">
                         {formatCurrency(item.rcPrice)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {item.vat ? `${item.vat}%` : "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {item.warranty || "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {formatDate(item.validUntil)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {item.brand || "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {item.makeModel || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <CategoryBadge category={item.category} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {item.subCategory || "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
                         {item.supplier || "—"}
                       </TableCell>
                       <TableCell>
@@ -510,12 +552,6 @@ function RCTab({ items, loading, error, refresh }: RCTabProps) {
                             </Button>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDate(item.validUntil)}
-                      </TableCell>
-                      <TableCell>
-                        <CategoryBadge category={item.category} />
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -580,39 +616,51 @@ function AddRCDialog({ open, onOpenChange, onDone }: AddRCDialogProps) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const blankForm = {
+    rateCode: "",
     itemCode: "",
     description: "",
     unit: "NOS",
     rcPrice: "",
-    supplier: "",
-    rcYear: String(new Date().getFullYear()),
+    vat: "",
+    warranty: "",
     validFrom: "",
     validUntil: "",
+    brand: "",
+    makeModel: "",
     category: "General",
+    subCategory: "",
+    supplier: "",
+    rcYear: String(new Date().getFullYear()),
   };
   const [form, setForm] = useState(blankForm);
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const submit = async () => {
-    if (!form.itemCode || !form.description) {
+    if (!form.description) {
       toast({
-        title: "Item Code and Description are required",
+        title: "Item description is required",
         variant: "destructive",
       });
       return;
     }
     setSaving(true);
     const res = await apiRequest("/api/rate-finder/rc", "POST", {
-      itemCode: form.itemCode,
+      rateCode: form.rateCode || null,
+      itemCode: form.itemCode || form.rateCode || "",
       description: form.description,
       unit: form.unit || "NOS",
       rcPrice: Number(form.rcPrice) || 0,
+      vat: Number(form.vat) || 0,
+      warranty: form.warranty || null,
+      brand: form.brand || null,
+      makeModel: form.makeModel || null,
+      category: form.category || "General",
+      subCategory: form.subCategory || null,
       supplier: form.supplier || null,
       rcYear: form.rcYear || String(new Date().getFullYear()),
       validFrom: form.validFrom || null,
       validUntil: form.validUntil || null,
-      category: form.category || "General",
     });
     setSaving(false);
     if (res.ok) {
@@ -639,11 +687,58 @@ function AddRCDialog({ open, onOpenChange, onDone }: AddRCDialogProps) {
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
           <div className="space-y-1.5">
-            <Label>Item Code *</Label>
+            <Label>Rate Code *</Label>
+            <Input
+              value={form.rateCode}
+              onChange={(e) => set("rateCode", e.target.value)}
+              placeholder="e.g. RC-2025-001"
+              className="bg-background border-border font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Item Code</Label>
             <Input
               value={form.itemCode}
               onChange={(e) => set("itemCode", e.target.value)}
-              placeholder="e.g. RC-2025-001"
+              placeholder="Defaults to Rate Code"
+              className="bg-background border-border font-mono"
+            />
+          </div>
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label>Item (Description) *</Label>
+            <Input
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="Item description"
+              className="bg-background border-border"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Rate (Rs.)</Label>
+            <Input
+              type="number"
+              value={form.rcPrice}
+              onChange={(e) => set("rcPrice", e.target.value)}
+              placeholder="0"
+              className="bg-background border-border"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>VAT (%)</Label>
+            <Input
+              type="number"
+              value={form.vat}
+              onChange={(e) => set("vat", e.target.value)}
+              placeholder="0"
+              className="bg-background border-border"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Warranty</Label>
+            <Input
+              value={form.warranty}
+              onChange={(e) => set("warranty", e.target.value)}
+              placeholder="e.g. 12 months"
               className="bg-background border-border"
             />
           </div>
@@ -656,40 +751,21 @@ function AddRCDialog({ open, onOpenChange, onDone }: AddRCDialogProps) {
               className="bg-background border-border"
             />
           </div>
-          <div className="sm:col-span-2 space-y-1.5">
-            <Label>Description *</Label>
+          <div className="space-y-1.5">
+            <Label>Brand</Label>
             <Input
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              placeholder="Item description"
+              value={form.brand}
+              onChange={(e) => set("brand", e.target.value)}
+              placeholder="Brand name"
               className="bg-background border-border"
             />
           </div>
           <div className="space-y-1.5">
-            <Label>RC Price (Rs.)</Label>
+            <Label>Make / Model</Label>
             <Input
-              type="number"
-              value={form.rcPrice}
-              onChange={(e) => set("rcPrice", e.target.value)}
-              placeholder="0"
-              className="bg-background border-border"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Supplier</Label>
-            <Input
-              value={form.supplier}
-              onChange={(e) => set("supplier", e.target.value)}
-              placeholder="Supplier name"
-              className="bg-background border-border"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>RC Year</Label>
-            <Input
-              value={form.rcYear}
-              onChange={(e) => set("rcYear", e.target.value)}
-              placeholder="2025"
+              value={form.makeModel}
+              onChange={(e) => set("makeModel", e.target.value)}
+              placeholder="Make and model"
               className="bg-background border-border"
             />
           </div>
@@ -707,6 +783,33 @@ function AddRCDialog({ open, onOpenChange, onDone }: AddRCDialogProps) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Sub Category</Label>
+            <Input
+              value={form.subCategory}
+              onChange={(e) => set("subCategory", e.target.value)}
+              placeholder="e.g. Valves"
+              className="bg-background border-border"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>RC Supplier</Label>
+            <Input
+              value={form.supplier}
+              onChange={(e) => set("supplier", e.target.value)}
+              placeholder="RC supplier name"
+              className="bg-background border-border"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>RC Year</Label>
+            <Input
+              value={form.rcYear}
+              onChange={(e) => set("rcYear", e.target.value)}
+              placeholder="2025"
+              className="bg-background border-border"
+            />
           </div>
           <div className="space-y-1.5">
             <Label>Valid From</Label>
@@ -777,26 +880,40 @@ function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
       return;
     }
     const headers = rows[0].map((h) => h.trim().toLowerCase());
-    const expected = [
-      "itemcode",
-      "description",
-      "unit",
-      "rcprice",
-      "supplier",
-      "rcyear",
-      "validfrom",
-      "validuntil",
-      "category",
-    ];
+    // New CSV format headers (lowercased). The API also accepts these aliases
+    // directly (e.g. "rate(Rs)" → rcPrice, "validity up to" → validUntil).
+    const columnAliases: Record<string, string[]> = {
+      rateCode: ["rate code", "ratecode"],
+      description: ["item", "description"],
+      rcPrice: ["rate(rs)", "rate", "rcprice"],
+      vat: ["vat"],
+      warranty: ["warranty"],
+      validUntil: ["validity up to", "validuntil"],
+      brand: ["brand"],
+      makeModel: ["make model", "makemodel"],
+      category: ["category"],
+      subCategory: ["sub category", "subcategory"],
+      supplier: ["rc supplier", "supplier"],
+      itemCode: ["itemcode", "item code"],
+      rcYear: ["rcyear", "rc year"],
+      validFrom: ["validfrom", "valid from"],
+      unit: ["unit"],
+    };
     const idx: Record<string, number> = {};
-    expected.forEach((h) => {
-      const i = headers.indexOf(h);
-      if (i >= 0) idx[h] = i;
+    Object.entries(columnAliases).forEach(([field, aliases]) => {
+      for (const a of aliases) {
+        const i = headers.indexOf(a);
+        if (i >= 0) {
+          idx[field] = i;
+          break;
+        }
+      }
     });
-    if (!("itemcode" in idx) || !("description" in idx)) {
+    if (!("description" in idx)) {
       toast({
-        title: "Missing required columns",
-        description: "ItemCode and Description columns are required.",
+        title: "Missing required column",
+        description:
+          'CSV must include an "item" (or "description") column. Use the template button to get the correct format.',
         variant: "destructive",
       });
       setParsed(null);
@@ -804,18 +921,29 @@ function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
     }
     const dataRows = rows.slice(1);
     const items: Omit<RCItem, "id">[] = dataRows
-      .map((r) => ({
-        itemCode: (r[idx["itemcode"]] ?? "").trim(),
-        description: (r[idx["description"]] ?? "").trim(),
-        unit: (r[idx["unit"]] ?? "NOS").trim() || "NOS",
-        rcPrice: Number((r[idx["rcprice"]] ?? "0").trim()) || 0,
-        supplier: (r[idx["supplier"]] ?? "").trim(),
-        rcYear:
-          (r[idx["rcyear"]] ?? "").trim() || String(new Date().getFullYear()),
-        validFrom: (r[idx["validfrom"]] ?? "").trim(),
-        validUntil: (r[idx["validuntil"]] ?? "").trim(),
-        category: (r[idx["category"]] ?? "General").trim() || "General",
-      }))
+      .map((r) => {
+        const rateCode = (r[idx["rateCode"]] ?? "").trim();
+        const itemCode = (r[idx["itemCode"]] ?? "").trim();
+        const description = (r[idx["description"]] ?? "").trim();
+        const rcYearRaw = (r[idx["rcYear"]] ?? "").trim();
+        return {
+          rateCode: rateCode || null,
+          itemCode: itemCode || rateCode || "",
+          description,
+          unit: (r[idx["unit"]] ?? "NOS").trim() || "NOS",
+          rcPrice: Number((r[idx["rcPrice"]] ?? "0").trim()) || 0,
+          vat: Number((r[idx["vat"]] ?? "0").trim()) || 0,
+          warranty: (r[idx["warranty"]] ?? "").trim() || null,
+          brand: (r[idx["brand"]] ?? "").trim() || null,
+          makeModel: (r[idx["makeModel"]] ?? "").trim() || null,
+          category: (r[idx["category"]] ?? "General").trim() || "General",
+          subCategory: (r[idx["subCategory"]] ?? "").trim() || null,
+          supplier: (r[idx["supplier"]] ?? "").trim() || null,
+          rcYear: rcYearRaw || String(new Date().getFullYear()),
+          validFrom: (r[idx["validFrom"]] ?? "").trim() || null,
+          validUntil: (r[idx["validUntil"]] ?? "").trim() || null,
+        };
+      })
       .filter((i) => i.itemCode || i.description);
 
     if (items.length === 0) {
@@ -855,12 +983,12 @@ function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
         <DialogHeader>
           <DialogTitle className="text-foreground">Upload RC List (CSV)</DialogTitle>
           <DialogDescription>
-            Columns: ItemCode, Description, Unit, RCPrice, Supplier, RCYear, ValidFrom, ValidUntil,
-            Category
+            Columns: Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand,
+            make model, Category, sub category, RC supplier
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -916,18 +1044,24 @@ function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="text-muted-foreground">Item Code</TableHead>
-                      <TableHead className="text-muted-foreground">Description</TableHead>
-                      <TableHead className="text-muted-foreground">Price</TableHead>
-                      <TableHead className="text-muted-foreground">Year</TableHead>
+                      <TableHead className="text-muted-foreground">Rate Code</TableHead>
+                      <TableHead className="text-muted-foreground">Item</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Rate (Rs)</TableHead>
+                      <TableHead className="text-muted-foreground">VAT</TableHead>
+                      <TableHead className="text-muted-foreground">Warranty</TableHead>
+                      <TableHead className="text-muted-foreground">Valid Until</TableHead>
+                      <TableHead className="text-muted-foreground">Brand</TableHead>
+                      <TableHead className="text-muted-foreground">Make/Model</TableHead>
                       <TableHead className="text-muted-foreground">Category</TableHead>
+                      <TableHead className="text-muted-foreground">Sub Cat</TableHead>
+                      <TableHead className="text-muted-foreground">Supplier</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {parsed.slice(0, 50).map((p, i) => (
                       <TableRow key={i} className="border-border">
-                        <TableCell className="font-medium text-foreground">
-                          {p.itemCode}
+                        <TableCell className="font-mono text-foreground whitespace-nowrap">
+                          {p.rateCode || "—"}
                         </TableCell>
                         <TableCell
                           className="text-muted-foreground truncate max-w-[200px]"
@@ -935,12 +1069,32 @@ function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
                         >
                           {p.description}
                         </TableCell>
-                        <TableCell className="text-foreground">
+                        <TableCell className="text-foreground text-right whitespace-nowrap">
                           {formatCurrency(p.rcPrice)}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{p.rcYear}</TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.vat ? `${p.vat}%` : "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.warranty || "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {formatDate(p.validUntil)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.brand || "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.makeModel || "—"}
+                        </TableCell>
                         <TableCell>
                           <CategoryBadge category={p.category} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.subCategory || "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.supplier || "—"}
                         </TableCell>
                       </TableRow>
                     ))}

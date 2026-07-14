@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -24,7 +25,6 @@ import { useToast } from "@/hooks/use-toast";
 import {
   PROJECT_STATUSES,
   PROJECT_TYPES,
-  FINANCIAL_MEANS,
   projectTypeColor,
   financialMeanColor,
   voteTypeColor,
@@ -50,8 +50,12 @@ import {
   Pencil,
   ChevronLeft,
   Landmark,
+  Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Fund options available when the "Funds" checkbox is ticked (non-vote funding).
+const FUND_OPTIONS = ["Malima Fund", "Non-Public Fund", "Contractual"] as const;
 
 interface Vote {
   id: string;
@@ -88,6 +92,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
   const [customVoteNumber, setCustomVoteNumber] = useState(false);
   const [selectedVoteId, setSelectedVoteId] = useState("");
+  // "Funds" checkbox state — when ticked, the project is funded via a non-vote fund
+  // (Malima/Non-Public/Contractual) and the Vote Number is NOT mandatory.
+  const [fundsChecked, setFundsChecked] = useState(false);
   const { data: votes } = useFetch<Vote[]>("/api/votes");
 
   const [form, setForm] = useState({
@@ -124,18 +131,38 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     }
   };
 
-  const handleFinancialMeanChange = (v: string) => {
-    setForm((prev) => ({ ...prev, financialMean: v, voteNumber: "" }));
+  // Toggle the "Funds" checkbox. When checked, the project is funded via a non-vote
+  // fund (default Malima Fund) and the Vote Number becomes optional. When unchecked,
+  // the project is funded via Vote and the Vote Number is mandatory.
+  const handleFundsToggle = (checked: boolean) => {
+    setFundsChecked(checked);
     setCustomVoteNumber(false);
     setSelectedVoteId("");
+    if (checked) {
+      setForm((prev) => ({
+        ...prev,
+        financialMean: "Malima Fund",
+        voteNumber: "",
+        voteAllocation: "",
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        financialMean: "Vote/Funds",
+        voteNumber: "",
+      }));
+    }
   };
 
-  const isVoteFunds = form.financialMean === "Vote/Funds";
-  const isNonVote = !isVoteFunds;
-  const nonVotePlaceholder = form.financialMean === "Contractual" ? "CONTRACTUAL" : "NON-NAVAL";
+  const handleFundSelect = (fund: string) => {
+    setForm((prev) => ({ ...prev, financialMean: fund }));
+  };
+
+  const nonVotePlaceholder =
+    form.financialMean === "Contractual" ? "CONTRACTUAL" : "NON-NAVAL";
   const nonVoteHint =
     form.financialMean === "Contractual"
-      ? "Contractual funding — Vote Number should be 'CONTRACTUAL' or the ARO reference."
+      ? "Contractual funding — Vote Number can be 'CONTRACTUAL' or the ARO reference."
       : form.financialMean === "Malima Fund"
       ? "Malima Fund — Vote Number can be 'NON-NAVAL' or the Malima reference number."
       : "Non-Public Fund — Vote Number can be 'NON-NAVAL' or the fund reference.";
@@ -257,8 +284,17 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   };
 
   const handleSaveAndProcess = async () => {
-    if (!form.name || !form.voteNumber) {
-      toast({ title: "Project Name and Vote Number are required", variant: "destructive" });
+    if (!form.name) {
+      toast({ title: "Project Name is required", variant: "destructive" });
+      return;
+    }
+    // Vote Number is mandatory UNLESS the Funds checkbox is ticked (non-vote funding).
+    if (!fundsChecked && !form.voteNumber.trim()) {
+      toast({
+        title: "Vote Number is required",
+        description: "Tick the Funds checkbox for non-vote funding (Malima/Non-Public/Contractual).",
+        variant: "destructive",
+      });
       return;
     }
     const validRows = estimateRows.filter((r) => r.itemName.trim());
@@ -318,6 +354,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       setStep(1);
       setCreatedProjectId(null);
       setCreatedEstimateId(null);
+      setFundsChecked(false);
       setForm({
         name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
         startDate: "", endDate: "", benefactor: "", reference: "",
@@ -368,13 +405,16 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
                 </div>
 
-                {/* Vote Number — conditional UI based on Financial Mean */}
+                {/* Vote Number — conditional UI based on Funds checkbox state */}
                 <div className="space-y-1.5">
                   <Label className="flex items-center gap-1.5">
                     <Vote className="h-3.5 w-3.5 text-primary" />
-                    Vote Number *
+                    Vote Number{!fundsChecked && " *"}
+                    {fundsChecked && (
+                      <span className="text-[10px] font-normal text-muted-foreground ml-1">(optional)</span>
+                    )}
                   </Label>
-                  {isVoteFunds && !customVoteNumber ? (
+                  {!fundsChecked && !customVoteNumber ? (
                     <>
                       <Select value={selectedVoteId} onValueChange={handleVoteSelect}>
                         <SelectTrigger className="bg-background border-border">
@@ -429,7 +469,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                         <Pencil className="h-3 w-3" /> Enter custom vote number
                       </button>
                     </>
-                  ) : isVoteFunds && customVoteNumber ? (
+                  ) : !fundsChecked && customVoteNumber ? (
                     <>
                       <Input
                         value={form.voteNumber}
@@ -484,24 +524,46 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   )}
                 </div>
 
-                {/* Financial Mean */}
+                {/* Funding Source — Funds checkbox (non-vote funding). NOT mandatory. */}
                 <div className="space-y-1.5">
-                  <Label>Financial Mean *</Label>
-                  <Select value={form.financialMean} onValueChange={handleFinancialMeanChange}>
-                    <SelectTrigger className="bg-background border-border">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FINANCIAL_MEANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {form.financialMean && (
-                    <div className="pt-0.5">
-                      <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
-                        {form.financialMean}
-                      </CustomBadge>
-                    </div>
+                  <Label className="flex items-center gap-1.5">
+                    <Wallet className="h-3.5 w-3.5 text-primary" />
+                    Funding Source
+                  </Label>
+                  <div className="flex items-start gap-2 pt-1">
+                    <Checkbox
+                      id="funds-checkbox"
+                      checked={fundsChecked}
+                      onCheckedChange={(v) => handleFundsToggle(!!v)}
+                      className="mt-0.5"
+                    />
+                    <Label
+                      htmlFor="funds-checkbox"
+                      className="text-sm font-normal cursor-pointer leading-tight"
+                    >
+                      <span className="font-medium">Funds</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        Tick if funded via Malima / Non-Public / Contractual fund
+                      </span>
+                    </Label>
+                  </div>
+                  {fundsChecked && (
+                    <Select value={form.financialMean} onValueChange={handleFundSelect}>
+                      <SelectTrigger className="bg-background border-border">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FUND_OPTIONS.map((f) => (
+                          <SelectItem key={f} value={f}>{f}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
+                  <div className="pt-0.5">
+                    <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
+                      {form.financialMean}
+                    </CustomBadge>
+                  </div>
                 </div>
 
                 {/* Reference — manual text entry (how vote allocated) */}

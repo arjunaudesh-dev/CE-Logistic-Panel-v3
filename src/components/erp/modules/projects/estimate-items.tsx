@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import {
   Table,
@@ -10,7 +10,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { CustomBadge } from "@/components/erp/badges";
 import { LoadingState, EmptyState } from "@/components/erp/states";
 import { InitiateFileDialog, EstimateItem } from "./initiate-file";
@@ -26,6 +25,12 @@ import {
   ShieldCheck,
   FileText,
   ScrollText,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  Group as GroupIcon,
+  Files,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +53,8 @@ interface EstimateWithProject {
 
 type SectionVariant = "rc" | "non-rate" | "contractual";
 type ThemeKey = "emerald" | "amber" | "violet";
+type SortKey = "srNo" | "itemName" | "itemCode" | "qty" | "approxCost";
+type SortDir = "asc" | "desc";
 
 const SECTION_THEME: Record<SectionVariant, { key: ThemeKey; bar: string; title: string; summary: string; desc: string }> = {
   rc: {
@@ -80,6 +87,21 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
   const [processing, setProcessing] = useState(false);
   const [initiateItem, setInitiateItem] = useState<EstimateItem | null>(null);
   const { toast } = useToast();
+
+  // Sorting state — shared across all 3 sections (single preference)
+  const [sortKey, setSortKey] = useState<SortKey>("srNo");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  // Group-by-file toggle — applies within each section
+  const [groupByFile, setGroupByFile] = useState(false);
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   const items = estimate?.items || [];
   const pendingItems = items.filter((i) => i.status === "Pending");
@@ -162,6 +184,29 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
         </div>
       )}
 
+      {/* Group-by-file toggle — only enabled when at least one item has been initiated */}
+      {items.length > 0 && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+            <GroupIcon className="h-3 w-3" />
+            Sortable headers · {initiatedItems.length > 0
+              ? "Toggle to group multiple items sharing the same PR/File number"
+              : "Initiate files to enable the group-by-file view"}
+          </p>
+          <Button
+            size="sm"
+            variant={groupByFile ? "default" : "outline"}
+            onClick={() => setGroupByFile((v) => !v)}
+            disabled={initiatedItems.length === 0}
+            className="gap-1.5"
+            title={initiatedItems.length === 0 ? "No initiated items to group" : "Toggle group-by-file view"}
+          >
+            <GroupIcon className="h-4 w-4" />
+            {groupByFile ? "Ungroup View" : "Group by File"}
+          </Button>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <EmptyState
           icon={PackageSearch}
@@ -178,6 +223,10 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               description="Items matched to an active Rate Contract — procurement can proceed at the locked RC rate."
               items={rcItems}
               onInitiate={(it) => setInitiateItem(it)}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              groupByFile={groupByFile}
             />
           )}
           {nonRateItems.length > 0 && (
@@ -188,6 +237,10 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               description="These items are not on an active Rate Contract — they require a tender or quotation process."
               items={nonRateItems}
               onInitiate={(it) => setInitiateItem(it)}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              groupByFile={groupByFile}
             />
           )}
           {contractualItems.length > 0 && (
@@ -198,22 +251,74 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               description="These items follow the ARO (Annual Requirement Order) contractual process flow."
               items={contractualItems}
               onInitiate={(it) => setInitiateItem(it)}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              groupByFile={groupByFile}
             />
           )}
         </div>
       )}
 
-      <InitiateFileDialog
-        item={initiateItem}
-        open={!!initiateItem}
-        onOpenChange={(o) => !o && setInitiateItem(null)}
-        onInitiated={() => {
-          setInitiateItem(null);
-          refresh();
-          onChanged?.();
-        }}
-      />
+      {initiateItem && (
+        <InitiateFileDialog
+          key={initiateItem.id}
+          item={initiateItem}
+          open
+          onOpenChange={(o) => !o && setInitiateItem(null)}
+          onInitiated={() => {
+            setInitiateItem(null);
+            refresh();
+            onChanged?.();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** Sortable column header with chevron indicator. */
+function SortHeader({
+  label,
+  sortKey,
+  currentSortKey,
+  currentSortDir,
+  onSort,
+  className,
+  align,
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentSortKey: SortKey;
+  currentSortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  className?: string;
+  align?: "left" | "right";
+}) {
+  const active = sortKey === currentSortKey;
+  return (
+    <TableHead className={cn("text-muted-foreground", className)}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground transition-colors",
+          align === "right" && "flex-row-reverse",
+          active && "text-foreground"
+        )}
+      >
+        {label}
+        {active ? (
+          currentSortDir === "asc" ? (
+            <ChevronUp className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          )
+        ) : (
+          <ChevronsUpDown className="h-3 w-3 opacity-40" />
+        )}
+      </button>
+    </TableHead>
   );
 }
 
@@ -224,6 +329,10 @@ function ItemsSection({
   description,
   items,
   onInitiate,
+  sortKey,
+  sortDir,
+  onSort,
+  groupByFile,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -231,11 +340,75 @@ function ItemsSection({
   description: string;
   items: EstimateItem[];
   onInitiate: (item: EstimateItem) => void;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  groupByFile: boolean;
 }) {
   const theme = SECTION_THEME[variant];
-  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
   const showRcCols = variant === "rc";
   const DescIcon = variant === "rc" ? CheckCircle2 : AlertCircle;
+
+  // Sort items — sort is applied within each section
+  const sortedItems = useMemo(() => {
+    const arr = [...items];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "srNo":
+          cmp = a.srNo - b.srNo;
+          break;
+        case "itemName":
+          cmp = (a.itemName || "").localeCompare(b.itemName || "");
+          break;
+        case "itemCode":
+          cmp = (a.itemCode || "").localeCompare(b.itemCode || "");
+          break;
+        case "qty":
+          cmp = a.qty - b.qty;
+          break;
+        case "approxCost":
+          cmp = a.approxCost - b.approxCost;
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [items, sortKey, sortDir]);
+
+  // Group items by prNumber (or fileNumber) when groupByFile is enabled.
+  // Items without a prNumber/fileNumber remain as individual rows.
+  // Groups of 2+ items become expandable group cards; single-initiated items
+  // render as individual rows so the user still sees the PR badge inline.
+  const groupedView = useMemo(() => {
+    if (!groupByFile) {
+      return { groups: [] as { key: string; items: EstimateItem[] }[], individuals: sortedItems };
+    }
+    const groupsMap = new Map<string, EstimateItem[]>();
+    const individuals: EstimateItem[] = [];
+    for (const it of sortedItems) {
+      const key = it.prNumber || it.fileNumber;
+      if (key) {
+        const existing = groupsMap.get(key);
+        if (existing) existing.push(it);
+        else groupsMap.set(key, [it]);
+      } else {
+        individuals.push(it);
+      }
+    }
+    const realGroups: { key: string; items: EstimateItem[] }[] = [];
+    for (const [key, groupItems] of groupsMap) {
+      if (groupItems.length >= 2) {
+        realGroups.push({ key, items: groupItems });
+      } else {
+        individuals.push(groupItems[0]);
+      }
+    }
+    return { groups: realGroups, individuals };
+  }, [sortedItems, groupByFile]);
+
+  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+  const groupedItemCount = groupedView.groups.reduce((s, g) => s + g.items.length, 0);
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -260,108 +433,307 @@ function ItemsSection({
         {description}
       </div>
 
-      <ScrollArea className="max-h-[55vh]">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent border-border bg-secondary/40">
-              <TableHead className="text-muted-foreground w-12">Sr</TableHead>
-              <TableHead className="text-muted-foreground">Item Name</TableHead>
-              <TableHead className="text-muted-foreground">Item Code</TableHead>
-              <TableHead className="text-muted-foreground text-right">Qty</TableHead>
-              <TableHead className="text-muted-foreground">Deno</TableHead>
-              <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
-              {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
-              {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
-              <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
-              <TableHead className="text-muted-foreground">Available Stock</TableHead>
-              <TableHead className="text-muted-foreground text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((it) => {
-              const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
-              return (
-                <TableRow key={it.id} className="border-border">
-                  <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
-                  <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {it.itemCode ? (
-                      <span className="text-blue-400">{it.itemCode}</span>
-                    ) : (
-                      <span className="text-muted-foreground italic">TBC</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">{it.qty}</TableCell>
-                  <TableCell className="text-xs">{it.unit}</TableCell>
-                  <TableCell className="text-right font-medium text-foreground">
-                    {formatCurrency(it.approxCost)}
-                    {it.isRC && (
-                      <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
-                    )}
-                    {!it.isRC && (
-                      <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
-                    )}
-                  </TableCell>
-                  {showRcCols && (
-                    <TableCell>
-                      {it.isRC ? (
-                        <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </TableCell>
-                  )}
-                  {showRcCols && (
-                    <TableCell className="text-xs text-muted-foreground">
-                      {it.rcSupplier || "—"}
-                    </TableCell>
-                  )}
-                  <TableCell className="text-right text-xs">
-                    {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {it.availableStock > 0 ? (
-                      <div className="text-xs">
-                        <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
-                        {it.stockLocation && (
-                          <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
-                        )}
-                        {it.nonMovingStock > 0 && (
-                          <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">0</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {it.status === "Initiated" ? (
-                      <div className="flex flex-col items-end gap-0.5">
-                        <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
-                          <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
-                        </CustomBadge>
-                        {it.fileNumber && (
-                          <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
-                        )}
-                      </div>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onInitiate(it)}
-                        className="gap-1.5 h-7"
-                      >
-                        <FileSignature className="h-3.5 w-3.5" /> Initiate File
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </ScrollArea>
+      {/* Group cards — only when groupByFile is enabled and there are multi-item groups */}
+      {groupByFile && groupedView.groups.length > 0 && (
+        <div className="p-3 space-y-2 bg-secondary/10 border-b border-border">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+            <Files className="h-3 w-3" />
+            {groupedView.groups.length} grouped file(s) · {groupedItemCount} items
+          </p>
+          {groupedView.groups.map((g) => (
+            <GroupCard
+              key={g.key}
+              groupKey={g.key}
+              items={g.items}
+              variant={variant}
+              onInitiate={onInitiate}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Individual items table — show ALL items (no pagination limit) in a scrollable container */}
+      {groupedView.individuals.length > 0 ? (
+        <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-secondary/95 backdrop-blur">
+              <TableRow className="hover:bg-transparent border-border">
+                <SortHeader
+                  label="Sr"
+                  sortKey="srNo"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                  className="w-12"
+                />
+                <SortHeader
+                  label="Item Name"
+                  sortKey="itemName"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                />
+                <SortHeader
+                  label="Item Code"
+                  sortKey="itemCode"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                />
+                <SortHeader
+                  label="Qty"
+                  sortKey="qty"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                  className="text-right"
+                  align="right"
+                />
+                <TableHead className="text-muted-foreground">Deno</TableHead>
+                <SortHeader
+                  label="Approx Cost"
+                  sortKey="approxCost"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                  className="text-right"
+                  align="right"
+                />
+                {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+                {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+                <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
+                <TableHead className="text-muted-foreground">Available Stock</TableHead>
+                <TableHead className="text-muted-foreground text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groupedView.individuals.map((it) => (
+                <ItemRow
+                  key={it.id}
+                  it={it}
+                  showRcCols={showRcCols}
+                  onInitiate={onInitiate}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        groupByFile &&
+        groupedView.groups.length > 0 && (
+          <div className="p-6 text-center text-xs text-muted-foreground">
+            All items in this section are part of file groups above.
+          </div>
+        )
+      )}
     </div>
+  );
+}
+
+/** Expandable group card — multiple items sharing a single PR/File number. */
+function GroupCard({
+  groupKey,
+  items,
+  variant,
+  onInitiate,
+}: {
+  groupKey: string;
+  items: EstimateItem[];
+  variant: SectionVariant;
+  onInitiate: (item: EstimateItem) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const theme = SECTION_THEME[variant];
+  const showRcCols = variant === "rc";
+
+  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+  const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
+
+  // Common attributes across the group (only show if all items share the same value)
+  const suppliers = new Set(items.map((i) => i.rcSupplier).filter(Boolean));
+  const commonSupplier = suppliers.size === 1 ? Array.from(suppliers)[0] : null;
+  const rcNumbers = new Set(items.map((i) => i.rcNumber).filter(Boolean));
+  const commonRcNumber = rcNumbers.size === 1 ? Array.from(rcNumbers)[0] : null;
+  const units = new Set(items.map((i) => i.unit));
+  const commonUnit = units.size === 1 ? Array.from(units)[0] : null;
+  const fileNumbers = new Set(items.map((i) => i.fileNumber).filter(Boolean));
+  const commonFileNumber = fileNumbers.size === 1 ? Array.from(fileNumbers)[0] : null;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden bg-background">
+      {/* Group header — clickable to expand/collapse */}
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <Files className={cn("h-4 w-4 shrink-0", theme.title)} />
+          <CustomBadge className={cn("border-0 bg-primary/15 text-primary font-mono")}>
+            {groupKey}
+          </CustomBadge>
+          <span className="text-xs text-muted-foreground">
+            {items.length} items · {totalQty} {commonUnit || "units"} total
+          </span>
+          {commonSupplier && (
+            <span className="text-xs text-muted-foreground hidden sm:inline truncate">
+              · Supplier: <span className="text-foreground/80">{commonSupplier}</span>
+            </span>
+          )}
+          {commonRcNumber && showRcCols && (
+            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400 font-mono">
+              {commonRcNumber}
+            </CustomBadge>
+          )}
+          {commonFileNumber && (
+            <span className="text-[11px] text-muted-foreground hidden md:inline font-mono">
+              · {commonFileNumber}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">File Total</p>
+            <p className={cn("text-sm font-semibold", theme.summary)}>{formatCurrency(totalCost)}</p>
+          </div>
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+      </button>
+
+      {/* Expanded individual items */}
+      {expanded && (
+        <div className="border-t border-border bg-secondary/20">
+          <div className="overflow-x-auto scrollbar-thin">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border">
+                  <TableHead className="text-muted-foreground w-12">Sr</TableHead>
+                  <TableHead className="text-muted-foreground">Item Name</TableHead>
+                  <TableHead className="text-muted-foreground">Item Code</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+                  <TableHead className="text-muted-foreground">Deno</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
+                  {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+                  {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+                  <TableHead className="text-muted-foreground text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((it) => (
+                  <ItemRow
+                    key={it.id}
+                    it={it}
+                    showRcCols={showRcCols}
+                    onInitiate={onInitiate}
+                    compact
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Single item row — shared between the main table and the expanded group view. */
+function ItemRow({
+  it,
+  showRcCols,
+  onInitiate,
+  compact,
+}: {
+  it: EstimateItem;
+  showRcCols: boolean;
+  onInitiate: (item: EstimateItem) => void;
+  compact?: boolean;
+}) {
+  const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
+  return (
+    <TableRow className="border-border">
+      <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
+      <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
+      <TableCell className="font-mono text-xs">
+        {it.itemCode ? (
+          <span className="text-blue-400">{it.itemCode}</span>
+        ) : (
+          <span className="text-muted-foreground italic">TBC</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">{it.qty}</TableCell>
+      <TableCell className="text-xs">{it.unit}</TableCell>
+      <TableCell className="text-right font-medium text-foreground">
+        {formatCurrency(it.approxCost)}
+        {it.isRC && (
+          <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
+        )}
+        {!it.isRC && (
+          <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
+        )}
+      </TableCell>
+      {showRcCols && (
+        <TableCell>
+          {it.isRC ? (
+            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
+        </TableCell>
+      )}
+      {showRcCols && (
+        <TableCell className="text-xs text-muted-foreground">
+          {it.rcSupplier || "—"}
+        </TableCell>
+      )}
+      {!compact && (
+        <>
+          <TableCell className="text-right text-xs">
+            {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
+          </TableCell>
+          <TableCell>
+            {it.availableStock > 0 ? (
+              <div className="text-xs">
+                <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
+                {it.stockLocation && (
+                  <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
+                )}
+                {it.nonMovingStock > 0 && (
+                  <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
+                )}
+              </div>
+            ) : (
+              <span className="text-muted-foreground text-xs">0</span>
+            )}
+          </TableCell>
+        </>
+      )}
+      <TableCell className="text-right">
+        {it.status === "Initiated" ? (
+          <div className="flex flex-col items-end gap-0.5">
+            <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
+              <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
+            </CustomBadge>
+            {it.fileNumber && (
+              <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
+            )}
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onInitiate(it)}
+            className="gap-1.5 h-7"
+          >
+            <FileSignature className="h-3.5 w-3.5" /> Initiate File
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }
 

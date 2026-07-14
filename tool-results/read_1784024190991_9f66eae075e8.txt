@@ -1,0 +1,741 @@
+     1→"use client";
+     2→import { useState, useRef } from "react";
+     3→import { apiRequest, useFetch } from "@/lib/use-fetch";
+     4→import { Button } from "@/components/ui/button";
+     5→import { Input } from "@/components/ui/input";
+     6→import { Label } from "@/components/ui/label";
+     7→import { Textarea } from "@/components/ui/textarea";
+     8→import {
+     9→  Select,
+    10→  SelectContent,
+    11→  SelectItem,
+    12→  SelectTrigger,
+    13→  SelectValue,
+    14→} from "@/components/ui/select";
+    15→import {
+    16→  Dialog,
+    17→  DialogContent,
+    18→  DialogHeader,
+    19→  DialogTitle,
+    20→  DialogFooter,
+    21→} from "@/components/ui/dialog";
+    22→import { CustomBadge } from "@/components/erp/badges";
+    23→import { useToast } from "@/hooks/use-toast";
+    24→import {
+    25→  PROJECT_STATUSES,
+    26→  PROJECT_TYPES,
+    27→  FINANCIAL_MEANS,
+    28→  projectTypeColor,
+    29→  financialMeanColor,
+    30→  voteTypeColor,
+    31→  formatCurrency,
+    32→} from "@/lib/constants";
+    33→import { EstimateItemsTable } from "./estimate-items";
+    34→import {
+    35→  Loader2,
+    36→  X,
+    37→  ArrowLeft,
+    38→  ArrowRight,
+    39→  Plus,
+    40→  Trash2,
+    41→  FileSpreadsheet,
+    42→  Sparkles,
+    43→  Check,
+    44→  ClipboardList,
+    45→  Download,
+    46→  Upload,
+    47→  AlertCircle,
+    48→  Info,
+    49→  Vote,
+    50→  Pencil,
+    51→  ChevronLeft,
+    52→  Landmark,
+    53→} from "lucide-react";
+    54→import { cn } from "@/lib/utils";
+    55→
+    56→interface Vote {
+    57→  id: string;
+    58→  voteNumber: string;
+    59→  description: string;
+    60→  voteType: string;
+    61→  allocation: number;
+    62→  financialYear: string | null;
+    63→  active: boolean;
+    64→}
+    65→
+    66→interface EstimateRow {
+    67→  itemName: string;
+    68→  qty: string;
+    69→  unit: string;
+    70→  estimateCost: string;
+    71→}
+    72→
+    73→interface Props {
+    74→  open: boolean;
+    75→  onClose: () => void;
+    76→  onCreated: (project: { id: string; name: string; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null }) => void;
+    77→}
+    78→
+    79→const UNITS = ["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"];
+    80→
+    81→export function AddProjectWizard({ open, onClose, onCreated }: Props) {
+    82→  const [step, setStep] = useState<1 | 2>(1);
+    83→  const [saving, setSaving] = useState(false);
+    84→  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
+    85→  const [createdEstimateId, setCreatedEstimateId] = useState<string | null>(null);
+    86→  const { toast } = useToast();
+    87→  const fileInputRef = useRef<HTMLInputElement>(null);
+    88→  const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
+    89→  const [customVoteNumber, setCustomVoteNumber] = useState(false);
+    90→  const [selectedVoteId, setSelectedVoteId] = useState("");
+    91→  const { data: votes } = useFetch<Vote[]>("/api/votes");
+    92→
+    93→  const [form, setForm] = useState({
+    94→    name: "",
+    95→    voteNumber: "",
+    96→    voteAllocation: "",
+    97→    committed: "0",
+    98→    actualSpent: "0",
+    99→    startDate: "",
+   100→    endDate: "", // EDC
+   101→    benefactor: "", // replaces Department
+   102→    reference: "", // manual text — how vote allocated
+   103→    projectType: "New Construction",
+   104→    financialMean: "Vote/Funds",
+   105→    projectOfficer: "",
+   106→    status: "Active",
+   107→    description: "",
+   108→  });
+   109→  const [estimateRows, setEstimateRows] = useState<EstimateRow[]>([
+   110→    { itemName: "", qty: "", unit: "NOS", estimateCost: "" },
+   111→  ]);
+   112→
+   113→  const selectedVote = votes?.find((v) => v.id === selectedVoteId);
+   114→
+   115→  const handleVoteSelect = (id: string) => {
+   116→    setSelectedVoteId(id);
+   117→    const v = votes?.find((vt) => vt.id === id);
+   118→    if (v) {
+   119→      setForm((prev) => ({
+   120→        ...prev,
+   121→        voteNumber: v.voteNumber,
+   122→        voteAllocation: v.allocation ? String(v.allocation) : prev.voteAllocation,
+   123→      }));
+   124→    }
+   125→  };
+   126→
+   127→  const handleFinancialMeanChange = (v: string) => {
+   128→    setForm((prev) => ({ ...prev, financialMean: v, voteNumber: "" }));
+   129→    setCustomVoteNumber(false);
+   130→    setSelectedVoteId("");
+   131→  };
+   132→
+   133→  const isVoteFunds = form.financialMean === "Vote/Funds";
+   134→  const isNonVote = !isVoteFunds;
+   135→  const nonVotePlaceholder = form.financialMean === "Contractual" ? "CONTRACTUAL" : "NON-NAVAL";
+   136→  const nonVoteHint =
+   137→    form.financialMean === "Contractual"
+   138→      ? "Contractual funding — Vote Number should be 'CONTRACTUAL' or the ARO reference."
+   139→      : form.financialMean === "Malima Fund"
+   140→      ? "Malima Fund — Vote Number can be 'NON-NAVAL' or the Malima reference number."
+   141→      : "Non-Public Fund — Vote Number can be 'NON-NAVAL' or the fund reference.";
+   142→
+   143→  const addRow = () =>
+   144→    setEstimateRows([...estimateRows, { itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+   145→  const removeRow = (idx: number) =>
+   146→    setEstimateRows(estimateRows.filter((_, i) => i !== idx));
+   147→  const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
+   148→    setEstimateRows(estimateRows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+   149→
+   150→  // Valid (filled) estimate rows — at least one is required to enable Step 2
+   151→  const validEstimateRows = estimateRows.filter(
+   152→    (r) => r.itemName.trim() && (Number(r.qty) > 0 || Number(r.estimateCost) > 0)
+   153→  );
+   154→  const hasValidEstimate = validEstimateRows.length > 0;
+   155→
+   156→  const downloadTemplate = () => {
+   157→    const header = "ItemName,Qty,Unit,EstimateCost";
+   158→    const sample = "Centrifugal Pump 15kW,2,NOS,185000";
+   159→    const csv = `${header}\n${sample}\n`;
+   160→    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+   161→    const url = URL.createObjectURL(blob);
+   162→    const a = document.createElement("a");
+   163→    a.href = url;
+   164→    a.download = "material-estimate-template.csv";
+   165→    a.click();
+   166→    URL.revokeObjectURL(url);
+   167→    toast({ title: "Template downloaded", description: "Fill in ItemName, Qty, Unit, EstimateCost" });
+   168→  };
+   169→
+   170→  // Simple CSV parser — handles quoted fields with commas
+   171→  const parseCsv = (text: string): string[][] => {
+   172→    const rows: string[][] = [];
+   173→    let cur: string[] = [];
+   174→    let field = "";
+   175→    let inQuotes = false;
+   176→    for (let i = 0; i < text.length; i++) {
+   177→      const ch = text[i];
+   178→      if (inQuotes) {
+   179→        if (ch === '"' && text[i + 1] === '"') {
+   180→          field += '"';
+   181→          i++;
+   182→        } else if (ch === '"') {
+   183→          inQuotes = false;
+   184→        } else {
+   185→          field += ch;
+   186→        }
+   187→      } else {
+   188→        if (ch === '"') inQuotes = true;
+   189→        else if (ch === ",") {
+   190→          cur.push(field);
+   191→          field = "";
+   192→        } else if (ch === "\n" || ch === "\r") {
+   193→          if (ch === "\r" && text[i + 1] === "\n") i++;
+   194→          cur.push(field);
+   195→          rows.push(cur);
+   196→          cur = [];
+   197→          field = "";
+   198→        } else {
+   199→          field += ch;
+   200→        }
+   201→      }
+   202→    }
+   203→    if (field.length > 0 || cur.length > 0) {
+   204→      cur.push(field);
+   205→      rows.push(cur);
+   206→    }
+   207→    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+   208→  };
+   209→
+   210→  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   211→    const file = e.target.files?.[0];
+   212→    if (!file) return;
+   213→    if (!file.name.toLowerCase().endsWith(".csv")) {
+   214→      toast({ title: "Please upload a CSV file", variant: "destructive" });
+   215→      e.target.value = "";
+   216→      return;
+   217→    }
+   218→    try {
+   219→      const text = await file.text();
+   220→      const rows = parseCsv(text);
+   221→      if (rows.length === 0) {
+   222→        toast({ title: "CSV file is empty", variant: "destructive" });
+   223→        e.target.value = "";
+   224→        return;
+   225→      }
+   226→      const header = rows[0].map((c) => c.trim().toLowerCase());
+   227→      const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
+   228→      const idxQty = header.findIndex((h) => h.includes("qty"));
+   229→      const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
+   230→      const idxCost = header.findIndex((h) => h.includes("cost") || h.includes("price"));
+   231→      const dataRows = idxName >= 0 ? rows.slice(1) : rows;
+   232→      const parsed: EstimateRow[] = dataRows
+   233→        .map((r) => ({
+   234→          itemName: idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim(),
+   235→          qty: idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim(),
+   236→          unit: (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS",
+   237→          estimateCost: idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim(),
+   238→        }))
+   239→        .filter((r) => r.itemName);
+   240→      if (parsed.length === 0) {
+   241→        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+   242→        e.target.value = "";
+   243→        return;
+   244→      }
+   245→      setPreviewRows(parsed);
+   246→    } catch {
+   247→      toast({ title: "Failed to read CSV file", variant: "destructive" });
+   248→    }
+   249→    e.target.value = "";
+   250→  };
+   251→
+   252→  const confirmImport = () => {
+   253→    if (!previewRows) return;
+   254→    setEstimateRows(previewRows);
+   255→    toast({ title: `Imported ${previewRows.length} estimate rows` });
+   256→    setPreviewRows(null);
+   257→  };
+   258→
+   259→  const handleSaveAndProcess = async () => {
+   260→    if (!form.name || !form.voteNumber) {
+   261→      toast({ title: "Project Name and Vote Number are required", variant: "destructive" });
+   262→      return;
+   263→    }
+   264→    const validRows = estimateRows.filter((r) => r.itemName.trim());
+   265→    if (validRows.length === 0) {
+   266→      toast({ title: "Add at least one material estimate item", variant: "destructive" });
+   267→      return;
+   268→    }
+   269→    setSaving(true);
+   270→    // 1. Create project
+   271→    const projRes = await apiRequest("/api/projects", "POST", form);
+   272→    if (!projRes.ok) {
+   273→      setSaving(false);
+   274→      toast({ title: "Failed to create project", description: projRes.error, variant: "destructive" });
+   275→      return;
+   276→    }
+   277→    const project = projRes.data as { id: string };
+   278→    // 2. Export Estimate into DB
+   279→    const estRes = await apiRequest("/api/estimates", "POST", {
+   280→      projectId: project.id,
+   281→      name: `${form.name} — Material Estimate`,
+   282→      items: validRows.map((r) => ({
+   283→        itemName: r.itemName,
+   284→        qty: Number(r.qty) || 0,
+   285→        unit: r.unit,
+   286→        estimateCost: Number(r.estimateCost) || 0,
+   287→      })),
+   288→    });
+   289→    setSaving(false);
+   290→    if (estRes.ok) {
+   291→      const est = estRes.data as { id: string };
+   292→      setCreatedProjectId(project.id);
+   293→      setCreatedEstimateId(est.id);
+   294→      setStep(2);
+   295→      toast({ title: "Project & estimate saved", description: "Now process the estimate with AI (Step 2)" });
+   296→    } else {
+   297→      toast({ title: "Estimate save failed", description: estRes.error, variant: "destructive" });
+   298→    }
+   299→  };
+   300→
+   301→  const handleGoToProject = () => {
+   302→    if (createdProjectId) {
+   303→      onCreated({
+   304→        id: createdProjectId,
+   305→        name: form.name,
+   306→        voteNumber: form.voteNumber,
+   307→        voteAllocation: Number(form.voteAllocation) || 0,
+   308→        committed: Number(form.committed) || 0,
+   309→        actualSpent: Number(form.actualSpent) || 0,
+   310→        benefactor: form.benefactor || null,
+   311→        reference: form.reference || null,
+   312→        endDate: form.endDate || null,
+   313→        startDate: form.startDate || null,
+   314→        projectType: form.projectType,
+   315→        financialMean: form.financialMean,
+   316→      });
+   317→      // reset
+   318→      setStep(1);
+   319→      setCreatedProjectId(null);
+   320→      setCreatedEstimateId(null);
+   321→      setForm({
+   322→        name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
+   323→        startDate: "", endDate: "", benefactor: "", reference: "",
+   324→        projectType: "New Construction", financialMean: "Vote/Funds",
+   325→        projectOfficer: "", status: "Active", description: "",
+   326→      });
+   327→      setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+   328→      setCustomVoteNumber(false);
+   329→      setSelectedVoteId("");
+   330→    }
+   331→  };
+   332→
+   333→  if (!open) return null;
+   334→
+   335→  return (
+   336→    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+   337→      {/* Header */}
+   338→      <div className="h-14 border-b border-border bg-card flex items-center justify-between px-4 sm:px-6 shrink-0">
+   339→        <div className="flex items-center gap-3">
+   340→          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+   341→            <X className="h-5 w-5" />
+   342→          </button>
+   343→          <h2 className="font-semibold text-foreground text-sm sm:text-base">
+   344→            Add New Project — {step === 1 ? "Step 1: Details & Material Estimate" : "Step 2: Processed Estimate (AI)"}
+   345→          </h2>
+   346→        </div>
+   347→        {/* Stepper */}
+   348→        <div className="hidden sm:flex items-center gap-2 text-xs">
+   349→          <StepBadge n={1} active={step === 1} done={step > 1} label="Details + Estimate" />
+   350→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   351→          <StepBadge n={2} active={step === 2} done={false} label="AI Processing" />
+   352→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   353→          <StepBadge n={3} active={false} done={false} label="Project Window" />
+   354→        </div>
+   355→      </div>
+   356→
+   357→      <div className="flex-1 overflow-y-auto scrollbar-thin">
+   358→        {step === 1 && (
+   359→          <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
+   360→            {/* Project details */}
+   361→            <section className="bg-card border border-border rounded-xl p-5">
+   362→              <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+   363→                <ClipboardList className="h-4 w-4 text-primary" /> Project Details
+   364→              </h3>
+   365→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   366→                <div className="sm:col-span-2 space-y-1.5">
+   367→                  <Label>Project Name *</Label>
+   368→                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
+   369→                </div>
+   370→
+   371→                {/* Vote Number — conditional UI based on Financial Mean */}
+   372→                <div className="space-y-1.5">
+   373→                  <Label className="flex items-center gap-1.5">
+   374→                    <Vote className="h-3.5 w-3.5 text-primary" />
+   375→                    Vote Number *
+   376→                  </Label>
+   377→                  {isVoteFunds && !customVoteNumber ? (
+   378→                    <>
+   379→                      <Select value={selectedVoteId} onValueChange={handleVoteSelect}>
+   380→                        <SelectTrigger className="bg-background border-border">
+   381→                          <SelectValue placeholder="Select a vote from the list…" />
+   382→                        </SelectTrigger>
+   383→                        <SelectContent>
+   384→                          {votes && votes.length > 0 ? (
+   385→                            votes.map((v) => (
+   386→                              <SelectItem key={v.id} value={v.id}>
+   387→                                <span className="font-mono">{v.voteNumber}</span> — {v.description} ({v.voteType})
+   388→                              </SelectItem>
+   389→                            ))
+   390→                          ) : (
+   391→                            <SelectItem value="_none" disabled>No votes available</SelectItem>
+   392→                          )}
+   393→                        </SelectContent>
+   394→                      </Select>
+   395→                      {selectedVote ? (
+   396→                        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+   397→                          <CustomBadge className={cn("border", voteTypeColor(selectedVote.voteType))}>
+   398→                            {selectedVote.voteType}
+   399→                          </CustomBadge>
+   400→                          {selectedVote.allocation > 0 && (
+   401→                            <span className="text-[11px] text-muted-foreground">
+   402→                              Allocation: {formatCurrency(selectedVote.allocation)}
+   403→                            </span>
+   404→                          )}
+   405→                          {selectedVote.financialYear && (
+   406→                            <span className="text-[11px] text-muted-foreground">
+   407→                              · FY: {selectedVote.financialYear}
+   408→                            </span>
+   409→                          )}
+   410→                          {!selectedVote.active && (
+   411→                            <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">Inactive</CustomBadge>
+   412→                          )}
+   413→                        </div>
+   414→                      ) : (
+   415→                        <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+   416→                          <Info className="h-3 w-3 mt-0.5 shrink-0" />
+   417→                          Capital votes fund one-time construction. Recurring votes fund annual maintenance.
+   418→                        </p>
+   419→                      )}
+   420→                      <button
+   421→                        type="button"
+   422→                        onClick={() => {
+   423→                          setCustomVoteNumber(true);
+   424→                          setSelectedVoteId("");
+   425→                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+   426→                        }}
+   427→                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+   428→                      >
+   429→                        <Pencil className="h-3 w-3" /> Enter custom vote number
+   430→                      </button>
+   431→                    </>
+   432→                  ) : isVoteFunds && customVoteNumber ? (
+   433→                    <>
+   434→                      <Input
+   435→                        value={form.voteNumber}
+   436→                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+   437→                        placeholder="e.g. 223-1-01-2104"
+   438→                        className="bg-background border-border"
+   439→                      />
+   440→                      <button
+   441→                        type="button"
+   442→                        onClick={() => {
+   443→                          setCustomVoteNumber(false);
+   444→                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+   445→                        }}
+   446→                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+   447→                      >
+   448→                        <ChevronLeft className="h-3 w-3" /> Back to vote list
+   449→                      </button>
+   450→                    </>
+   451→                  ) : (
+   452→                    <>
+   453→                      <Input
+   454→                        value={form.voteNumber}
+   455→                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+   456→                        placeholder={nonVotePlaceholder}
+   457→                        className="bg-background border-border"
+   458→                      />
+   459→                      <p className="text-[11px] text-amber-400 flex items-start gap-1">
+   460→                        <Landmark className="h-3 w-3 mt-0.5 shrink-0" />
+   461→                        {nonVoteHint}
+   462→                      </p>
+   463→                    </>
+   464→                  )}
+   465→                </div>
+   466→
+   467→                {/* Project Type */}
+   468→                <div className="space-y-1.5">
+   469→                  <Label>Project Type *</Label>
+   470→                  <Select value={form.projectType} onValueChange={(v) => setForm({ ...form, projectType: v })}>
+   471→                    <SelectTrigger className="bg-background border-border">
+   472→                      <SelectValue />
+   473→                    </SelectTrigger>
+   474→                    <SelectContent>
+   475→                      {PROJECT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   476→                    </SelectContent>
+   477→                  </Select>
+   478→                  {form.projectType && (
+   479→                    <div className="pt-0.5">
+   480→                      <CustomBadge className={cn("border", projectTypeColor(form.projectType))}>
+   481→                        {form.projectType}
+   482→                      </CustomBadge>
+   483→                    </div>
+   484→                  )}
+   485→                </div>
+   486→
+   487→                {/* Financial Mean */}
+   488→                <div className="space-y-1.5">
+   489→                  <Label>Financial Mean *</Label>
+   490→                  <Select value={form.financialMean} onValueChange={handleFinancialMeanChange}>
+   491→                    <SelectTrigger className="bg-background border-border">
+   492→                      <SelectValue />
+   493→                    </SelectTrigger>
+   494→                    <SelectContent>
+   495→                      {FINANCIAL_MEANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+   496→                    </SelectContent>
+   497→                  </Select>
+   498→                  {form.financialMean && (
+   499→                    <div className="pt-0.5">
+   500→                      <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
+   501→                        {form.financialMean}
+   502→                      </CustomBadge>
+   503→                    </div>
+   504→                  )}
+   505→                </div>
+   506→
+   507→                {/* Reference — manual text entry (how vote allocated) */}
+   508→                <div className="space-y-1.5">
+   509→                  <Label>Reference (how vote allocated)</Label>
+   510→                  <Input
+   511→                    value={form.reference}
+   512→                    onChange={(e) => setForm({ ...form, reference: e.target.value })}
+   513→                    placeholder="e.g. Vote 2104 - Allocation 2025"
+   514→                    className="bg-background border-border"
+   515→                  />
+   516→                </div>
+   517→
+   518→                <div className="space-y-1.5">
+   519→                  <Label>Vote Allocation (Rs.)</Label>
+   520→                  <Input type="number" value={form.voteAllocation} onChange={(e) => setForm({ ...form, voteAllocation: e.target.value })} placeholder="0" className="bg-background border-border" />
+   521→                </div>
+   522→                <div className="space-y-1.5">
+   523→                  <Label>Benefactor</Label>
+   524→                  <Input value={form.benefactor} onChange={(e) => setForm({ ...form, benefactor: e.target.value })} placeholder="e.g. Engineering Dept" className="bg-background border-border" />
+   525→                </div>
+   526→                <div className="space-y-1.5">
+   527→                  <Label>Start Date</Label>
+   528→                  <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="bg-background border-border" />
+   529→                </div>
+   530→                <div className="space-y-1.5">
+   531→                  <Label>EDC (Estimated Date of Completion)</Label>
+   532→                  <Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="bg-background border-border" />
+   533→                </div>
+   534→                <div className="space-y-1.5">
+   535→                  <Label>Project Officer</Label>
+   536→                  <Input value={form.projectOfficer} onChange={(e) => setForm({ ...form, projectOfficer: e.target.value })} placeholder="e.g. Cdr. R. Perera" className="bg-background border-border" />
+   537→                </div>
+   538→                <div className="space-y-1.5">
+   539→                  <Label>Status</Label>
+   540→                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+   541→                    <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   542→                    <SelectContent>
+   543→                      {PROJECT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   544→                    </SelectContent>
+   545→                  </Select>
+   546→                </div>
+   547→                <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
+   548→                  <Label>Description</Label>
+   549→                  <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Brief description..." className="bg-background border-border" />
+   550→                </div>
+   551→              </div>
+   552→            </section>
+   553→
+   554→            {/* Material Estimate — MANDATORY */}
+   555→            <section className="bg-card border border-border rounded-xl p-5">
+   556→              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+   557→                <div className="min-w-0">
+   558→                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   559→                    <FileSpreadsheet className="h-4 w-4 text-primary" />
+   560→                    Material Estimate
+   561→                    <span className="text-[11px] font-normal text-amber-400 flex items-center gap-1">
+   562→                      <AlertCircle className="h-3 w-3" />
+   563→                      Mandatory — required to create project material list
+   564→                    </span>
+   565→                  </h3>
+   566→                </div>
+   567→                <div className="flex items-center gap-2 flex-wrap">
+   568→                  <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+   569→                    <Download className="h-4 w-4" /> Download Template
+   570→                  </Button>
+   571→                  <Button
+   572→                    onClick={() => fileInputRef.current?.click()}
+   573→                    size="sm"
+   574→                    variant="outline"
+   575→                    className="gap-1.5"
+   576→                  >
+   577→                    <Upload className="h-4 w-4" /> Upload Estimate
+   578→                  </Button>
+   579→                  <input
+   580→                    ref={fileInputRef}
+   581→                    type="file"
+   582→                    accept=".csv"
+   583→                    className="hidden"
+   584→                    onChange={handleFileUpload}
+   585→                  />
+   586→                  <Button onClick={addRow} size="sm" variant="outline" className="gap-1.5">
+   587→                    <Plus className="h-4 w-4" /> Add Row
+   588→                  </Button>
+   589→                </div>
+   590→              </div>
+   591→
+   592→              <div className="border border-border rounded-lg overflow-hidden">
+   593→                <div className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   594→                  <span>Item Name</span>
+   595→                  <span className="text-right">Qty</span>
+   596→                  <span>Deno</span>
+   597→                  <span className="text-right">Est. Cost (Rs.)</span>
+   598→                  <span></span>
+   599→                </div>
+   600→                <div className="divide-y divide-border">
+   601→                  {estimateRows.map((row, idx) => (
+   602→                    <div key={idx} className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 items-center">
+   603→                      <Input value={row.itemName} onChange={(e) => updateRow(idx, "itemName", e.target.value)} placeholder="e.g. Centrifugal Pump 15kW" className="bg-background border-border h-8 text-sm" />
+   604→                      <Input type="number" value={row.qty} onChange={(e) => updateRow(idx, "qty", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   605→                      <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
+   606→                        <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
+   607→                        <SelectContent>
+   608→                          {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+   609→                        </SelectContent>
+   610→                      </Select>
+   611→                      <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   612→                      <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
+   613→                        <Trash2 className="h-4 w-4" />
+   614→                      </button>
+   615→                    </div>
+   616→                  ))}
+   617→                </div>
+   618→              </div>
+   619→              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+   620→                <Info className="h-3 w-3" />
+   621→                Tip: Estimate cost is per-unit. After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+   622→                {!hasValidEstimate && (
+   623→                  <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
+   624→                )}
+   625→              </p>
+   626→            </section>
+   627→
+   628→            {/* Actions */}
+   629→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   630→              <Button variant="outline" onClick={onClose}>Cancel</Button>
+   631→              <div className="flex items-center gap-2">
+   632→                {!hasValidEstimate && (
+   633→                  <span className="text-xs text-amber-400 hidden sm:flex items-center gap-1">
+   634→                    <AlertCircle className="h-3.5 w-3.5" />
+   635→                    Add estimate items to continue
+   636→                  </span>
+   637→                )}
+   638→                <Button
+   639→                  onClick={handleSaveAndProcess}
+   640→                  disabled={saving || !hasValidEstimate}
+   641→                  className="gap-1.5"
+   642→                  title={!hasValidEstimate ? "Add at least one estimate item with item name + qty/cost" : undefined}
+   643→                >
+   644→                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   645→                  Export Estimate &amp; Process (Step 2)
+   646→                </Button>
+   647→              </div>
+   648→            </div>
+   649→          </div>
+   650→        )}
+   651→
+   652→        {step === 2 && createdEstimateId && (
+   653→          <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
+   654→            <div className="bg-card border border-border rounded-xl p-5">
+   655→              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+   656→                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   657→                  <Sparkles className="h-4 w-4 text-primary" /> Processed Estimate — AI Matched Items
+   658→                </h3>
+   659→                <p className="text-xs text-muted-foreground">
+   660→                  Review matched items, then &quot;Initiate File&quot; to raise PRs. Initiated files forward to the Project Window.
+   661→                </p>
+   662→              </div>
+   663→              <EstimateItemsTable
+   664→                estimateId={createdEstimateId}
+   665→                showProcessButton
+   666→              />
+   667→            </div>
+   668→
+   669→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   670→              <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5">
+   671→                <ArrowLeft className="h-4 w-4" /> Back to Details
+   672→              </Button>
+   673→              <Button onClick={handleGoToProject} className="gap-1.5">
+   674→                Go to Project Window (Step 3) <ArrowRight className="h-4 w-4" />
+   675→              </Button>
+   676→            </div>
+   677→          </div>
+   678→        )}
+   679→      </div>
+   680→
+   681→      {/* CSV Import Preview Dialog */}
+   682→      <Dialog open={!!previewRows} onOpenChange={(o) => !o && setPreviewRows(null)}>
+   683→        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   684→          <DialogHeader>
+   685→            <DialogTitle className="text-foreground flex items-center gap-2">
+   686→              <Upload className="h-5 w-5 text-primary" />
+   687→              Preview Imported Estimate ({previewRows?.length || 0} rows)
+   688→            </DialogTitle>
+   689→          </DialogHeader>
+   690→          <p className="text-xs text-muted-foreground -mt-1">
+   691→            Review the parsed CSV rows below. Confirming will <span className="font-medium text-foreground">replace</span> the current estimate rows.
+   692→          </p>
+   693→          {previewRows && previewRows.length > 0 && (
+   694→            <div className="border border-border rounded-lg overflow-hidden">
+   695→              <div className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   696→                <span>Item Name</span>
+   697→                <span className="text-right">Qty</span>
+   698→                <span>Unit</span>
+   699→                <span className="text-right">Est. Cost</span>
+   700→              </div>
+   701→              <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
+   702→                {previewRows.map((r, i) => (
+   703→                  <div key={i} className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-1.5 text-sm items-center">
+   704→                    <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
+   705→                    <span className="text-right">{r.qty || "—"}</span>
+   706→                    <span className="text-xs">{r.unit || "NOS"}</span>
+   707→                    <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+   708→                  </div>
+   709→                ))}
+   710→              </div>
+   711→            </div>
+   712→          )}
+   713→          <DialogFooter>
+   714→            <Button variant="outline" onClick={() => setPreviewRows(null)}>Cancel</Button>
+   715→            <Button onClick={confirmImport} disabled={!previewRows || previewRows.length === 0} className="gap-1.5">
+   716→              <Check className="h-4 w-4" /> Confirm Import ({previewRows?.length || 0} rows)
+   717→            </Button>
+   718→          </DialogFooter>
+   719→        </DialogContent>
+   720→      </Dialog>
+   721→    </div>
+   722→  );
+   723→}
+   724→
+   725→function StepBadge({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
+   726→  return (
+   727→    <div className={cn(
+   728→      "flex items-center gap-1.5 px-2.5 py-1 rounded-md",
+   729→      active ? "bg-primary text-primary-foreground" : done ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary text-muted-foreground"
+   730→    )}>
+   731→      <span className={cn(
+   732→        "h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold",
+   733→        active ? "bg-primary-foreground text-primary" : done ? "bg-emerald-500 text-white" : "bg-muted-foreground/30"
+   734→      )}>
+   735→        {done ? <Check className="h-2.5 w-2.5" /> : n}
+   736→      </span>
+   737→      <span className="font-medium">{label}</span>
+   738→    </div>
+   739→  );
+   740→}
+   741→

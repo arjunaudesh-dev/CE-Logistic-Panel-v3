@@ -30,16 +30,48 @@ export async function POST(req: NextRequest) {
           category: b.category || null,
         })),
       });
-      // also update stakeholders seniority where name matches
+      // also update stakeholders (seniority / category / department) where name matches
       for (const r of body) {
-        if (r.name && r.seniority != null) {
-          await db.stakeholder
-            .updateMany({
-              where: { name: r.name },
-              data: { seniority: Number(r.seniority) },
-            })
-            .catch(() => {});
+        if (!r.name) continue;
+        const data: Record<string, unknown> = {};
+        if (r.seniority != null && !isNaN(Number(r.seniority))) {
+          data.seniority = Number(r.seniority);
         }
+        if (r.category) {
+          data.category = r.category;
+        }
+        if (r.department) {
+          data.department = r.department;
+        }
+        // For sailors, infer the area-store location from the appointment
+        // (best-effort hint — falls back to "General" when nothing matches).
+        if (
+          r.category &&
+          (r.category === "CCED Sailor" || r.category === "CSLOG Sailor") &&
+          r.appointment
+        ) {
+          const appt = String(r.appointment).toLowerCase();
+          if (appt.includes("bms") || appt.includes("plumb")) {
+            data.areaStoreLocation = "BMS";
+          } else if (appt.includes("metal") || appt.includes("alum")) {
+            data.areaStoreLocation = "Metal";
+          } else if (appt.includes("paint")) {
+            data.areaStoreLocation = "Paint";
+          } else if (appt.includes("oil") || appt.includes("lub")) {
+            data.areaStoreLocation = "Oil & Lubricant";
+          } else if (appt.includes("station")) {
+            data.areaStoreLocation = "Stationary";
+          } else {
+            data.areaStoreLocation = "General";
+          }
+        }
+        if (Object.keys(data).length === 0) continue;
+        await db.stakeholder
+          .updateMany({
+            where: { name: r.name },
+            data,
+          })
+          .catch(() => {});
       }
       return NextResponse.json(created, { status: 201 });
     }
@@ -54,6 +86,20 @@ export async function POST(req: NextRequest) {
         category: body.category || null,
       },
     });
+    // single-object path: also update stakeholder if name matches
+    if (body.name) {
+      const data: Record<string, unknown> = {};
+      if (body.seniority != null && !isNaN(Number(body.seniority))) {
+        data.seniority = Number(body.seniority);
+      }
+      if (body.category) data.category = body.category;
+      if (body.department) data.department = body.department;
+      if (Object.keys(data).length > 0) {
+        await db.stakeholder
+          .updateMany({ where: { name: body.name }, data })
+          .catch(() => {});
+      }
+    }
     return NextResponse.json(record, { status: 201 });
   } catch (e) {
     console.error(e);

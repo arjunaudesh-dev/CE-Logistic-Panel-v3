@@ -19,6 +19,8 @@ import {
   Coins,
   Trophy,
   FileBarChart,
+  PieChart as PieChartIcon,
+  Gauge,
 } from "lucide-react";
 import {
   BarChart,
@@ -55,6 +57,18 @@ interface TopProject {
   status: string;
 }
 
+interface Project {
+  id: string;
+  name: string;
+  voteNumber: string;
+  voteAllocation: number;
+  committed: number;
+  actualSpent: number;
+  utilization?: number;
+  status: string;
+  projectType?: string | null;
+}
+
 interface Stats {
   projects: { total: number; active: number; voteAllocation: number; committed: number; actualSpent: number; balance: number };
   procurement: { total: number; pendingCollection: number };
@@ -65,10 +79,31 @@ interface Stats {
 }
 
 const PIE_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#64748b"];
+const DONUT_COLORS = [
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#ef4444",
+  "#14b8a6",
+  "#a855f7",
+  "#f97316",
+  "#84cc16",
+  "#64748b",
+];
+const UTILIZATION_COLORS: Record<string, string> = {
+  "Under 50%": "#22c55e",
+  "50-70%": "#3b82f6",
+  "70-90%": "#f59e0b",
+  "Over 90%": "#ef4444",
+};
 
 export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void }) {
   const { data: stats, loading, error } = useFetch<Stats>("/api/stats");
   const { data: procurement } = useFetch<{ presentPosition: string }[]>("/api/procurement");
+  const { data: allProjects } = useFetch<Project[]>("/api/projects");
   // toggle for infographics: "value" shows currency, "percent" shows utilization %
   const [viewMode, setViewMode] = useState<"value" | "percent">("value");
 
@@ -91,6 +126,38 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
     posCounts[f.presentPosition] = (posCounts[f.presentPosition] || 0) + 1;
   });
   const posChart = Object.entries(posCounts).map(([name, value]) => ({ name, value }));
+
+  // ── Donut 1: Project Allocation Distribution ──
+  // Each project's voteAllocation is one slice; center shows the total allocation.
+  const allocationDonut = (allProjects ?? topProjects)
+    .filter((p) => (p.voteAllocation ?? 0) > 0)
+    .map((p) => ({
+      name:
+        p.name.length > 22 ? p.name.slice(0, 20) + "…" : p.name,
+      value: Math.round((p.voteAllocation ?? 0) / 1000000), // Rs. Millions
+      raw: p.voteAllocation ?? 0,
+    }));
+  const totalAllocationM =
+    allocationDonut.reduce((s, d) => s + d.value, 0);
+
+  // ── Donut 2: Project Utilization buckets ──
+  const utilBuckets = [
+    { name: "Under 50%", min: 0, max: 50 },
+    { name: "50-70%", min: 50, max: 70 },
+    { name: "70-90%", min: 70, max: 90 },
+    { name: "Over 90%", min: 90, max: Infinity },
+  ];
+  const utilBucketData = utilBuckets.map((b) => ({
+    name: b.name,
+    value: (allProjects ?? topProjects).filter((p) => {
+      const u = p.utilization ?? 0;
+      return u >= b.min && u < b.max;
+    }).length,
+  }));
+  const totalProjectsCounted = utilBucketData.reduce(
+    (s, d) => s + d.value,
+    0
+  );
 
   return (
     <div>
@@ -271,6 +338,157 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
             </div>
           </>
         )}
+      </div>
+
+      {/* Project Allocation Distribution + Utilization donuts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        {/* Donut 1 — Project Allocation Distribution */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+            <PieChartIcon className="h-4 w-4 text-primary" />
+            Project Allocation Distribution
+          </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Each project&apos;s vote allocation share (Rs. Millions)
+          </p>
+          {allocationDonut.length > 0 ? (
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={260}>
+                <PieChart>
+                  <Pie
+                    data={allocationDonut}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={3}
+                  >
+                    {allocationDonut.map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={DONUT_COLORS[i % DONUT_COLORS.length]}
+                        stroke="var(--background, #0f1420)"
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--card, #1a1f2e)",
+                      border: "1px solid var(--border, #2d3548)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(value: number, _name, entry) => [
+                      `Rs. ${value}M (${formatCurrency(
+                        (entry?.payload?.raw as number) ?? 0
+                      )})`,
+                      entry?.payload?.name as string,
+                    ]}
+                  />
+                  <Legend
+                    layout="vertical"
+                    align="right"
+                    verticalAlign="middle"
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: 10, lineHeight: "16px" }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Center label — total allocation */}
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Total
+                </span>
+                <span className="text-lg font-bold text-foreground leading-tight">
+                  Rs. {formatNumber(totalAllocationM)}M
+                </span>
+                <span className="text-[10px] text-muted-foreground mt-0.5">
+                  {allocationDonut.length} projects
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-10 text-center">
+              No project allocation data
+            </p>
+          )}
+        </div>
+
+        {/* Donut 2 — Project Utilization */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+            <Gauge className="h-4 w-4 text-primary" />
+            Project Utilization
+          </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Distribution of projects by utilization bucket
+          </p>
+          {totalProjectsCounted > 0 ? (
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={260}>
+                <PieChart>
+                  <Pie
+                    data={utilBucketData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={3}
+                  >
+                    {utilBucketData.map((entry) => (
+                      <Cell
+                        key={entry.name}
+                        fill={UTILIZATION_COLORS[entry.name] ?? "#64748b"}
+                        stroke="var(--background, #0f1420)"
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--card, #1a1f2e)",
+                      border: "1px solid var(--border, #2d3548)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(value: number, name: string) => [
+                      `${value} project${value === 1 ? "" : "s"}`,
+                      name,
+                    ]}
+                  />
+                  <Legend
+                    layout="vertical"
+                    align="right"
+                    verticalAlign="middle"
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: 11, lineHeight: "18px" }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Center label — total projects counted */}
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Total
+                </span>
+                <span className="text-lg font-bold text-foreground leading-tight">
+                  {totalProjectsCounted}
+                </span>
+                <span className="text-[10px] text-muted-foreground mt-0.5">
+                  projects tracked
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-10 text-center">
+              No utilization data
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Secondary charts */}

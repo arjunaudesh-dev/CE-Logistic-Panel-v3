@@ -98,6 +98,7 @@ import {
   Download,
   FileUp,
   Ship,
+  Sparkles,
 } from "lucide-react";
 import {
   BarChart,
@@ -385,6 +386,74 @@ const NAVY_LIST_CSV_COLUMNS = [
   "Category",
 ] as const;
 
+/**
+ * Auto-identify a stakeholder category from the appointment + rank fields
+ * (used when the imported CSV leaves the Category column blank).
+ *
+ * Rules (per task spec):
+ *   CCED(E), CCEO(E), SCE(M), SCE(P&P)  → "CCED Officer"
+ *   CSLOG, CLOGD, ASO(E)                → "CSLOG Officer"
+ *   APO(E), AAPO(PT)                    → "CSLOG Sailor" (if rank suggests sailor)
+ *                                        else "CSLOG Officer"
+ *   Rank contains "Petty Officer", "Leading", "Able", "Ordinary" → Sailor variant
+ *   Otherwise                           → Officer variant of the inferred dept
+ *
+ * Returns null when nothing can be inferred (caller keeps the existing value).
+ */
+function autoIdentifyCategory(
+  appointment: string | null,
+  rank: string | null,
+  fallbackDept: string | null
+): string | null {
+  const appt = (appointment ?? "").trim().toUpperCase();
+  const rankLower = (rank ?? "").trim().toLowerCase();
+  const isSailorByRank =
+    /\b(petty officer|leading|able|ordinary)\b/.test(rankLower) ||
+    rankLower.includes("petty") ||
+    rankLower.includes("leading seaman") ||
+    rankLower.includes("able seaman") ||
+    rankLower.includes("ord seaman");
+
+  if (["CCED(E)", "CCEO(E)", "SCE(M)", "SCE(P&P)"].includes(appt)) {
+    return isSailorByRank ? "CCED Sailor" : "CCED Officer";
+  }
+  if (["CSLOG", "CLOGD", "ASO(E)"].includes(appt)) {
+    return isSailorByRank ? "CSLOG Sailor" : "CSLOG Officer";
+  }
+  if (["APO(E)", "AAPO(PT)"].includes(appt)) {
+    return isSailorByRank ? "CSLOG Sailor" : "CSLOG Officer";
+  }
+  // Fallback: derive from department (if known) + rank
+  if (fallbackDept) {
+    const dept = fallbackDept.toUpperCase();
+    if (dept === "CE") return isSailorByRank ? "CCED Sailor" : "CCED Officer";
+    if (dept === "CSLOG") return isSailorByRank ? "CSLOG Sailor" : "CSLOG Officer";
+  }
+  // Last-resort: only rank is known
+  if (isSailorByRank) return "CSLOG Sailor";
+  if (appt) return "Officer-in-Area";
+  return null;
+}
+
+/**
+ * Auto-identify the department from the appointment.
+ *   CE     for CCED(E)/CCEO(E)/SCE(M)/SCE(P&P) appointments
+ *   CSLOG  for CSLOG/CLOGD/ASO(E)/APO(E)/AAPO(PT) appointments
+ * Returns null when nothing can be inferred.
+ */
+function autoIdentifyDepartment(appointment: string | null): string | null {
+  const appt = (appointment ?? "").trim().toUpperCase();
+  if (["CCED(E)", "CCEO(E)", "SCE(M)", "SCE(P&P)", "AOE", "SO(CE)"].includes(appt)) {
+    return "CE";
+  }
+  if (
+    ["CSLOG", "CLOGD", "ASO(E)", "APO(E)", "AAPO(PT)", "LOGO", "SO(LOG)"].includes(appt)
+  ) {
+    return "CSLOG";
+  }
+  return null;
+}
+
 /** Build a downloadable CSV template for Navy List import. */
 function buildNavyListTemplate(): string {
   const sampleRows: Record<string, string>[] = [
@@ -405,6 +474,27 @@ function buildNavyListTemplate(): string {
       Seniority: "4",
       Department: "CE",
       Category: "Officer-in-Area",
+    },
+    // Sample row that leaves Department + Category blank — they will be
+    // auto-identified from the Appointment ("CCED(E)") + Rank.
+    {
+      Name: "Lt. Cdr. K. Silva",
+      Rank: "Lieutenant Commander",
+      SVCNumber: "SVC/1077",
+      Appointment: "CCED(E)",
+      Seniority: "7",
+      Department: "",
+      Category: "",
+    },
+    // Sample sailor row — Rank contains "Petty Officer" → Sailor category
+    {
+      Name: "PO S. Bandara",
+      Rank: "Petty Officer",
+      SVCNumber: "SVC/2204",
+      Appointment: "ASO(E)",
+      Seniority: "12",
+      Department: "",
+      Category: "",
     },
   ];
   return toCSV(sampleRows, [...NAVY_LIST_CSV_COLUMNS]);
@@ -3393,6 +3483,9 @@ interface ParsedNavyRecord {
   seniority: number;
   department: string | null;
   category: string | null;
+  // Track whether category / department were auto-identified (for UI highlighting)
+  categoryAutoFilled: boolean;
+  departmentAutoFilled: boolean;
 }
 
 function NavyListSection({
@@ -3472,12 +3565,13 @@ function NavyListSection({
           </div>
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">
-              Navy List (Officer Seniority)
+              Navy List (Officer & Sailor Directory)
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Upload the Navy List to define officer seniority. Officers will be
-              sorted by seniority (lower number = more senior) in each officer
-              section.
+              Upload the Navy List to define seniority and identify each
+              person&apos;s place (Department &amp; Category) — auto-identified
+              from Appointment &amp; Rank when blank. Officers are sorted by
+              seniority (lower number = more senior) in each section.
             </p>
           </div>
         </div>
@@ -3656,28 +3750,57 @@ function UploadNavyListDialog({
           const seniorityRaw =
             colIdx.Seniority != null ? (row[colIdx.Seniority] ?? "").trim() : "";
           const seniorityNum = seniorityRaw ? Number(seniorityRaw) : NaN;
+          const rank =
+            colIdx.Rank != null ? (row[colIdx.Rank] ?? "").trim() || null : null;
+          const appointment =
+            colIdx.Appointment != null
+              ? (row[colIdx.Appointment] ?? "").trim() || null
+              : null;
+          const rawDepartment =
+            colIdx.Department != null
+              ? (row[colIdx.Department] ?? "").trim() || null
+              : null;
+          const rawCategory =
+            colIdx.Category != null
+              ? (row[colIdx.Category] ?? "").trim() || null
+              : null;
+
+          // Auto-identify department when blank
+          let department = rawDepartment;
+          let departmentAutoFilled = false;
+          if (!department) {
+            const inferred = autoIdentifyDepartment(appointment);
+            if (inferred) {
+              department = inferred;
+              departmentAutoFilled = true;
+            }
+          }
+
+          // Auto-identify category when blank
+          let category = rawCategory;
+          let categoryAutoFilled = false;
+          if (!category) {
+            const inferred = autoIdentifyCategory(appointment, rank, department);
+            if (inferred) {
+              category = inferred;
+              categoryAutoFilled = true;
+            }
+          }
+
           records.push({
             name,
-            rank:
-              colIdx.Rank != null ? (row[colIdx.Rank] ?? "").trim() || null : null,
+            rank,
             svcNumber:
               colIdx.SVCNumber != null
                 ? (row[colIdx.SVCNumber] ?? "").trim() || null
                 : null,
-            appointment:
-              colIdx.Appointment != null
-                ? (row[colIdx.Appointment] ?? "").trim() || null
-                : null,
+            appointment,
             seniority:
               !isNaN(seniorityNum) && seniorityNum > 0 ? seniorityNum : 999,
-            department:
-              colIdx.Department != null
-                ? (row[colIdx.Department] ?? "").trim() || null
-                : null,
-            category:
-              colIdx.Category != null
-                ? (row[colIdx.Category] ?? "").trim() || null
-                : null,
+            department,
+            category,
+            categoryAutoFilled,
+            departmentAutoFilled,
           });
         }
         if (records.length === 0) {
@@ -3740,10 +3863,16 @@ function UploadNavyListDialog({
     }
     setProgress(100);
     setImporting(false);
+    const autoCatCount = parsed.filter((r) => r.categoryAutoFilled).length;
+    const autoDeptCount = parsed.filter((r) => r.departmentAutoFilled).length;
     toast({
       title: "Navy List imported",
       description: `Imported ${parsed.length} records, updated ${matchedStakeholderCount} stakeholder seniorit${
         matchedStakeholderCount === 1 ? "y" : "ies"
+      }${
+        autoCatCount + autoDeptCount > 0
+          ? ` · auto-identified ${autoCatCount} categor${autoCatCount === 1 ? "y" : "ies"} & ${autoDeptCount} department${autoDeptCount === 1 ? "" : "s"}`
+          : ""
       }.`,
     });
     onImported();
@@ -3763,9 +3892,12 @@ function UploadNavyListDialog({
             Upload Navy List
           </DialogTitle>
           <DialogDescription>
-            Bulk-import officer seniority records. The CSV must include at least
-            a &quot;Name&quot; column. Importing replaces the entire Navy List
-            and auto-updates stakeholder seniority where names match.
+            Bulk-import officer & sailor records. The CSV must include at least a
+            &quot;Name&quot; column. When Department / Category columns are blank,
+            they are <span className="text-foreground font-medium">auto-identified</span>{" "}
+            from the Appointment (and Rank). Importing replaces the entire Navy
+            List and updates matching stakeholders&apos; seniority, category &
+            department.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -3830,10 +3962,18 @@ function UploadNavyListDialog({
           {/* Preview table */}
           {parsed.length > 0 && !importing && (
             <div className="rounded-lg border border-border overflow-hidden">
-              <div className="bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
+              <div className="bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between flex-wrap gap-2">
                 <span>Preview ({parsed.length} records)</span>
-                <span className="text-[10px] uppercase tracking-wide">
-                  sorted by seniority
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide">
+                  <span className="flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                    auto-identified
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                    matches stakeholder
+                  </span>
+                  <span>sorted by seniority</span>
                 </span>
               </div>
               <div className="max-h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
@@ -3888,11 +4028,51 @@ function UploadNavyListDialog({
                               </CustomBadge>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {r.department || "—"}
+                          <TableCell className="text-xs">
+                            {r.department ? (
+                              <span
+                                className={
+                                  r.departmentAutoFilled
+                                    ? "inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-500 dark:text-amber-400"
+                                    : "text-muted-foreground"
+                                }
+                                title={
+                                  r.departmentAutoFilled
+                                    ? "Auto-identified from appointment"
+                                    : undefined
+                                }
+                              >
+                                {r.departmentAutoFilled && (
+                                  <Sparkles className="h-3 w-3" />
+                                )}
+                                {r.department}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {r.category || "—"}
+                          <TableCell className="text-xs">
+                            {r.category ? (
+                              <span
+                                className={
+                                  r.categoryAutoFilled
+                                    ? "inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-500 dark:text-amber-400"
+                                    : "text-muted-foreground"
+                                }
+                                title={
+                                  r.categoryAutoFilled
+                                    ? "Auto-identified from appointment & rank"
+                                    : undefined
+                                }
+                              >
+                                {r.categoryAutoFilled && (
+                                  <Sparkles className="h-3 w-3" />
+                                )}
+                                {r.category}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       );

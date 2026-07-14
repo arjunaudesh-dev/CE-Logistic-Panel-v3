@@ -51,6 +51,7 @@ model ProjectFile {
   presentPosition String   @default("PR Raised") // see PRESENT_POSITIONS
   fileCategory    String   @default("General")
   fileNumber      String?  // file number received after initial RL raising
+  fileGroupKey    String?  // grouping key for multiple items under a single file (usually = prNumber or fileNumber)
   createdBy       String?  // sailor name who created
   authorizedBy    String?  // officer name who authorized
   responsiblePerson String? // default responsible person for current position
@@ -367,19 +368,26 @@ model StoreItem {
 // ───────────────────────── MODULE 5: RATE FINDER ─────────────────────────
 model RateContract {
   id          String   @id @default(cuid())
+  rateCode    String?  // RC rate code (from CSV "Rate code")
   itemCode    String
   description String
   unit        String
   rcPrice     Float    @default(0)
-  supplier    String?
+  vat         Float    @default(0)  // VAT percentage or amount
+  warranty    String?  // warranty if available
+  brand       String?
+  makeModel   String?
+  category    String   @default("General")  // "Category (what says in topic)"
+  subCategory String?  // "Sub category (what says in table)"
+  supplier    String?  // RC supplier
   rcYear      String
   validFrom   String?
-  validUntil  String?
-  category    String   @default("General")
+  validUntil  String?  // validity up to
   uploadedAt  DateTime @default(now())
 
   @@index([rcYear])
   @@index([category])
+  @@index([rateCode])
 }
 
 model DiscontinuedItem {

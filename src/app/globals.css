@@ -43,42 +43,43 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* CE Logistic Panel — Dark ERP theme (always dark) */
+/* ─── LIGHT THEME (default) ─── */
 :root {
   --radius: 0.625rem;
-  --background: #0f1420;
-  --foreground: #f1f5f9;
-  --card: #1a1f2e;
-  --card-foreground: #f1f5f9;
-  --popover: #1a1f2e;
-  --popover-foreground: #f1f5f9;
-  --primary: #3b82f6;
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #2563eb;
   --primary-foreground: #ffffff;
-  --secondary: #151a28;
-  --secondary-foreground: #e2e8f0;
-  --muted: #151a28;
-  --muted-foreground: #94a3b8;
-  --accent: #2d3548;
-  --accent-foreground: #f1f5f9;
-  --destructive: #ef4444;
-  --border: #2d3548;
-  --input: #2d3548;
-  --ring: #3b82f6;
-  --chart-1: #3b82f6;
-  --chart-2: #22c55e;
-  --chart-3: #f59e0b;
-  --chart-4: #8b5cf6;
-  --chart-5: #ec4899;
-  --sidebar: #151a28;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-primary: #3b82f6;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1e293b;
+  --muted: #e2e8f0;
+  --muted-foreground: #64748b;
+  --accent: #e0e7ff;
+  --accent-foreground: #1e293b;
+  --destructive: #dc2626;
+  --border: #cbd5e1;
+  --input: #cbd5e1;
+  --ring: #2563eb;
+  --chart-1: #2563eb;
+  --chart-2: #16a34a;
+  --chart-3: #d97706;
+  --chart-4: #7c3aed;
+  --chart-5: #db2777;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1e293b;
+  --sidebar-primary: #2563eb;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #2d3548;
-  --sidebar-accent-foreground: #f1f5f9;
-  --sidebar-border: #2d3548;
-  --sidebar-ring: #3b82f6;
+  --sidebar-accent: #e0e7ff;
+  --sidebar-accent-foreground: #1e293b;
+  --sidebar-border: #cbd5e1;
+  --sidebar-ring: #2563eb;
 }
 
+/* ─── DARK THEME ─── */
 .dark {
   --background: #0f1420;
   --foreground: #f1f5f9;
@@ -119,15 +120,14 @@
   }
   body {
     @apply bg-background text-foreground;
-    color-scheme: dark;
   }
 }
 
-/* Custom scrollbars for dark theme */
+/* Custom scrollbars */
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #2d3548 transparent;
+    scrollbar-color: var(--border) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 8px;
@@ -137,14 +137,26 @@
     background: transparent;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: #2d3548;
+    background-color: var(--border);
     border-radius: 4px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: #3b82f6;
+    background-color: var(--primary);
   }
   .glass {
-    background: rgba(26, 31, 46, 0.85);
+    background: color-mix(in srgb, var(--card) 85%, transparent);
     backdrop-filter: blur(12px);
+  }
+  .gradient-primary {
+    background: linear-gradient(135deg, var(--primary), var(--chart-4));
+  }
+  .gradient-success {
+    background: linear-gradient(135deg, var(--chart-2), #14b8a6);
+  }
+  .gradient-warning {
+    background: linear-gradient(135deg, var(--chart-3), #f97316);
+  }
+  .gradient-danger {
+    background: linear-gradient(135deg, var(--destructive), var(--chart-5));
   }
 }
