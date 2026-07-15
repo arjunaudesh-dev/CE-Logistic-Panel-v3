@@ -19,6 +19,20 @@ export async function PUT(
     const newPosition = body.presentPosition || existing.presentPosition;
     const oldPosition = existing.presentPosition;
 
+    // Support restore-from-archive: when body.isArchived === false explicitly,
+    // clear the archive fields and bring the file back into active view.
+    // When body.isArchived === true, mark as archived (with optional reason).
+    const archiveUpdate: Record<string, unknown> = {};
+    if (body.isArchived === false) {
+      archiveUpdate.isArchived = false;
+      archiveUpdate.archivedReason = null;
+      archiveUpdate.archivedAt = null;
+    } else if (body.isArchived === true) {
+      archiveUpdate.isArchived = true;
+      archiveUpdate.archivedReason = body.archivedReason || existing.archivedReason || "NFA — Archived";
+      archiveUpdate.archivedAt = existing.archivedAt || new Date();
+    }
+
     const updated = await db.projectFile.update({
       where: { id: fileId },
       data: {
@@ -35,6 +49,7 @@ export async function PUT(
         fileNumber: body.fileNumber ?? existing.fileNumber,
         authorizedBy: body.authorizedBy ?? existing.authorizedBy,
         responsiblePerson: body.responsiblePerson ?? existing.responsiblePerson,
+        ...archiveUpdate,
       },
     });
 
@@ -67,12 +82,27 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
   try {
     const { fileId } = await params;
-    await db.projectFile.delete({ where: { id: fileId } });
+    // Archive (NFA) instead of hard delete — unless force=true query param
+    const { searchParams } = new URL(req.url);
+    const force = searchParams.get("force") === "true";
+    if (force) {
+      await db.projectFile.delete({ where: { id: fileId } });
+    } else {
+      const body = await req.json().catch(() => ({}));
+      await db.projectFile.update({
+        where: { id: fileId },
+        data: {
+          isArchived: true,
+          archivedReason: body.reason || "NFA — Archived",
+          archivedAt: new Date(),
+        },
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error(e);

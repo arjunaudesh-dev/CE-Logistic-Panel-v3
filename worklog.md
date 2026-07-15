@@ -1233,3 +1233,150 @@ Stage Summary:
 - Number Prefixes: Step dropdown added to Add/Edit dialog (lists all steps across all flows with parent-flow color dot). New "Linked Step" column in the table. Body sends stepId; API persists it.
 - Value & Step (NEW TAB): Financial Delegation CRUD section (4 StatCards + table with Value/Authority badge/Label/Status/Actions + Add Delegation dialog with auto-computed label preview) and Step Management section (auto-creates "General Steps" flow, renders its steps in a table, Add Step dialog reusing the predefined-stage + department + multi-select pattern). Both sections share helpers (financialAuthorityColor, parseJsonArray, MultiStakeholderPicker).
 - All edits use semantic Tailwind classes (bg-card, bg-secondary/30, text-foreground, text-muted-foreground, border-border) so they adapt to light/dark theme. Fully responsive (mobile-first grids, flex-wrap toolbars, max-h-[60vh] ScrollArea on tables, overflow-x-auto). Uses only shared ERP components (StatCard, PageHeader, LoadingState, ErrorState, EmptyState, CustomBadge, useFetch, apiRequest, useToast) + shadcn/ui primitives (Dialog, AlertDialog, Button, Input, Label, Textarea, Checkbox, Select, Table family, Tabs, ScrollArea) + lucide-react icons. Lint-clean (0 errors / 0 warnings on settings.tsx + all 4 changed API route files). No TODOs/placeholders, no extra dependencies installed.
+
+---
+Task ID: 1-schema-archive-approvals
+Agent: Main (Schema: nameAbbreviation, archive NFA, approval history, dashboard visibility)
+Task: Project nameAbbreviation, file archive (NFA), FileApprovalEntry, showOnDashboard
+
+Work Log:
+- Schema: Project.nameAbbreviation (for file group key prefix); Project.showOnDashboard (toggle visibility); ProjectFile.isArchived + archivedReason + archivedAt + fileGroupSeq; new FileApprovalEntry model (category, roleStatus, personnel, dateTime)
+- Updated /api/projects POST+PUT to accept nameAbbreviation + showOnDashboard
+- Updated /api/projects/[id]/files GET to filter archived (support ?includeArchived=true & ?archivedOnly=true); includes approvals relation
+- Updated /api/projects/[id]/files/[fileId] DELETE → archives (NFA) instead of hard delete (unless ?force=true)
+- Created /api/projects/[id]/files/[fileId]/approvals (GET, POST bulk/single)
+- Updated /api/estimates/[id]/items/[itemId] (initiate file): auto-generates fileGroupKey as {ABBREV}-{SEQ} using project.nameAbbreviation; supports approvalEntries array
+- Seeded: project abbreviations (NSH, EFS, FDK); sample FileApprovalEntry (5 entries on first file with the exact data from user's example); file group keys auto-generated
+- File group key rules: prefix=project abbreviation, auto-fill number in order of initiating, NOT mandatory for sorting file list
+
+Stage Summary:
+- Backend ready. Frontend needed: Dashboard dynamic donuts + project visibility toggle; Projects dynamic donuts + bulk upload pp.csv + archive NFA view + file group key display + approval history extended view
+
+
+---
+Task ID: 2
+Agent: Dashboard Dynamic Donuts + Project Visibility
+Task: PART A — Make Project Allocation Distribution + Project Utilization donuts dynamic & detailed (rich tooltips, larger radii, gradient/shadow effects, custom legends with values+percentages, top-5+Others grouping). PART B — Add "Manage Dashboard Projects" dialog with per-project showOnDashboard checkboxes (PUT /api/projects/[id]) + filter "Most Active / Valued Projects" section by visibility.
+
+Work Log:
+- Read worklog.md (foundation Task 1-schema-archive-approvals confirmed: Project.nameAbbreviation + Project.showOnDashboard exist; /api/projects POST+PUT accept both; /api/projects GET returns both).
+- Read existing /home/z/my-project/src/components/erp/modules/dashboard.tsx (597 lines) in full to preserve all existing functionality (stat cards, view-mode toggle, Most Active section bar chart + project detail cards, secondary Project Financials + Procurement-by-Position charts, module quick links).
+- Verified API shapes via curl: GET /api/projects returns array with showOnDashboard + nameAbbreviation + utilization; GET /api/stats returns topProjects array (no showOnDashboard field — needed lookup). PUT /api/projects/[id] with {showOnDashboard: bool} returns 200 + updated record (curl-tested both directions, reverted).
+- Verified chart-* CSS variables exist in globals.css (chart-1 blue, chart-2 green, chart-3 amber, chart-4 purple, chart-5 pink in dark; brighter variants in light). Confirmed `@typescript-eslint/no-explicit-any` and `react-hooks/exhaustive-deps` are OFF in eslint.config.mjs (gives flexibility for recharts tooltip typing + useMemo deps).
+
+PART A — Donuts rewrite:
+- Updated DONUT_COLORS palette to use chart-* CSS variables (theme-adaptive) instead of hardcoded hex; 6th entry stays neutral slate for "Others".
+- Project Allocation Distribution donut:
+  * `allocationData` useMemo filters visible projects (showOnDashboard !== false) with voteAllocation > 0, sorts desc by allocation, takes top 5, groups the rest as "Others (N projects)" with summed value.
+  * Pie enlarged: innerRadius=60, outerRadius=100 (was 50/80), paddingAngle=3, isAnimationActive + 600ms animation.
+  * Added <defs> with radialGradient per slice (0.85 → 1.0 opacity stop) for subtle depth gradient.
+  * Per-slice Cell with inline style: dim non-active slices to opacity 0.4 when another is hovered; active slice gets a drop-shadow glow filter (rgba blue). 220ms CSS transitions on opacity + filter for smooth hover animation.
+  * Custom Tooltip content (`renderAllocTooltip`) renders rich card: color swatch + project name as title, large formatCurrency(value), "{pct}% of total allocation" sub-line. Uses `content={renderAllocTooltip}` (not formatter) for full layout control.
+  * Center label (absolutely positioned, inset-0, centered): "Total Allocation" small label + formatCurrency(total) large bold + "across N projects" sub-text.
+  * Beside donut: custom legend (NOT recharts <Legend>) with each slice as a row — color swatch + project name (truncate) + formatCurrency(value) sub-line + percentage on right. Row hover sets activeAllocIdx (mirrors donut hover state for cross-highlight). Scrollable container with thin scrollbar styling.
+- Project Utilization donut:
+  * `utilBucketData` useMemo: 4 buckets (Under 50% / 50-70% / 70-90% / Over 90%), counts visible projects only. Color map: green/blue/amber/red (kept as fixed hex per spec — these are semantic, not theme-bound).
+  * Same radialGradient + drop-shadow + opacity-dim-on-hover treatment as allocation donut, but with each bucket's color for the glow.
+  * Custom Tooltip (`renderUtilTooltip`): color swatch + bucket name as title, large "{N} project/projects" + "{pct}% of tracked projects" sub-line.
+  * Center label: "Total Tracked" + large bold count + "project(s)".
+  * Beside donut: custom legend rows — swatch + bucket name + "{N} projects · {pct}%" sub-line + large bold count on right. Cross-highlight on hover.
+- Removed the old recharts <Legend> from both donuts (replaced by custom legend with richer info).
+
+PART B — Manage Dashboard Projects:
+- Added "Manage Dashboard Projects" button (Settings icon, outline variant, h-8) in the Most Active section header between the section title and the existing "View all projects" link. Wrapped both in a flex-wrap container.
+- Added visibility count line below the section header: "Showing X of Y top projects on dashboard · A of B projects visible overall".
+- New `ManageDashboardProjectsDialog` component:
+  * Dialog with header (icon + title + description showing current visible count of total), search Input with clear button, "Select All" + "Deselect All" outline buttons, scrollable project list, footer with summary count + Done button.
+  * Each row: Checkbox (checked = visible), project name (+ nameAbbreviation badge if present), sub-line with vote number + allocation + utilization, project status badge, right-side visibility indicator (Eye/Visible emerald OR EyeOff/Hidden muted OR Loader2 spinner when toggling).
+  * Search filters by name, voteNumber, or nameAbbreviation (case-insensitive).
+  * Select All: loops all filtered-hidden projects, calls onToggle(p, true) in parallel via Promise.all. Deselect All: loops all filtered-visible, calls onToggle(p, false). Both disabled when nothing to do or when a toggle is in-flight.
+  * `togglingIds: Set<string>` tracks in-flight toggles per project for row-level spinners + bulk-disable.
+  * Footer: "Showing X of Y projects · N visible on dashboard" + "Updating…" spinner badge when any toggle is in-flight + Done button (closes dialog).
+- `handleToggleVisibility` (in Dashboard): PUT /api/projects/[id] with {showOnDashboard: next}; on success shows toast + calls refreshProjects() + refreshStats(); on failure shows destructive toast with error.
+- "Most Active / Valued Projects" section: `visibleTopProjects` useMemo filters `stats.topProjects` by showOnDashboard via Set lookup in allProjects. Before allProjects loads, returns all topProjects (graceful fallback). Empty state now points the user to the Manage dialog.
+- Donut 1 + Donut 2 also respect showOnDashboard filter (visible projects only) for internal dashboard consistency.
+
+Other changes:
+- Imports added: useMemo (react), apiRequest + useToast, Dialog family, Button, Checkbox, Input, lucide icons (Settings, Eye, EyeOff, Search, CheckCheck, Square, Loader2, X).
+- Project interface extended: showOnDashboard?: boolean + nameAbbreviation?: string | null.
+- All existing functionality preserved: 4 stat cards, By Value/By Percentage view-mode toggle, Most Active bar chart + project detail cards (3-col grid), Project Financials secondary BarChart, Procurement-by-Position PieChart, 3 module quick-link cards (Procurement/Stores/Collection). ModuleLink component unchanged.
+- Component still named `Dashboard` (named export) with `"use client"` directive at top. Fully responsive (mobile-first grid → md:grid-cols-2 for donut+legend → lg:grid-cols-2 for the two donut cards side-by-side). Semantic Tailwind classes throughout (bg-card, bg-secondary/40, text-foreground, text-muted-foreground, border-border, bg-popover/text-popover-foreground for tooltips) for light/dark theme support. Custom scrollbar via inline `scrollbarWidth: "thin"` style on legend + dialog list.
+
+Verification:
+- `bun run lint` → EXIT 0, zero errors across the whole project.
+- Dev server log: multiple "✓ Compiled in Nms" entries, no compile errors. GET / → HTTP 200 (40,752 bytes), no runtime exceptions. GET /api/stats, /api/projects, /api/procurement all return 200.
+- curl-tested PUT /api/projects/{id} with {showOnDashboard: false} → 200, showOnDashboard updated to false. Reverted with {showOnDashboard: true} → 200, reverted. Confirms the toggle backend works end-to-end with the dashboard's optimistic refresh flow.
+
+Stage Summary:
+- 1 file touched: /home/z/my-project/src/components/erp/modules/dashboard.tsx (597 → ~820 lines). Component still named `Dashboard` (named export) with `"use client"` directive. All existing functionality preserved.
+- PART A delivered: Both donuts now use chart-* CSS variables (theme-adaptive), enlarged to innerRadius=60/outerRadius=100, with per-slice radialGradient + drop-shadow glow on active slice + opacity-dim on non-active slices during hover (220ms CSS transitions). Allocation donut shows top-5 + grouped "Others" tail; rich Tooltip content with project name, formatCurrency(value), and percentage of total; center label shows "Total Allocation" + formatCurrency(total) + "across N projects"; custom legend beside donut shows color swatch + name + value + percentage per slice (cross-highlights on hover). Utilization donut: 4 fixed-color buckets (green/blue/amber/red), Tooltip shows bucket + count + percentage of tracked, center shows total project count in large bold, custom legend shows swatch + bucket + count·pct + bold count.
+- PART B delivered: "Manage Dashboard Projects" button (Settings icon) opens a Dialog showing ALL projects with per-project Checkbox (checked = visible), searchable by name/vote number/abbreviation, with Select All / Deselect All bulk actions + per-row Eye/EyeOff visibility indicator + Loader2 spinner during in-flight toggles. Toggling PUTs /api/projects/[id] with {showOnDashboard: bool}, shows toast, and refreshes both /api/projects + /api/stats. "Most Active / Valued Projects" section now filters topProjects by showOnDashboard via Set lookup, with a "Showing X of Y top projects on dashboard · A of B visible overall" count line + empty-state that points users to the Manage dialog.
+- Lint-clean, runtime-clean, no TODOs/placeholders, no extra dependencies installed. Uses only shared ERP components (StatCard, badges, PageHeader, states, useFetch, apiRequest, useToast) + shadcn/ui primitives (Dialog, Button, Checkbox, Input) + recharts (PieChart/Pie/Cell/Tooltip/ResponsiveContainer) + lucide-react icons. Semantic Tailwind classes for light/dark theme support; responsive (mobile-first, 1→2 col donut+legend layout, 1→2 col donuts side-by-side on lg).
+
+---
+Task ID: 3
+Agent: Projects Donuts + Bulk Upload + Archive NFA + File Group Key + Approvals
+Task: Enhance the Projects module: dynamic donut charts, bulk upload (pp.csv), archive-instead-of-delete (NFA) with restore, File Group column display, and Approval History section in the File Log extended view; add Project Name Abbreviation field to the Add Project wizard.
+
+Work Log:
+- Read worklog.md (Task 1-schema-archive-approvals foundation) and the four target files in full (projects.tsx, present-position.tsx, add-project-wizard.tsx, file-log.tsx) plus initiate-file.tsx and estimate-items.tsx for context. Confirmed the schema has Project.nameAbbreviation, ProjectFile.isArchived/archivedReason/archivedAt/fileGroupKey/fileGroupSeq, and the FileApprovalEntry model. Confirmed /api/projects/[id]/files GET supports ?archivedOnly=true & ?includeArchived=true and includes approvals; /api/projects/[id]/files/[fileId] DELETE archives by default (?force=true for hard delete); /api/estimates/[id]/items/[itemId] POST auto-generates fileGroupKey as {ABBREV}-{SEQ}.
+
+- API HARDENING (src/app/api/projects/[id]/files/[fileId]/route.ts): extended PUT to accept body.isArchived for restore. When isArchived===false → clears isArchived/archivedReason/archivedAt (restore from NFA). When isArchived===true → marks as archived (with optional archivedReason). Existing field-update logic untouched. Verified end-to-end with curl: archive → archivedOnly=true returns the row → PUT isArchived=false clears all archive fields.
+
+- add-project-wizard.tsx (Step 1 — Name Abbreviation field):
+  * Added `nameAbbreviation` to form state (defaults "").
+  * Added `abbrevTouched` state — false until the user manually edits the field. While false, abbreviation auto-suggests from the project name (first letters of significant words, uppercased, stripped of stop-words/noise — e.g. "No.03 Slipway Hangar" → "NSH"). Once the user types in the field, auto-suggest stops and their override sticks.
+  * Added `suggestAbbreviation()` (Unicode-aware tokenization, stop-word list, max 5 letters) and `handleNameChange()` / `handleAbbrevChange()` (uppercase + alphanumeric-only + max 8 chars).
+  * New field block in Step 1 grid (next to Project Name): Label "Project Name Abbreviation (for file group key prefix)" with Layers icon, mono-font uppercase Input, placeholder "e.g. NSH", help text explaining the {ABBREV}-001 / {ABBREV}-002 example. Resets on dialog close.
+  * Added `Layers` to lucide imports; included `nameAbbreviation` in the onCreated payload (Project interface updated accordingly); reset `abbrevTouched` on close. The form is sent verbatim to POST /api/projects so nameAbbreviation reaches the API.
+
+- projects.tsx (dynamic donuts + bulk upload):
+  * Donut redesign — Projects by Type + Projects by Status. Larger donuts (innerRadius=55, outerRadius=90, paddingAngle=3, strokeWidth=2). Each slice shows its count as an inline label; center overlay shows the total count + bucket count. Tooltips now render "{n} project(s) · {pct}%". Layout switched to grid-cols-[1fr_auto] with a custom legend list showing colored dot + name + count + percentage (tabular-nums). Both donuts only render when projects exist.
+  * Project card: now shows the project's nameAbbreviation as a small mono-font badge next to the name (when present).
+  * New "Upload Bulk" button in the PageHeader (next to "Add Project") and in the EmptyState CTA row.
+  * New BulkUploadDialog component: downloads a pp.csv template (12 columns: ProjectName, NameAbbreviation, VoteNumber, ProjectType, FinancialMean, VoteAllocation, Benefactor, ProjectOfficer, StartDate, EndDate, Status, Description) with 2 sample rows (NSH + EFS). RFC-4180 CSV parser (quoted fields, embedded commas/newlines, CRLF tolerant). Header detection is column-name based (case/space insensitive). Preview table with all 12 columns + row index. Sequential POST /api/projects per row with live Progress bar + success/failure counters + per-row error list. Coerces ProjectType/FinancialMean/Status to safe defaults if out-of-vocab. Toast summary on completion; calls onImported → refresh on full success.
+  * Added PROJECT_TYPES, PROJECT_STATUSES, FINANCIAL_MEANS to constants imports (used for vocab validation in the bulk import). Added Dialog, Table family, Upload/Download/FileSpreadsheet/Loader2/Check icons + Progress component imports.
+
+- file-log.tsx (Approval History section in extended view):
+  * Extended ProjectFile interface: added projectId?, isArchived?, archivedReason?, archivedAt?, approvals? fields. Added FileApprovalEntry interface.
+  * Added APPROVAL_CATEGORIES (11 options incl. General Order Request, General Order Dispatch, Procurement Request Assign, Tender Call, BEC Evaluation, PO Placed, Material Inspection, Payment Approval, …) and APPROVAL_ROLE_STATUSES (6 options: Approved/Authorized/Assigned/Recommended/Inspected/Verified By) constants.
+  * Added ApprovalHistorySection component (rendered below the Activity Timeline). Header with ShieldCheck icon + entry-count badge + "Add Approval Entry" button (disabled if file has no projectId). Renders an empty-state card or a 5-column Table (#, Category badge, Role/Status badge [colored by approvalRoleColor helper], Personnel, Date & Time mono).
+  * Added AddApprovalDialog: Category Select, Role/Status Select, Personnel Input (required), datetime-local Input. Converts datetime-local (YYYY-MM-DDTHH:mm) → "DD/MM/YYYY HH:mm:ss" format on submit to match the spec's sample data. POSTs to /api/projects/{projectId}/files/{fileId}/approvals. Toast on success/error; resets form after save.
+  * FileLogDialog now accepts an optional onApprovalsChanged callback (called after a new approval entry is added so the parent can refresh).
+  * Added a "File Group Key" detail to the file details grid (mono font) so the user sees the fileGroupKey in the extended view.
+  * Imports: Button, Input, Label, Select family, Table family, apiRequest, useToast, ShieldCheck + Plus + Loader2 icons.
+
+- present-position.tsx (Archive NFA + Restore + File Group column + archived styling):
+  * Added Archive, ArchiveRestore, FolderKey icons + Textarea import.
+  * Project interface: added optional nameAbbreviation.
+  * New `showArchived` state (default false). filesUrl becomes `/api/projects/[id]/files?archivedOnly=true` when ON, plain `/api/projects/[id]/files` when OFF. Because useFetch's URL is a dependency, switching the toggle re-fetches automatically.
+  * `handleDelete` no longer hard-deletes — it opens the new ArchiveNfaDialog (sets archiveTarget state). New `handleRestore` PUTs `{isArchived:false}` to restore from NFA.
+  * New ArchiveNfaDialog component: amber-themed dialog showing file summary (PR/Item/ItemCode/FileGroup) + Textarea for an optional archive reason (defaults to "NFA — Archived" when blank) + amber "Archive (NFA)" submit button. Calls DELETE /api/projects/{id}/files/{fileId} with `{reason}` (which the API archives by default). Toast on success.
+  * Toolbar: added "Show Archived (NFA)" / "Archived (NFA)" toggle button (amber when active) between the File Number filter pills and Export. Add File button hidden when showArchived is ON. Added an amber banner explaining the archived view when active.
+  * Table header: added new "File Group" column between "File Number" and "Item Code". colSpan on loading/empty rows bumped 13 → 14. Empty-state message changes when showArchived is ON ("No archived (NFA) files found.").
+  * Single-row renderer: rows with isArchived get opacity-60 + bg-muted/30 styling. PR Number cell prefixed with an Archive icon when archived. New File Group cell shows the fileGroupKey as a primary-tinted mono-font pill with FolderKey icon (or "—" when null). Position cell adds a third line for archived rows showing the archived reason + archived date. Action cell: when archived → emerald Restore button (ArchiveRestore icon, calls handleRestore); when active → amber Archive button (Archive icon, calls handleDelete → opens ArchiveNfaDialog). The old red Trash2 hard-delete button is gone.
+  * Grouped view: group header row gets opacity-70 + bg-muted/20 when ALL items in the group are archived, plus an amber "NFA" CustomBadge in the PR Number cell. Added File Group cell to both the group header (shows the group's shared fileGroupKey or "multiple") and to expanded child rows (shows the per-item fileGroupKey). Child rows inherit the same archived styling + Restore/Archive action button logic.
+  * Project header: project name now shows the nameAbbreviation as a small primary-tinted mono badge (when present).
+  * FileLogDialog invocation: added onApprovalsChanged callback that calls refresh() + onChanged() so newly added approval entries appear in the dialog immediately.
+
+- initiate-file.tsx (Initiate File dialog — file group key preview):
+  * Added optional `projectAbbreviation` prop. Falls back to "PRJ" when null/undefined (matches the API's server-side fallback).
+  * Replaced the old "File Group Key (optional) — defaults to PR Number" field with a read-only preview block: bordered card showing "{ABBREV}-00X" in mono font with a "(auto-generated)" suffix and a FolderKey icon. Help text explains the {ABBREV}-{SEQ} format (e.g. NSH-001, NSH-002) and that the sequence is assigned server-side in initiation order.
+  * Added an "Override (group multiple items under one file)" Checkbox (default unchecked). When ticked, shows the existing custom-key Input + Reset button. The submit handler now sends NO fileGroupKey when useAutoGenerated=true (letting the API auto-generate) and sends the custom key only when override is on.
+  * Added Checkbox + FolderKey imports; removed unused Layers import.
+  * Props interface updated; EstimateItemsTable now passes `projectAbbreviation={estimate?.project?.nameAbbreviation}` (EstimateWithProject.project interface widened to include id, name, nameAbbreviation).
+
+- Verification:
+  * `bun run lint` → 0 errors, 0 warnings across the whole project. `npx eslint <each modified file> --max-warnings 0` → exit 0 on all.
+  * Dev server log shows repeated "✓ Compiled" entries and 200 responses for /api/projects, /api/projects/[id]/files, /api/projects/[id]/files/[fileId]/approvals — no errors.
+  * curl tests: POST /api/projects with nameAbbreviation persists it; DELETE /api/projects/[id]/files/[fileId] sets isArchived=true + archivedReason + archivedAt; GET ?archivedOnly=true returns only archived rows; GET (plain) returns only active rows; PUT {isArchived:false} restores (clears all archive fields); POST /api/projects/[id]/files/[fileId]/approvals creates entries with the spec's exact field shape (category, roleStatus, personnel, dateTime). The seeded PR-2025-001 file's 5 approval entries (matching the spec's sample data) render correctly via the API.
+
+Stage Summary:
+- 4 frontend files modified (projects.tsx, projects/present-position.tsx, projects/add-project-wizard.tsx, projects/file-log.tsx) + 2 supporting frontend files (projects/initiate-file.tsx, projects/estimate-items.tsx) + 1 backend route (api/projects/[id]/files/[fileId]/route.ts PUT extended for isArchived restore). All components remain named exports with "use client" at top.
+- A. Donut charts: larger donuts (outerRadius=90, innerRadius=55), inline slice labels (count), rich tooltips with count + percentage, custom legend list with colored dot + name + count + percentage, center total. Both donuts render conditionally when projects exist.
+- B. Bulk Upload: "Upload Bulk" button in header + EmptyState; BulkUploadDialog with pp.csv template download (12 columns + 2 sample rows), RFC-4180 CSV parser, preview table, sequential POST /api/projects with live Progress + success/failure counters + per-row error list.
+- C. Archive NFA: Delete button replaced with amber "Archive (NFA)" button → ArchiveNfaDialog prompts for optional reason → DELETE (archives). "Show Archived (NFA)" toolbar toggle (amber when active) switches the fetch URL to ?archivedOnly=true. Archived rows render with muted styling (opacity-60, bg-muted/30), NFA archive icon, archived reason + date in the Position cell. Restore button (emerald ArchiveRestore icon) on archived rows → PUT {isArchived:false}.
+- D. File Group Key: new "File Group" column added to the file register (mono-font primary-tinted pill with FolderKey icon, between File Number and Item Code). NOT a sort key — display/grouping only. Initiate File dialog now shows a read-only preview "File Group Key: {ABBREV}-00X (auto-generated)" with an optional override checkbox for grouping multiple items under one file. When override is off, no fileGroupKey is sent — the API auto-generates {ABBREV}-{SEQ} server-side.
+- E. Approval History: new section below the Activity Timeline in the File Log (extended view only). 5-column table (#, Category, Role/Status, Personnel, Date & Time) with colored role badges. "Add Approval Entry" button opens a dialog with Category Select (11 options), Role/Status Select (6 options), Personnel Input (required), datetime-local Input (converted to DD/MM/YYYY HH:mm:ss on submit). POST /api/projects/[id]/files/[fileId]/approvals. Parent refreshes via onApprovalsChanged callback so the new entry appears immediately.
+- F. Name Abbreviation: new "Project Name Abbreviation" field in the Add Project wizard Step 1 (mono uppercase Input, max 8 chars). Auto-suggests from the project name (first letters of significant words) until the user manually overrides. Help text shows the {ABBREV}-001 example. Included in the POST /api/projects body and in the onCreated callback payload. Project card + Present Position dialog header now display the abbreviation as a small badge.
+- All existing functionality preserved (Group by File toggle, Quick Update popover, checkbox multi-select, Bulk Initiate, Cost columns, sortable headers, position summary, allocations, PR from Estimate tab, etc.). Lint-clean (0 errors / 0 warnings). No new dependencies installed. Uses only shared ERP components + shadcn/ui primitives + lucide-react + recharts.

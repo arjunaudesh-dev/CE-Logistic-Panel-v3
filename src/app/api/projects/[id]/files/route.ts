@@ -2,15 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const { searchParams } = new URL(req.url);
+    const includeArchived = searchParams.get("includeArchived") === "true";
+    const archivedOnly = searchParams.get("archivedOnly") === "true";
+
+    const where: Record<string, unknown> = { projectId: id };
+    if (archivedOnly) {
+      where.isArchived = true;
+    } else if (!includeArchived) {
+      where.isArchived = false;
+    }
+
     const files = await db.projectFile.findMany({
-      where: { projectId: id },
+      where,
       orderBy: { createdAt: "desc" },
-      include: { logs: { orderBy: { changedAt: "desc" } } },
+      include: {
+        logs: { orderBy: { changedAt: "desc" } },
+        approvals: { orderBy: { createdAt: "desc" } },
+      },
     });
     return NextResponse.json(files);
   } catch (e) {

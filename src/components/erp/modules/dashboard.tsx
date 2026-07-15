@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { useFetch } from "@/lib/use-fetch";
+import { useMemo, useState } from "react";
+import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { StatCard } from "@/components/erp/stat-card";
 import { PageHeader } from "@/components/erp/page-header";
 import { LoadingState, ErrorState } from "@/components/erp/states";
@@ -21,6 +21,14 @@ import {
   FileBarChart,
   PieChart as PieChartIcon,
   Gauge,
+  Settings,
+  Eye,
+  EyeOff,
+  Search,
+  CheckCheck,
+  Square,
+  Loader2,
+  X,
 } from "lucide-react";
 import {
   BarChart,
@@ -42,6 +50,18 @@ import {
 } from "@/lib/constants";
 import { ModuleId } from "../nav";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 
 interface TopProject {
   id: string;
@@ -60,6 +80,7 @@ interface TopProject {
 interface Project {
   id: string;
   name: string;
+  nameAbbreviation?: string | null;
   voteNumber: string;
   voteAllocation: number;
   committed: number;
@@ -67,6 +88,7 @@ interface Project {
   utilization?: number;
   status: string;
   projectType?: string | null;
+  showOnDashboard?: boolean;
 }
 
 interface Stats {
@@ -78,21 +100,19 @@ interface Stats {
   topProjects: TopProject[];
 }
 
-const PIE_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#64748b"];
+const PIE_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "#64748b"];
+
+// Donut palette — adapts to light/dark theme via the chart-* CSS variables.
+// The 6th entry (neutral slate) is reserved for the "Others" slice in the allocation donut.
 const DONUT_COLORS = [
-  "#3b82f6",
-  "#22c55e",
-  "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-  "#ef4444",
-  "#14b8a6",
-  "#a855f7",
-  "#f97316",
-  "#84cc16",
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
   "#64748b",
 ];
+
 const UTILIZATION_COLORS: Record<string, string> = {
   "Under 50%": "#22c55e",
   "50-70%": "#3b82f6",
@@ -100,17 +120,117 @@ const UTILIZATION_COLORS: Record<string, string> = {
   "Over 90%": "#ef4444",
 };
 
+const UTIL_BUCKETS = [
+  { name: "Under 50%", min: 0, max: 50 },
+  { name: "50-70%", min: 50, max: 70 },
+  { name: "70-90%", min: 70, max: 90 },
+  { name: "Over 90%", min: 90, max: Infinity },
+];
+
 export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void }) {
-  const { data: stats, loading, error } = useFetch<Stats>("/api/stats");
+  const { data: stats, loading, error, refresh: refreshStats } = useFetch<Stats>("/api/stats");
   const { data: procurement } = useFetch<{ presentPosition: string }[]>("/api/procurement");
-  const { data: allProjects } = useFetch<Project[]>("/api/projects");
+  const { data: allProjects, refresh: refreshProjects } = useFetch<Project[]>("/api/projects");
+  const { toast } = useToast();
+
   // toggle for infographics: "value" shows currency, "percent" shows utilization %
   const [viewMode, setViewMode] = useState<"value" | "percent">("value");
+  // manage dashboard projects dialog
+  const [manageOpen, setManageOpen] = useState(false);
+  // hovered slice index for donut highlight
+  const [activeAllocIdx, setActiveAllocIdx] = useState<number | null>(null);
+  const [activeUtilIdx, setActiveUtilIdx] = useState<number | null>(null);
+
+  // ── Visible projects: showOnDashboard === true OR undefined (legacy) ──
+  const visibleProjects = useMemo<Project[]>(() => {
+    return (allProjects ?? []).filter((p) => p.showOnDashboard !== false);
+  }, [allProjects]);
+
+  // ── Donut 1: Project Allocation Distribution ──
+  // Top 5 by allocation; group the rest as "Others".
+  const allocationData = useMemo(() => {
+    const source = (allProjects ?? []) as Project[];
+    const items = source
+      .filter((p) => p.showOnDashboard !== false && (p.voteAllocation ?? 0) > 0)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        value: p.voteAllocation ?? 0,
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    const top = items.slice(0, 5);
+    const rest = items.slice(5);
+
+    const slices = top.map((d, i) => ({
+      name: d.name,
+      value: d.value,
+      color: DONUT_COLORS[i % DONUT_COLORS.length],
+      isOthers: false,
+    }));
+    if (rest.length > 0) {
+      slices.push({
+        name: `Others (${rest.length} project${rest.length === 1 ? "" : "s"})`,
+        value: rest.reduce((s, d) => s + d.value, 0),
+        color: DONUT_COLORS[5],
+        isOthers: true,
+      });
+    }
+    const total = slices.reduce((s, d) => s + d.value, 0);
+    return { slices, total, projectCount: items.length };
+  }, [allProjects]);
+
+  // ── Donut 2: Project Utilization buckets ──
+  const utilBucketData = useMemo(() => {
+    const source = (allProjects ?? []) as Project[];
+    return UTIL_BUCKETS.map((b) => ({
+      name: b.name,
+      value: source.filter((p) => {
+        if (p.showOnDashboard === false) return false;
+        const u = p.utilization ?? 0;
+        return u >= b.min && u < b.max;
+      }).length,
+    }));
+  }, [allProjects]);
+  const totalProjectsCounted = utilBucketData.reduce((s, d) => s + d.value, 0);
+
+  // ── Top projects for "Most Active / Valued" section ──
+  // Filter /api/stats topProjects by showOnDashboard via lookup in allProjects.
+  const visibleTopProjects = useMemo<TopProject[]>(() => {
+    const tps = stats?.topProjects ?? [];
+    if (!allProjects) return tps;
+    const visibleIds = new Set(
+      allProjects.filter((p) => p.showOnDashboard !== false).map((p) => p.id)
+    );
+    return tps.filter((p) => visibleIds.has(p.id));
+  }, [stats, allProjects]);
+
+  // ── Toggle showOnDashboard handler ──
+  const handleToggleVisibility = async (project: Project, next: boolean) => {
+    const res = await apiRequest(`/api/projects/${project.id}`, "PUT", {
+      showOnDashboard: next,
+    });
+    if (res.ok) {
+      toast({
+        title: next ? "Project shown on dashboard" : "Project hidden from dashboard",
+        description: project.name,
+      });
+      refreshProjects();
+      refreshStats();
+    } else {
+      toast({
+        title: "Update failed",
+        description: res.error || "Could not update project visibility",
+        variant: "destructive",
+      });
+    }
+  };
 
   if (loading) return <LoadingState label="Loading dashboard..." />;
   if (error || !stats) return <ErrorState message={error || "No data"} />;
 
-  const topProjects = stats.topProjects || [];
+  const topProjects = visibleTopProjects;
+  const totalProjectsAll = allProjects?.length ?? 0;
 
   // For the chart: in value mode show Rs. millions, in percent mode show utilization %
   const projectChart = topProjects.map((p) => ({
@@ -127,37 +247,63 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
   });
   const posChart = Object.entries(posCounts).map(([name, value]) => ({ name, value }));
 
-  // ── Donut 1: Project Allocation Distribution ──
-  // Each project's voteAllocation is one slice; center shows the total allocation.
-  const allocationDonut = (allProjects ?? topProjects)
-    .filter((p) => (p.voteAllocation ?? 0) > 0)
-    .map((p) => ({
-      name:
-        p.name.length > 22 ? p.name.slice(0, 20) + "…" : p.name,
-      value: Math.round((p.voteAllocation ?? 0) / 1000000), // Rs. Millions
-      raw: p.voteAllocation ?? 0,
-    }));
-  const totalAllocationM =
-    allocationDonut.reduce((s, d) => s + d.value, 0);
+  // Rich tooltip for the allocation donut
+  const renderAllocTooltip = (props: any) => {
+    if (!props?.active || !props?.payload || props.payload.length === 0) return null;
+    const item = props.payload[0];
+    const slice = item?.payload as
+      | { name?: string; value?: number; color?: string; isOthers?: boolean }
+      | undefined;
+    if (!slice) return null;
+    const value = slice.value ?? 0;
+    const pct = allocationData.total > 0 ? (value / allocationData.total) * 100 : 0;
+    return (
+      <div className="bg-popover text-popover-foreground border border-border rounded-lg p-3 shadow-xl max-w-[280px]">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span
+            className="h-2.5 w-2.5 rounded-sm shrink-0"
+            style={{ background: slice.color ?? item?.color ?? "#3b82f6" }}
+          />
+          <span className="text-xs font-semibold text-foreground truncate">{slice.name}</span>
+        </div>
+        <div className="text-base font-bold text-foreground leading-tight">
+          {formatCurrency(value)}
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          {pct.toFixed(1)}% of total allocation
+        </div>
+      </div>
+    );
+  };
 
-  // ── Donut 2: Project Utilization buckets ──
-  const utilBuckets = [
-    { name: "Under 50%", min: 0, max: 50 },
-    { name: "50-70%", min: 50, max: 70 },
-    { name: "70-90%", min: 70, max: 90 },
-    { name: "Over 90%", min: 90, max: Infinity },
-  ];
-  const utilBucketData = utilBuckets.map((b) => ({
-    name: b.name,
-    value: (allProjects ?? topProjects).filter((p) => {
-      const u = p.utilization ?? 0;
-      return u >= b.min && u < b.max;
-    }).length,
-  }));
-  const totalProjectsCounted = utilBucketData.reduce(
-    (s, d) => s + d.value,
-    0
-  );
+  // Rich tooltip for the utilization donut
+  const renderUtilTooltip = (props: any) => {
+    if (!props?.active || !props?.payload || props.payload.length === 0) return null;
+    const item = props.payload[0];
+    const slice = item?.payload as
+      | { name?: string; value?: number; color?: string }
+      | undefined;
+    if (!slice) return null;
+    const value = slice.value ?? 0;
+    const pct = totalProjectsCounted > 0 ? (value / totalProjectsCounted) * 100 : 0;
+    return (
+      <div className="bg-popover text-popover-foreground border border-border rounded-lg p-3 shadow-xl max-w-[280px]">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span
+            className="h-2.5 w-2.5 rounded-sm shrink-0"
+            style={{ background: slice.color ?? item?.color ?? "#22c55e" }}
+          />
+          <span className="text-xs font-semibold text-foreground">{slice.name}</span>
+        </div>
+        <div className="text-base font-bold text-foreground leading-tight">
+          {value} project{value === 1 ? "" : "s"}
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          {pct.toFixed(1)}% of tracked projects
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -223,7 +369,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
 
       {/* Most Active / Most Valued Projects */}
       <div className="bg-card border border-border rounded-xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Trophy className="h-4 w-4 text-amber-400" />
             Most Active / Valued Projects
@@ -231,16 +377,48 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
               ({viewMode === "value" ? "Rs. Millions" : "Utilization %"})
             </span>
           </h3>
-          <button
-            onClick={() => onNavigate("projects")}
-            className="text-xs text-primary hover:underline flex items-center gap-1"
-          >
-            View all projects <ArrowRight className="h-3 w-3" />
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setManageOpen(true)}
+              className="h-8"
+            >
+              <Settings className="h-3.5 w-3.5 mr-1.5" />
+              Manage Dashboard Projects
+            </Button>
+            <button
+              onClick={() => onNavigate("projects")}
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              View all projects <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
         </div>
 
+        {/* Visibility count line */}
+        <p className="text-xs text-muted-foreground mb-4">
+          Showing{" "}
+          <span className="font-semibold text-foreground">{topProjects.length}</span> of{" "}
+          <span className="font-semibold text-foreground">{stats.topProjects?.length ?? 0}</span> top
+          projects on dashboard ·{" "}
+          <span className="font-semibold text-foreground">{visibleProjects.length}</span> of{" "}
+          <span className="font-semibold text-foreground">{totalProjectsAll}</span> projects visible
+          overall
+        </p>
+
         {topProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">No projects yet.</p>
+          <p className="text-sm text-muted-foreground py-8 text-center">
+            No projects to display. Use{" "}
+            <button
+              onClick={() => setManageOpen(true)}
+              className="text-primary hover:underline font-medium"
+            >
+              Manage Dashboard Projects
+            </button>{" "}
+            to control what appears here.
+          </p>
         ) : (
           <>
             {/* Chart */}
@@ -348,66 +526,111 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
             <PieChartIcon className="h-4 w-4 text-primary" />
             Project Allocation Distribution
           </h3>
-          <p className="text-xs text-muted-foreground mb-3">
-            Each project&apos;s vote allocation share (Rs. Millions)
+          <p className="text-xs text-muted-foreground mb-4">
+            Top 5 projects by vote allocation · grouped &ldquo;Others&rdquo; tail (Rs.)
           </p>
-          {allocationDonut.length > 0 ? (
-            <div className="relative">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={allocationDonut}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={3}
-                  >
-                    {allocationDonut.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={DONUT_COLORS[i % DONUT_COLORS.length]}
-                        stroke="var(--background, #0f1420)"
-                        strokeWidth={1.5}
+          {allocationData.slices.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              {/* Donut */}
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <defs>
+                      {DONUT_COLORS.map((c, i) => (
+                        <radialGradient key={i} id={`alloc-grad-${i}`} cx="50%" cy="50%" r="65%">
+                          <stop offset="0%" stopColor={c} stopOpacity={0.85} />
+                          <stop offset="100%" stopColor={c} stopOpacity={1} />
+                        </radialGradient>
+                      ))}
+                    </defs>
+                    <Pie
+                      data={allocationData.slices}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={3}
+                      onMouseEnter={(_, idx) => setActiveAllocIdx(idx)}
+                      onMouseLeave={() => setActiveAllocIdx(null)}
+                      isAnimationActive
+                      animationDuration={600}
+                    >
+                      {allocationData.slices.map((s, i) => (
+                        <Cell
+                          key={i}
+                          fill={`url(#alloc-grad-${i % DONUT_COLORS.length})`}
+                          stroke="var(--background, #0f1420)"
+                          strokeWidth={1.5}
+                          style={{
+                            opacity:
+                              activeAllocIdx === null || activeAllocIdx === i ? 1 : 0.4,
+                            filter:
+                              activeAllocIdx === i
+                                ? "drop-shadow(0 0 10px rgba(59,130,246,0.55))"
+                                : "drop-shadow(0 1px 2px rgba(0,0,0,0.15))",
+                            transition: "opacity 220ms ease, filter 220ms ease",
+                            cursor: "pointer",
+                          }}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={renderAllocTooltip}
+                      cursor={false}
+                      wrapperStyle={{ outline: "none", zIndex: 50 }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Center label — total allocation */}
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center px-2">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Total Allocation
+                  </span>
+                  <span className="text-lg font-bold text-foreground leading-tight">
+                    {formatCurrency(allocationData.total)}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                    across {allocationData.projectCount} project{allocationData.projectCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Legend with values */}
+              <div
+                className="space-y-1 max-h-[260px] overflow-y-auto pr-1"
+                style={{ scrollbarWidth: "thin" }}
+              >
+                {allocationData.slices.map((s, i) => {
+                  const pct =
+                    allocationData.total > 0 ? (s.value / allocationData.total) * 100 : 0;
+                  return (
+                    <div
+                      key={i}
+                      onMouseEnter={() => setActiveAllocIdx(i)}
+                      onMouseLeave={() => setActiveAllocIdx(null)}
+                      className={cn(
+                        "flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors cursor-default",
+                        activeAllocIdx === i ? "bg-secondary/70" : "hover:bg-secondary/40"
+                      )}
+                    >
+                      <span
+                        className="h-3 w-3 rounded-sm shrink-0"
+                        style={{ background: s.color }}
                       />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--card, #1a1f2e)",
-                      border: "1px solid var(--border, #2d3548)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    formatter={(value: number, _name, entry) => [
-                      `Rs. ${value}M (${formatCurrency(
-                        (entry?.payload?.raw as number) ?? 0
-                      )})`,
-                      entry?.payload?.name as string,
-                    ]}
-                  />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    iconType="circle"
-                    wrapperStyle={{ fontSize: 10, lineHeight: "16px" }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              {/* Center label — total allocation */}
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Total
-                </span>
-                <span className="text-lg font-bold text-foreground leading-tight">
-                  Rs. {formatNumber(totalAllocationM)}M
-                </span>
-                <span className="text-[10px] text-muted-foreground mt-0.5">
-                  {allocationDonut.length} projects
-                </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-foreground truncate">{s.name}</p>
+                        <p className="text-[10px] text-muted-foreground tabular-nums">
+                          {formatCurrency(s.value)}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-foreground tabular-nums shrink-0">
+                        {pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -423,64 +646,116 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
             <Gauge className="h-4 w-4 text-primary" />
             Project Utilization
           </h3>
-          <p className="text-xs text-muted-foreground mb-3">
-            Distribution of projects by utilization bucket
+          <p className="text-xs text-muted-foreground mb-4">
+            Distribution of visible projects by utilization bucket
           </p>
           {totalProjectsCounted > 0 ? (
-            <div className="relative">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={utilBucketData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={3}
-                  >
-                    {utilBucketData.map((entry) => (
-                      <Cell
-                        key={entry.name}
-                        fill={UTILIZATION_COLORS[entry.name] ?? "#64748b"}
-                        stroke="var(--background, #0f1420)"
-                        strokeWidth={1.5}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              {/* Donut */}
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <defs>
+                      {utilBucketData.map((b, i) => (
+                        <radialGradient key={i} id={`util-grad-${i}`} cx="50%" cy="50%" r="65%">
+                          <stop
+                            offset="0%"
+                            stopColor={UTILIZATION_COLORS[b.name] ?? "#64748b"}
+                            stopOpacity={0.85}
+                          />
+                          <stop
+                            offset="100%"
+                            stopColor={UTILIZATION_COLORS[b.name] ?? "#64748b"}
+                            stopOpacity={1}
+                          />
+                        </radialGradient>
+                      ))}
+                    </defs>
+                    <Pie
+                      data={utilBucketData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={3}
+                      onMouseEnter={(_, idx) => setActiveUtilIdx(idx)}
+                      onMouseLeave={() => setActiveUtilIdx(null)}
+                      isAnimationActive
+                      animationDuration={600}
+                    >
+                      {utilBucketData.map((entry, i) => (
+                        <Cell
+                          key={entry.name}
+                          fill={`url(#util-grad-${i})`}
+                          stroke="var(--background, #0f1420)"
+                          strokeWidth={1.5}
+                          style={{
+                            opacity:
+                              activeUtilIdx === null || activeUtilIdx === i ? 1 : 0.4,
+                            filter:
+                              activeUtilIdx === i
+                                ? `drop-shadow(0 0 10px ${UTILIZATION_COLORS[entry.name] ?? "#64748b"}99)`
+                                : "drop-shadow(0 1px 2px rgba(0,0,0,0.15))",
+                            transition: "opacity 220ms ease, filter 220ms ease",
+                            cursor: "pointer",
+                          }}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={renderUtilTooltip}
+                      cursor={false}
+                      wrapperStyle={{ outline: "none", zIndex: 50 }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Center label — total projects counted */}
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center px-2">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Total Tracked
+                  </span>
+                  <span className="text-3xl font-bold text-foreground leading-tight">
+                    {totalProjectsCounted}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                    project{totalProjectsCounted === 1 ? "" : "s"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Legend with counts + percentages */}
+              <div className="space-y-1">
+                {utilBucketData.map((b, i) => {
+                  const pct =
+                    totalProjectsCounted > 0 ? (b.value / totalProjectsCounted) * 100 : 0;
+                  return (
+                    <div
+                      key={b.name}
+                      onMouseEnter={() => setActiveUtilIdx(i)}
+                      onMouseLeave={() => setActiveUtilIdx(null)}
+                      className={cn(
+                        "flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors cursor-default",
+                        activeUtilIdx === i ? "bg-secondary/70" : "hover:bg-secondary/40"
+                      )}
+                    >
+                      <span
+                        className="h-3 w-3 rounded-sm shrink-0"
+                        style={{ background: UTILIZATION_COLORS[b.name] ?? "#64748b" }}
                       />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--card, #1a1f2e)",
-                      border: "1px solid var(--border, #2d3548)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    formatter={(value: number, name: string) => [
-                      `${value} project${value === 1 ? "" : "s"}`,
-                      name,
-                    ]}
-                  />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    iconType="circle"
-                    wrapperStyle={{ fontSize: 11, lineHeight: "18px" }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              {/* Center label — total projects counted */}
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex flex-col items-center justify-center" style={{ width: "55%" }}>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Total
-                </span>
-                <span className="text-lg font-bold text-foreground leading-tight">
-                  {totalProjectsCounted}
-                </span>
-                <span className="text-[10px] text-muted-foreground mt-0.5">
-                  projects tracked
-                </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-foreground">{b.name}</p>
+                        <p className="text-[10px] text-muted-foreground tabular-nums">
+                          {b.value} project{b.value === 1 ? "" : "s"} · {pct.toFixed(1)}%
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-foreground tabular-nums shrink-0">
+                        {b.value}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -559,7 +834,248 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
           onClick={() => onNavigate("collection")}
         />
       </div>
+
+      {/* Manage Dashboard Projects dialog */}
+      <ManageDashboardProjectsDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        projects={allProjects ?? []}
+        onToggle={handleToggleVisibility}
+      />
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+/* Manage Dashboard Projects dialog                                            */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+function ManageDashboardProjectsDialog({
+  open,
+  onOpenChange,
+  projects,
+  onToggle,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projects: Project[];
+  onToggle: (project: Project, next: boolean) => void | Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.voteNumber ?? "").toLowerCase().includes(q) ||
+        (p.nameAbbreviation ?? "").toLowerCase().includes(q)
+    );
+  }, [projects, search]);
+
+  const visibleCount = projects.filter((p) => p.showOnDashboard !== false).length;
+  const filteredHidden = filtered.filter((p) => p.showOnDashboard === false);
+  const filteredVisible = filtered.filter((p) => p.showOnDashboard !== false);
+
+  const runToggle = async (p: Project, next: boolean) => {
+    setTogglingIds((prev) => {
+      const n = new Set(prev);
+      n.add(p.id);
+      return n;
+    });
+    try {
+      await onToggle(p, next);
+    } finally {
+      setTogglingIds((prev) => {
+        const n = new Set(prev);
+        n.delete(p.id);
+        return n;
+      });
+    }
+  };
+
+  const handleSelectAll = async () => {
+    await Promise.all(filteredHidden.map((p) => runToggle(p, true)));
+  };
+
+  const handleDeselectAll = async () => {
+    await Promise.all(filteredVisible.map((p) => runToggle(p, false)));
+  };
+
+  const totalToggling = togglingIds.size;
+  const allFilteredVisible =
+    filtered.length > 0 && filteredHidden.length === 0;
+  const allFilteredHidden = filteredVisible.length === 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[88vh] flex flex-col gap-3 p-0">
+        {/* Header */}
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Settings className="h-4 w-4 text-primary" />
+            Manage Dashboard Projects
+          </DialogTitle>
+          <DialogDescription>
+            Toggle which projects appear on the dashboard. This controls visibility only &mdash; it
+            does not delete projects.{" "}
+            <span className="font-medium text-foreground">
+              {visibleCount} of {projects.length}
+            </span>{" "}
+            projects currently visible.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Toolbar: search + bulk actions */}
+        <div className="px-5 py-3 flex items-center gap-2 flex-wrap border-b border-border">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, vote number, or abbreviation…"
+              className="pl-8 h-9 text-sm"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleSelectAll}
+            disabled={allFilteredVisible || filtered.length === 0 || totalToggling > 0}
+            className="h-9"
+          >
+            <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
+            Select All
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleDeselectAll}
+            disabled={allFilteredHidden || filtered.length === 0 || totalToggling > 0}
+            className="h-9"
+          >
+            <Square className="h-3.5 w-3.5 mr-1.5" />
+            Deselect All
+          </Button>
+        </div>
+
+        {/* Project list */}
+        <div
+          className="flex-1 overflow-y-auto px-2 min-h-[220px]"
+          style={{ scrollbarWidth: "thin" }}
+        >
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              {projects.length === 0
+                ? "No projects available."
+                : "No projects match your search."}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {filtered.map((p) => {
+                const visible = p.showOnDashboard !== false;
+                const toggling = togglingIds.has(p.id);
+                return (
+                  <li
+                    key={p.id}
+                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-secondary/40 transition-colors"
+                  >
+                    <Checkbox
+                      id={`dash-${p.id}`}
+                      checked={visible}
+                      onCheckedChange={(checked) => runToggle(p, checked === true)}
+                      disabled={toggling}
+                      aria-label={`Toggle dashboard visibility for ${p.name}`}
+                    />
+                    <label
+                      htmlFor={`dash-${p.id}`}
+                      className="flex-1 min-w-0 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-foreground truncate">
+                          {p.name}
+                        </span>
+                        {p.nameAbbreviation && (
+                          <CustomBadge className="border-0 bg-primary/15 text-primary shrink-0 text-[10px]">
+                            {p.nameAbbreviation}
+                          </CustomBadge>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {p.voteNumber || "—"} · {formatCurrency(p.voteAllocation ?? 0)}
+                        {p.utilization != null && (
+                          <> · {Math.round(p.utilization)}% util</>
+                        )}
+                      </p>
+                    </label>
+                    <CustomBadge
+                      className={cn("border-0 shrink-0", projectStatusColor(p.status))}
+                    >
+                      {p.status}
+                    </CustomBadge>
+                    <div
+                      className={cn(
+                        "flex items-center gap-1 text-xs shrink-0 w-[88px] justify-end",
+                        visible ? "text-emerald-500" : "text-muted-foreground"
+                      )}
+                    >
+                      {toggling ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : visible ? (
+                        <>
+                          <Eye className="h-3.5 w-3.5" />
+                          <span className="text-[11px]">Visible</span>
+                        </>
+                      ) : (
+                        <>
+                          <EyeOff className="h-3.5 w-3.5" />
+                          <span className="text-[11px]">Hidden</span>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-5 py-3 border-t border-border sm:justify-between gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground">
+            Showing {filtered.length} of {projects.length} projects · {visibleCount} visible on
+            dashboard
+            {totalToggling > 0 && (
+              <span className="ml-2 text-primary inline-flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Updating…
+              </span>
+            )}
+          </span>
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+          >
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

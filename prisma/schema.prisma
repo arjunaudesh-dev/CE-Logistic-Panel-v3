@@ -14,6 +14,7 @@ datasource db {
 model Project {
   id            String   @id @default(cuid())
   name          String
+  nameAbbreviation String? // abbreviated project name (e.g. "NSH" for "No.03 Slipway Hangar") — used as file group key prefix
   voteNumber    String   // vote number OR "NON-NAVAL" OR "CONTRACTUAL"
   voteAllocation Float   @default(0)
   committed     Float    @default(0)
@@ -28,6 +29,7 @@ model Project {
   projectOfficer String?
   status        String   @default("Active") // Active | On Hold | Completed | Cancelled
   description   String?
+  showOnDashboard Boolean @default(true) // toggle visibility on operational dashboard
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -52,16 +54,39 @@ model ProjectFile {
   fileCategory    String   @default("General")
   fileNumber      String?  // file number received after initial RL raising
   fileGroupKey    String?  // grouping key for multiple items under a single file (usually = prNumber or fileNumber)
+  fileGroupSeq    Int      @default(0) // auto-increment sequence number for file group key within a project
   createdBy       String?  // sailor name who created
   authorizedBy    String?  // officer name who authorized
   responsiblePerson String? // default responsible person for current position
+  isArchived      Boolean  @default(false) // NFA (Not For Action) archive instead of hard delete
+  archivedReason  String?  // reason for archiving
+  archivedAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   logs        FileLog[]
+  approvals   FileApprovalEntry[]
 
   @@index([projectId])
+  @@index([isArchived])
+}
+
+// ───────────────────────── FILE APPROVAL HISTORY ─────────────────────────
+// Extended log with Category, Role/Status, Personnel, Date & Time
+// Shown in extended view (not normal popup)
+model FileApprovalEntry {
+  id          String   @id @default(cuid())
+  fileId      String
+  category    String   // e.g. "General Order Request", "General Order Dispatch", "Procurement Request Assign"
+  roleStatus  String   // e.g. "Approved By", "Authorized By", "Assigned By"
+  personnel   String   // e.g. "LT JATK JAYAKODY (NRC3542)"
+  dateTime    String   // e.g. "20/01/2026 17:01:00"
+  createdAt   DateTime @default(now())
+
+  file ProjectFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
 }
 
 model FileLog {

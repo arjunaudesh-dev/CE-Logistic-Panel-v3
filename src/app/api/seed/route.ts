@@ -17,6 +17,7 @@ export async function POST() {
     await db.procurementLog.deleteMany();
     await db.procurementFile.deleteMany();
     await db.fileLog.deleteMany();
+    await db.fileApprovalEntry.deleteMany();
     await db.projectFile.deleteMany();
     await db.allocation.deleteMany();
     await db.estimateItem.deleteMany();
@@ -46,6 +47,7 @@ export async function POST() {
     const p1 = await db.project.create({
       data: {
         name: "Construction of No. 03 Slipway Hangar at Naval Dockyard",
+        nameAbbreviation: "NSH",
         voteNumber: "223-1-01-2104",
         voteAllocation: 85000000,
         committed: 42000000,
@@ -64,6 +66,7 @@ export async function POST() {
     const p2 = await db.project.create({
       data: {
         name: "Expansion of facilities around No. 03 Slipway at Naval Base Trincomalee (50m x 20m steel workshop)",
+        nameAbbreviation: "EFS",
         voteNumber: "223-1-01-2104",
         voteAllocation: 45000000,
         committed: 18000000,
@@ -174,6 +177,7 @@ export async function POST() {
     const p8 = await db.project.create({
       data: {
         name: "Floating Dock at SLN Dockyard",
+        nameAbbreviation: "FDK",
         voteNumber: "223-1-01-2506",
         voteAllocation: 200000000,
         committed: 45000000,
@@ -282,6 +286,13 @@ export async function POST() {
 
     for (const f of fileDefs) {
       const fileCost = (f[5] as number) * (f[6] as number);
+      const proj = await db.project.findUnique({ where: { id: f[0] as string } });
+      const abbrev = proj?.nameAbbreviation || "PRJ";
+      // auto-generate file group key
+      const existingCount = await db.projectFile.count({
+        where: { projectId: f[0] as string, fileGroupKey: { startsWith: `${abbrev}-` } },
+      });
+      const seq = existingCount + 1;
       await db.projectFile.create({
         data: {
           projectId: f[0] as string,
@@ -296,10 +307,26 @@ export async function POST() {
           presentPosition: f[8] as string,
           fileCategory: f[9] as string,
           fileNumber: (f[10] as string) || null,
+          fileGroupKey: `${abbrev}-${String(seq).padStart(3, "0")}`,
+          fileGroupSeq: seq,
           createdBy: f[11] as string,
           authorizedBy: f[12] as string,
           responsiblePerson: f[12] as string,
         },
+      });
+    }
+
+    // ── Sample File Approval Entries (for first file) ──
+    const firstFile = await db.projectFile.findFirst({ orderBy: { createdAt: "asc" } });
+    if (firstFile) {
+      await db.fileApprovalEntry.createMany({
+        data: [
+          { fileId: firstFile.id, category: "General Order Request", roleStatus: "Approved By", personnel: "LT JATK JAYAKODY (NRC3542)", dateTime: "20/01/2026 17:01:00" },
+          { fileId: firstFile.id, category: "General Order Request", roleStatus: "Authorized By", personnel: "LCdr WLE ARAVINDA (NRC2798)", dateTime: "20/01/2026 17:06:00" },
+          { fileId: firstFile.id, category: "General Order Request", roleStatus: "Authorized By", personnel: "Capt (S) TMTB TENNAKOON (NRS1199)", dateTime: "22/01/2026 08:42:00" },
+          { fileId: firstFile.id, category: "General Order Dispatch", roleStatus: "Authorized By", personnel: "LCdr DAL WICKRAMASINGHE", dateTime: "21/01/2026 09:52:00" },
+          { fileId: firstFile.id, category: "Procurement Request Assign", roleStatus: "Assigned By", personnel: "Cdr BND MENDIS (NRS1455)", dateTime: "22/01/2026 10:19:54" },
+        ],
       });
     }
 

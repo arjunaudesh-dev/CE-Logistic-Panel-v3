@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -68,12 +69,16 @@ import {
   Files,
   CheckSquare,
   ListChecks,
+  Archive,
+  ArchiveRestore,
+  FolderKey,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Project {
   id: string;
   name: string;
+  nameAbbreviation?: string | null;
   voteNumber: string;
   voteAllocation: number;
   committed: number;
@@ -123,9 +128,11 @@ interface Props {
 type FileNumberFilter = "all" | "with" | "without";
 
 export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
-  const { data: files, loading, refresh } = useFetch<ProjectFile[]>(
-    `/api/projects/${project.id}/files`
-  );
+  // Archive (NFA) view toggle — OFF (default) shows active files only,
+  // ON shows archived files only (with muted/greyed styling and NFA badges).
+  const [showArchived, setShowArchived] = useState(false);
+  const filesUrl = `/api/projects/${project.id}/files${showArchived ? "?archivedOnly=true" : ""}`;
+  const { data: files, loading, refresh } = useFetch<ProjectFile[]>(filesUrl);
   const { data: estimates, refresh: refreshEst } = useFetch<Estimate[]>(
     `/api/estimates?projectId=${project.id}`
   );
@@ -150,6 +157,8 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Bulk initiate dialog open state
   const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
+  // Archive (NFA) dialog target — when set, opens the small reason-prompt dialog
+  const [archiveTarget, setArchiveTarget] = useState<ProjectFile | null>(null);
   const { toast } = useToast();
 
   const toggleGroup = (key: string) => {
@@ -418,14 +427,23 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   };
 
   const handleDelete = async (file: ProjectFile) => {
-    if (!confirm(`Delete file ${file.prNumber} (${file.itemName})?`)) return;
-    const res = await apiRequest(`/api/projects/${project.id}/files/${file.id}`, "DELETE");
+    // Open the small archive (NFA) dialog asking for an optional reason.
+    // The actual DELETE request (which archives by default) is fired from the
+    // ArchiveNfaDialog's submit handler.
+    setArchiveTarget(file);
+  };
+
+  // Restore an archived (NFA) file back to active — PUT with isArchived=false.
+  const handleRestore = async (file: ProjectFile) => {
+    const res = await apiRequest(`/api/projects/${project.id}/files/${file.id}`, "PUT", {
+      isArchived: false,
+    });
     if (res.ok) {
-      toast({ title: "File deleted" });
+      toast({ title: "File restored from NFA archive" });
       refresh();
       onChanged();
     } else {
-      toast({ title: "Delete failed", description: res.error, variant: "destructive" });
+      toast({ title: "Restore failed", description: res.error, variant: "destructive" });
     }
   };
 
@@ -468,12 +486,14 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
     const hasFileNumber = !!(f.fileNumber && f.fileNumber.trim());
     const isSelected = selectedIds.has(f.id);
     const itemCost = (f.unitPrice || 0) * (f.qty || 0);
+    const isArchived = !!f.isArchived;
     return (
       <TableRow
         key={f.id}
         className={cn(
           "border-border cursor-pointer hover:bg-secondary/40",
-          isSelected && "bg-primary/[0.06]"
+          isSelected && "bg-primary/[0.06]",
+          isArchived && "opacity-60 bg-muted/30"
         )}
         onClick={() => setLogFile(f)}
       >
@@ -484,12 +504,27 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
             aria-label={`Select ${f.prNumber}`}
           />
         </TableCell>
-        <TableCell className="font-mono text-xs text-foreground">{f.prNumber}</TableCell>
+        <TableCell className="font-mono text-xs text-foreground">
+          <div className="flex items-center gap-1.5">
+            {isArchived && <Archive className="h-3 w-3 text-muted-foreground shrink-0" />}
+            {f.prNumber}
+          </div>
+        </TableCell>
         <TableCell>
           {hasFileNumber ? (
             <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
               <Hash className="h-3 w-3" />
               {f.fileNumber}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </TableCell>
+        <TableCell>
+          {f.fileGroupKey && f.fileGroupKey.trim() ? (
+            <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+              <FolderKey className="h-3 w-3" />
+              {f.fileGroupKey}
             </span>
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -511,6 +546,13 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                 {f.responsiblePerson}
               </span>
             )}
+            {isArchived && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Archive className="h-2.5 w-2.5" />
+                {f.archivedReason || "NFA — Archived"}
+                {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
+              </span>
+            )}
           </div>
         </TableCell>
         <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
@@ -522,7 +564,11 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               onSaved={() => { refresh(); onChanged(); }}
             />
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => handleDelete(f)} title="Delete file"><Trash2 className="h-3.5 w-3.5" /></Button>
+            {isArchived ? (
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive"><ArchiveRestore className="h-3.5 w-3.5" /></Button>
+            ) : (
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)"><Archive className="h-3.5 w-3.5" /></Button>
+            )}
           </div>
         </TableCell>
       </TableRow>
@@ -541,7 +587,14 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               <X className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <h2 className="font-semibold text-foreground text-sm sm:text-base truncate">{project.name}</h2>
+              <h2 className="font-semibold text-foreground text-sm sm:text-base truncate flex items-center gap-2">
+                {project.name}
+                {project.nameAbbreviation && (
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+                    {project.nameAbbreviation}
+                  </span>
+                )}
+              </h2>
               <p className="text-xs text-muted-foreground">
                 {project.voteNumber}
                 {project.benefactor && ` · Benefactor: ${project.benefactor}`}
@@ -643,6 +696,17 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     onClick={() => setFileNumberFilter("without")}
                   />
                 </div>
+                {/* Archived (NFA) toggle — ON shows archived files only (with muted styling + NFA badge) */}
+                <Button
+                  size="sm"
+                  variant={showArchived ? "default" : "outline"}
+                  onClick={() => setShowArchived((v) => !v)}
+                  className={cn("gap-1.5", showArchived && "bg-amber-500/90 hover:bg-amber-500 text-white")}
+                  title="Toggle between active and archived (NFA) files"
+                >
+                  <Archive className="h-4 w-4" />
+                  {showArchived ? "Archived (NFA)" : "Show Archived (NFA)"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={exportExcel} className="gap-1.5"><Download className="h-4 w-4" /> Export</Button>
                 <Button
                   size="sm"
@@ -654,8 +718,20 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                   <Files className="h-4 w-4" />
                   {groupByFile ? "Grouped by File" : "Group by File"}
                 </Button>
-                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
+                {!showArchived && (
+                  <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
+                )}
               </div>
+
+              {/* Archived view banner — explains what the user is looking at */}
+              {showArchived && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-4 py-2.5 flex items-center gap-2 text-sm">
+                  <Archive className="h-4 w-4 text-amber-400" />
+                  <span className="text-foreground">
+                    Showing <span className="font-medium">archived (NFA)</span> files only. These are kept for historical reference and can be restored to active status.
+                  </span>
+                </div>
+              )}
 
               {/* Selection bar — appears when at least one file is selected */}
               {selectedIds.size > 0 && (
@@ -706,6 +782,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                         </TableHead>
                         <SortTh label="PR Number" onClick={() => toggleSort("prNumber")} active={sortKey === "prNumber"} dir={sortDir} />
                         <TableHead className="text-muted-foreground">File Number</TableHead>
+                        <TableHead className="text-muted-foreground">File Group</TableHead>
                         <TableHead className="text-muted-foreground">Item Code</TableHead>
                         <TableHead className="text-muted-foreground">Item Name</TableHead>
                         <TableHead className="text-muted-foreground text-right">Qty</TableHead>
@@ -720,18 +797,23 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     </TableHeader>
                     <TableBody>
                       {loading ? (
-                        <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
+                        <TableRow><TableCell colSpan={14} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
                       ) : filteredFiles.length === 0 ? (
-                        <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground">No files found. Click &quot;Add File&quot; to create one.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={14} className="text-center py-8 text-muted-foreground">{showArchived ? "No archived (NFA) files found." : "No files found. Click \"Add File\" to create one."}</TableCell></TableRow>
                       ) : groupByFile && groupedView.groups.length > 0 ? (
                         <>
                           {groupedView.groups.map((g) => {
                             const expanded = expandedGroups.has(g.key);
+                            const groupFileGroupKey = g.items[0]?.fileGroupKey || null;
+                            const groupArchived = g.items.every((it) => it.isArchived);
                             return (
                               <Fragment key={g.key}>
                                 {/* Group header (merged) row */}
                                 <TableRow
-                                  className="border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50"
+                                  className={cn(
+                                    "border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50",
+                                    groupArchived && "opacity-70 bg-muted/20"
+                                  )}
                                   onClick={() => toggleGroup(g.key)}
                                 >
                                   <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
@@ -760,6 +842,11 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                       <Files className="h-3.5 w-3.5 text-primary shrink-0" />
                                       <span className="truncate">{g.key}</span>
                                       <CustomBadge className="border-0 bg-primary/15 text-primary">{g.items.length} items</CustomBadge>
+                                      {groupArchived && (
+                                        <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">
+                                          <Archive className="h-2.5 w-2.5 mr-1 inline" />NFA
+                                        </CustomBadge>
+                                      )}
                                     </div>
                                   </TableCell>
                                   <TableCell>
@@ -770,6 +857,16 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                       </span>
                                     ) : (
                                       <span className="text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {groupFileGroupKey ? (
+                                      <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                                        <FolderKey className="h-3 w-3" />
+                                        {groupFileGroupKey}
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground text-xs italic">multiple</span>
                                     )}
                                   </TableCell>
                                   <TableCell className="text-xs text-muted-foreground italic">multiple</TableCell>
@@ -836,12 +933,14 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                 {expanded && g.items.map((f) => {
                                   const childSelected = selectedIds.has(f.id);
                                   const childCost = (f.unitPrice || 0) * (f.qty || 0);
+                                  const childArchived = !!f.isArchived;
                                   return (
                                   <TableRow
                                     key={f.id}
                                     className={cn(
                                       "border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30",
-                                      childSelected && "bg-primary/[0.06]"
+                                      childSelected && "bg-primary/[0.06]",
+                                      childArchived && "opacity-60 bg-muted/20"
                                     )}
                                     onClick={() => setLogFile(f)}
                                   >
@@ -868,6 +967,16 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                         <span className="text-muted-foreground">—</span>
                                       )}
                                     </TableCell>
+                                    <TableCell>
+                                      {f.fileGroupKey && f.fileGroupKey.trim() ? (
+                                        <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                                          <FolderKey className="h-3 w-3" />
+                                          {f.fileGroupKey}
+                                        </span>
+                                      ) : (
+                                        <span className="text-muted-foreground">—</span>
+                                      )}
+                                    </TableCell>
                                     <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
                                     <TableCell className="text-foreground text-xs">{f.itemName}</TableCell>
                                     <TableCell className="text-right text-xs">{f.qty} {f.unit}</TableCell>
@@ -884,6 +993,13 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                             {f.responsiblePerson}
                                           </span>
                                         )}
+                                        {childArchived && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                                            <Archive className="h-2.5 w-2.5" />
+                                            {f.archivedReason || "NFA — Archived"}
+                                            {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
+                                          </span>
+                                        )}
                                       </div>
                                     </TableCell>
                                     <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
@@ -895,6 +1011,11 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                           onSaved={() => { refresh(); onChanged(); }}
                                         />
                                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
+                                        {childArchived ? (
+                                          <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive"><ArchiveRestore className="h-3.5 w-3.5" /></Button>
+                                        ) : (
+                                          <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)"><Archive className="h-3.5 w-3.5" /></Button>
+                                        )}
                                       </div>
                                     </TableCell>
                                   </TableRow>
@@ -982,9 +1103,28 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
         />
       )}
       {/* File Log */}
-      <FileLogDialog file={logFile} open={!!logFile} onOpenChange={(o) => !o && setLogFile(null)} />
+      <FileLogDialog
+        file={logFile}
+        open={!!logFile}
+        onOpenChange={(o) => !o && setLogFile(null)}
+        onApprovalsChanged={() => { refresh(); onChanged(); }}
+      />
       {/* Allocation History */}
       <AllocationHistoryDialog project={project} open={allocOpen} onOpenChange={setAllocOpen} onChanged={onChanged} />
+      {/* Archive (NFA) reason-prompt dialog — opened via the Archive button on each file row */}
+      {archiveTarget && (
+        <ArchiveNfaDialog
+          file={archiveTarget}
+          projectId={project.id}
+          open={!!archiveTarget}
+          onOpenChange={(o) => !o && setArchiveTarget(null)}
+          onArchived={() => {
+            setArchiveTarget(null);
+            refresh();
+            onChanged();
+          }}
+        />
+      )}
       {/* Bulk Initiate dialog — picks the target position then bulk-updates selected files.
           The `key` forces a fresh mount whenever the user opens the dialog with a
           different set of selections, so the suggested-next-position default refreshes. */}
@@ -1622,6 +1762,101 @@ function BulkInitiateDialog({
           <Button onClick={submit} disabled={saving || selectedCount === 0} className="gap-1.5">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
             Initiate {selectedCount} File{selectedCount === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Archive (NFA) Dialog — prompts for an optional reason before archiving ───
+// DELETE /api/projects/[id]/files/[fileId] archives by default (sets isArchived,
+// archivedReason, archivedAt). Use ?force=true to hard-delete — we never call
+// that variant from this UI; archive is the only path.
+function ArchiveNfaDialog({
+  file,
+  projectId,
+  open,
+  onOpenChange,
+  onArchived,
+}: {
+  file: ProjectFile;
+  projectId: string;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onArchived: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const submit = async () => {
+    setSaving(true);
+    const res = await apiRequest(`/api/projects/${projectId}/files/${file.id}`, "DELETE", {
+      reason: reason.trim() || "NFA — Archived",
+    });
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: "File archived (NFA)",
+        description: reason.trim()
+          ? `Reason: ${reason.trim()}`
+          : "Use the “Show Archived (NFA)” toggle to view archived files.",
+      });
+      setReason("");
+      onArchived();
+    } else {
+      toast({ title: "Archive failed", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
+      <DialogContent className="max-w-md bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <Archive className="h-5 w-5 text-amber-400" />
+            Archive (NFA) — {file.prNumber}
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Archiving moves this file to the <span className="font-medium text-foreground">NFA (Not For Action)</span> archive. The file is kept for historical reference and can be restored later. The file will not appear in the active file register.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="bg-secondary/40 rounded-lg p-3 text-xs space-y-1">
+            <div><span className="text-muted-foreground">PR Number:</span> <span className="font-mono text-foreground">{file.prNumber}</span></div>
+            <div><span className="text-muted-foreground">Item:</span> <span className="text-foreground">{file.itemName}</span></div>
+            <div><span className="text-muted-foreground">Item Code:</span> <span className="font-mono text-foreground">{file.itemCode}</span></div>
+            {file.fileGroupKey && (
+              <div><span className="text-muted-foreground">File Group:</span> <span className="font-mono text-primary">{file.fileGroupKey}</span></div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Reason for archiving (NFA)</Label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Duplicate file, cancelled PR, superseded by newer file…"
+              rows={3}
+              className="bg-background border-border"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Optional — leave blank to use the default reason <span className="font-mono">“NFA — Archived”</span>.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button
+            onClick={submit}
+            disabled={saving}
+            className="gap-1.5 bg-amber-500/90 hover:bg-amber-500 text-white"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+            Archive (NFA)
           </Button>
         </DialogFooter>
       </DialogContent>

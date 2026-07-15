@@ -72,6 +72,9 @@ interface EstimateWithProject {
   status: string;
   items: EstimateItem[];
   project?: {
+    id?: string;
+    name?: string;
+    nameAbbreviation?: string | null;
     projectType?: string | null;
     financialMean?: string | null;
   } | null;
@@ -487,6 +490,7 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
             refresh();
             onChanged?.();
           }}
+          projectAbbreviation={estimate?.project?.nameAbbreviation}
         />
       )}
 

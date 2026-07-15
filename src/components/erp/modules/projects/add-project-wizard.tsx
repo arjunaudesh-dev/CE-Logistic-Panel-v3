@@ -51,6 +51,7 @@ import {
   ChevronLeft,
   Landmark,
   Wallet,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +88,7 @@ interface EstimateRow {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreated: (project: { id: string; name: string; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null }) => void;
+  onCreated: (project: { id: string; name: string; nameAbbreviation: string | null; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null }) => void;
 }
 
 const UNITS = ["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"];
@@ -109,6 +110,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
 
   const [form, setForm] = useState({
     name: "",
+    nameAbbreviation: "",
     voteNumber: "",
     voteAllocation: "",
     committed: "0",
@@ -128,6 +130,43 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   ]);
 
   const selectedVote = votes?.find((v) => v.id === selectedVoteId);
+
+  // Tracks whether the user has manually edited the abbreviation field. When
+  // false, the abbreviation auto-suggests from the project name. Once the user
+  // touches the field, we stop auto-suggesting so their override sticks.
+  const [abbrevTouched, setAbbrevTouched] = useState(false);
+
+  // Suggest an abbreviation from a project name by taking the first letter of
+  // each significant word (skipping common stop-words / numbers / symbols).
+  // Example: "No.03 Slipway Hangar" → "NSH", "Engine Fire Suppression" → "EFS".
+  const suggestAbbreviation = (name: string): string => {
+    const stop = new Set(["of", "for", "and", "the", "in", "on", "at", "to", "no", "a", "an"]);
+    const tokens = name
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+      .split(/[\s-]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const letters = tokens
+      .filter((t) => !stop.has(t.toLowerCase()))
+      .map((t) => t[0]!.toUpperCase());
+    return letters.slice(0, 5).join("");
+  };
+
+  const handleNameChange = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      name: value,
+      // keep auto-suggesting the abbreviation until the user edits it manually
+      nameAbbreviation: abbrevTouched ? prev.nameAbbreviation : suggestAbbreviation(value),
+    }));
+  };
+
+  const handleAbbrevChange = (value: string) => {
+    setAbbrevTouched(true);
+    // Force uppercase, strip non-alphanumeric (keep letters + digits)
+    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    setForm((prev) => ({ ...prev, nameAbbreviation: cleaned }));
+  };
 
   const handleVoteSelect = (id: string) => {
     setSelectedVoteId(id);
@@ -403,6 +442,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       onCreated({
         id: createdProjectId,
         name: form.name,
+        nameAbbreviation: form.nameAbbreviation || null,
         voteNumber: form.voteNumber,
         voteAllocation: Number(form.voteAllocation) || 0,
         committed: Number(form.committed) || 0,
@@ -419,8 +459,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       setCreatedProjectId(null);
       setCreatedEstimateId(null);
       setFundsChecked(false);
+      setAbbrevTouched(false);
       setForm({
-        name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
+        name: "", nameAbbreviation: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
         startDate: "", endDate: "", benefactor: "", reference: "",
         projectType: "New Construction", financialMean: "Vote/Funds",
         projectOfficer: "", status: "Active", description: "",
@@ -466,7 +507,30 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label>Project Name *</Label>
-                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
+                  <Input value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
+                </div>
+
+                {/* Project Name Abbreviation — used as the file group key prefix */}
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5">
+                    <Layers className="h-3.5 w-3.5 text-primary" />
+                    Project Name Abbreviation
+                    <span className="text-[10px] font-normal text-muted-foreground ml-1">(for file group key prefix)</span>
+                  </Label>
+                  <Input
+                    value={form.nameAbbreviation}
+                    onChange={(e) => handleAbbrevChange(e.target.value)}
+                    placeholder="e.g. NSH"
+                    className="bg-background border-border font-mono uppercase tracking-wider"
+                    maxLength={8}
+                  />
+                  <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                    <Info className="h-3 w-3 mt-0.5 shrink-0" />
+                    Used as prefix for auto-generated file group keys (e.g.
+                    <span className="font-mono text-foreground mx-1">{form.nameAbbreviation || "NSH"}-001</span>,
+                    <span className="font-mono text-foreground ml-1">{form.nameAbbreviation || "NSH"}-002</span>).
+                    Auto-suggested from the project name — override if needed.
+                  </p>
                 </div>
 
                 {/* Vote Number — conditional UI based on Funds checkbox state */}

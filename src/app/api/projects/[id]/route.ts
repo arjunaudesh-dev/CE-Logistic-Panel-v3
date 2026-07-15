@@ -34,6 +34,7 @@ export async function PUT(
       where: { id },
       data: {
         name: body.name,
+        nameAbbreviation: body.nameAbbreviation ?? undefined,
         voteNumber: body.voteNumber,
         voteAllocation: Number(body.voteAllocation) || 0,
         committed: Number(body.committed) || 0,
@@ -48,6 +49,7 @@ export async function PUT(
         projectOfficer: body.projectOfficer || null,
         status: body.status || "Active",
         description: body.description || null,
+        showOnDashboard: body.showOnDashboard !== undefined ? body.showOnDashboard : undefined,
       },
     });
     return NextResponse.json(updated);

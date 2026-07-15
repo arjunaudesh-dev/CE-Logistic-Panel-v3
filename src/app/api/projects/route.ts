@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     const project = await db.project.create({
       data: {
         name: body.name,
+        nameAbbreviation: body.nameAbbreviation || null,
         voteNumber: body.voteNumber,
         voteAllocation: Number(body.voteAllocation) || 0,
         committed: Number(body.committed) || 0,
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
         projectOfficer: body.projectOfficer || null,
         status: body.status || "Active",
         description: body.description || null,
+        showOnDashboard: body.showOnDashboard !== false,
       },
     });
     return NextResponse.json(project, { status: 201 });
