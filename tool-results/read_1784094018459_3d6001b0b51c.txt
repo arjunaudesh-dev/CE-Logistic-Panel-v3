@@ -1,0 +1,702 @@
+     1→  1100→    </Dialog>
+     2→  1101→  );
+     3→  1102→}
+     4→  1103→
+     5→  1104→// ─────────────────────────────────────────────────────────
+     6→  1105→// Set Password Dialog (per user)
+     7→  1106→// ─────────────────────────────────────────────────────────
+     8→  1107→interface SetPasswordDialogProps {
+     9→  1108→  user: UserProfile | null;
+    10→  1109→  open: boolean;
+    11→  1110→  onOpenChange: (o: boolean) => void;
+    12→  1111→  onSaved: () => void;
+    13→  1112→}
+    14→  1113→
+    15→  1114→function SetPasswordDialog({
+    16→  1115→  user,
+    17→  1116→  open,
+    18→  1117→  onOpenChange,
+    19→  1118→  onSaved,
+    20→  1119→}: SetPasswordDialogProps) {
+    21→  1120→  const { toast } = useToast();
+    22→  1121→  const [password, setPassword] = useState("");
+    23→  1122→  const [confirm, setConfirm] = useState("");
+    24→  1123→  const [show, setShow] = useState(false);
+    25→  1124→  const [saving, setSaving] = useState(false);
+    26→  1125→
+    27→  1126→  async function handleSubmit(e: React.FormEvent) {
+    28→  1127→    e.preventDefault();
+    29→  1128→    if (!user) return;
+    30→  1129→    if (password.length < 4) {
+    31→  1130→      toast({
+    32→  1131→        title: "Password too short",
+    33→  1132→        description: "Use at least 4 characters.",
+    34→  1133→        variant: "destructive",
+    35→  1134→      });
+    36→  1135→      return;
+    37→  1136→    }
+    38→  1137→    if (password !== confirm) {
+    39→  1138→      toast({
+    40→  1139→        title: "Passwords do not match",
+    41→  1140→        variant: "destructive",
+    42→  1141→      });
+    43→  1142→      return;
+    44→  1143→    }
+    45→  1144→    setSaving(true);
+    46→  1145→    const res = await apiRequest("/api/auth/set-password", "POST", {
+    47→  1146→      userId: user.id,
+    48→  1147→      password,
+    49→  1148→    });
+    50→  1149→    setSaving(false);
+    51→  1150→    if (res.ok) {
+    52→  1151→      toast({
+    53→  1152→        title: "Password set",
+    54→  1153→        description: `${user.displayName} can now sign in.`,
+    55→  1154→      });
+    56→  1155→      onSaved();
+    57→  1156→    } else {
+    58→  1157→      toast({
+    59→  1158→        title: "Failed to set password",
+    60→  1159→        description: res.error,
+    61→  1160→        variant: "destructive",
+    62→  1161→      });
+    63→  1162→    }
+    64→  1163→  }
+    65→  1164→
+    66→  1165→  return (
+    67→  1166→    <Dialog open={open} onOpenChange={onOpenChange}>
+    68→  1167→      <DialogContent className="sm:max-w-md">
+    69→  1168→        <DialogHeader>
+    70→  1169→          <DialogTitle className="flex items-center gap-2">
+    71→  1170→            <KeyRound className="h-5 w-5 text-primary" />
+    72→  1171→            Set Password
+    73→  1172→          </DialogTitle>
+    74→  1173→          <DialogDescription>
+    75→  1174→            Set or reset the password for{" "}
+    76→  1175→            <span className="font-semibold text-foreground">
+    77→  1176→              {user?.displayName}
+    78→  1177→            </span>{" "}
+    79→  1178→            (<span className="font-mono">@{user?.username}</span>).
+    80→  1179→          </DialogDescription>
+    81→  1180→        </DialogHeader>
+    82→  1181→        <form onSubmit={handleSubmit} className="space-y-4">
+    83→  1182→          <Field label="New Password" required>
+    84→  1183→            <div className="relative">
+    85→  1184→              <Input
+    86→  1185→                type={show ? "text" : "password"}
+    87→  1186→                value={password}
+    88→  1187→                onChange={(e) => setPassword(e.target.value)}
+    89→  1188→                placeholder="Minimum 4 characters"
+    90→  1189→                className="bg-background pr-10"
+    91→  1190→                required
+    92→  1191→                autoFocus
+    93→  1192→              />
+    94→  1193→              <button
+    95→  1194→                type="button"
+    96→  1195→                onClick={() => setShow((s) => !s)}
+    97→  1196→                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+    98→  1197→                aria-label={show ? "Hide password" : "Show password"}
+    99→  1198→              >
+   100→  1199→                {show ? (
+   101→  1200→                  <EyeOff className="h-4 w-4" />
+   102→  1201→                ) : (
+   103→  1202→                  <Eye className="h-4 w-4" />
+   104→  1203→                )}
+   105→  1204→              </button>
+   106→  1205→            </div>
+   107→  1206→          </Field>
+   108→  1207→          <Field label="Confirm Password" required>
+   109→  1208→            <Input
+   110→  1209→              type={show ? "text" : "password"}
+   111→  1210→              value={confirm}
+   112→  1211→              onChange={(e) => setConfirm(e.target.value)}
+   113→  1212→              placeholder="Re-enter password"
+   114→  1213→              className="bg-background"
+   115→  1214→              required
+   116→  1215→            />
+   117→  1216→          </Field>
+   118→  1217→          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300 flex items-start gap-2">
+   119→  1218→            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+   120→  1219→            <p>
+   121→  1220→              This will overwrite any existing password for this user. The user
+   122→  1221→              must use this new password to sign in.
+   123→  1222→            </p>
+   124→  1223→          </div>
+   125→  1224→          <DialogFooter>
+   126→  1225→            <Button
+   127→  1226→              type="button"
+   128→  1227→              variant="outline"
+   129→  1228→              onClick={() => onOpenChange(false)}
+   130→  1229→              disabled={saving}
+   131→  1230→            >
+   132→  1231→              Cancel
+   133→  1232→            </Button>
+   134→  1233→            <Button type="submit" disabled={saving}>
+   135→  1234→              {saving ? (
+   136→  1235→                <>
+   137→  1236→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+   138→  1237→                  Saving...
+   139→  1238→                </>
+   140→  1239→              ) : (
+   141→  1240→                <>
+   142→  1241→                  <KeyRound className="h-4 w-4 mr-1" />
+   143→  1242→                  Set Password
+   144→  1243→                </>
+   145→  1244→              )}
+   146→  1245→            </Button>
+   147→  1246→          </DialogFooter>
+   148→  1247→        </form>
+   149→  1248→      </DialogContent>
+   150→  1249→    </Dialog>
+   151→  1250→  );
+   152→  1251→}
+   153→  1252→
+   154→  1253→// ═════════════════════════════════════════════════════════
+   155→  1254→// TAB 2 — Roles & Access
+   156→  1255→// ═════════════════════════════════════════════════════════
+   157→  1256→function RolesAccessTab() {
+   158→  1257→  const roleDescriptions: {
+   159→  1258→    role: string;
+   160→  1259→    description: string;
+   161→  1260→    icon: LucideIcon;
+   162→  1261→  }[] = [
+   163→  1262→    {
+   164→  1263→      role: "Admin",
+   165→  1264→      description:
+   166→  1265→        "Full system control — manages users, settings and every module.",
+   167→  1266→      icon: Crown,
+   168→  1267→    },
+   169→  1268→    {
+   170→  1269→      role: "Manager",
+   171→  1270→      description: "Approves and oversees operations across most modules.",
+   172→  1271→      icon: UserCog,
+   173→  1272→    },
+   174→  1273→    {
+   175→  1274→      role: "Officer",
+   176→  1275→      description: "Edits operational records in assigned departments.",
+   177→  1276→      icon: Shield,
+   178→  1277→    },
+   179→  1278→    {
+   180→  1279→      role: "Clerk",
+   181→  1280→      description:
+   182→  1281→        "Creates and edits files, items and collection records.",
+   183→  1282→      icon: ClipboardCheck,
+   184→  1283→    },
+   185→  1284→    {
+   186→  1285→      role: "Viewer",
+   187→  1286→      description: "Read-only access to dashboards and records.",
+   188→  1287→      icon: Eye,
+   189→  1288→    },
+   190→  1289→  ];
+   191→  1290→
+   192→  1291→  return (
+   193→  1292→    <div className="space-y-5">
+   194→  1293→      {/* Header banner */}
+   195→  1294→      <div className="bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent border border-violet-500/20 rounded-xl p-5 flex items-start gap-3">
+   196→  1295→        <div className="h-12 w-12 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center shrink-0 ring-2 ring-violet-500/20">
+   197→  1296→          <Shield className="h-6 w-6" />
+   198→  1297→        </div>
+   199→  1298→        <div>
+   200→  1299→          <h2 className="text-xl font-bold text-foreground">
+   201→  1300→            Roles &amp; Access Permissions
+   202→  1301→          </h2>
+   203→  1302→          <p className="text-sm text-muted-foreground mt-1">
+   204→  1303→            The permission matrix below defines what each role can do across
+   205→  1304→            every module of the CE Logistic Panel. This is a reference
+   206→  1305→            configuration — admins assign roles to users in the User Profiles
+   207→  1306→            tab.
+   208→  1307→          </p>
+   209→  1308→        </div>
+   210→  1309→      </div>
+   211→  1310→
+   212→  1311→      {/* Role description cards */}
+   213→  1312→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+   214→  1313→        {roleDescriptions.map(({ role, description, icon: Icon }) => (
+   215→  1314→          <div
+   216→  1315→            key={role}
+   217→  1316→            className="bg-card border border-border rounded-xl p-4 hover:border-primary/40 transition-all hover:-translate-y-0.5"
+   218→  1317→          >
+   219→  1318→            <div className="flex items-center gap-2 mb-2">
+   220→  1319→              <div
+   221→  1320→                className={cn(
+   222→  1321→                  "h-8 w-8 rounded-md flex items-center justify-center",
+   223→  1322→                  userRoleColor(role)
+   224→  1323→                )}
+   225→  1324→              >
+   226→  1325→                <Icon className="h-4 w-4" />
+   227→  1326→              </div>
+   228→  1327→              <CustomBadge className={userRoleColor(role)}>{role}</CustomBadge>
+   229→  1328→            </div>
+   230→  1329→            <p className="text-xs text-muted-foreground leading-relaxed">
+   231→  1330→              {description}
+   232→  1331→            </p>
+   233→  1332→          </div>
+   234→  1333→        ))}
+   235→  1334→      </div>
+   236→  1335→
+   237→  1336→      {/* Permission matrix */}
+   238→  1337→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+   239→  1338→        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex items-center justify-between gap-3">
+   240→  1339→          <div>
+   241→  1340→            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   242→  1341→              <ListTree className="h-4 w-4 text-primary" />
+   243→  1342→              Module Permission Matrix
+   244→  1343→            </h3>
+   245→  1344→            <p className="text-xs text-muted-foreground mt-0.5">
+   246→  1345→              Read-only reference of role-based access control (RBAC) for the
+   247→  1346→              ERP modules.
+   248→  1347→            </p>
+   249→  1348→          </div>
+   250→  1349→          <CustomBadge className="bg-secondary text-muted-foreground border-border">
+   251→  1350→            {ROLE_PERMISSIONS.length} modules × {USER_ROLES.length} roles
+   252→  1351→          </CustomBadge>
+   253→  1352→        </div>
+   254→  1353→        <ScrollArea className="max-h-[60vh]">
+   255→  1354→          <Table>
+   256→  1355→            <TableHeader className="sticky top-0 bg-card z-10">
+   257→  1356→              <TableRow className="border-border hover:bg-transparent">
+   258→  1357→                <TableHead className="min-w-[180px]">Module</TableHead>
+   259→  1358→                {USER_ROLES.map((role) => {
+   260→  1359→                  const Icon = roleDescriptions.find((r) => r.role === role)
+   261→  1360→                    ?.icon;
+   262→  1361→                  return (
+   263→  1362→                    <TableHead
+   264→  1363→                      key={role}
+   265→  1364→                      className="text-center min-w-[140px]"
+   266→  1365→                    >
+   267→  1366→                      <div className="flex flex-col items-center gap-1">
+   268→  1367→                        <div
+   269→  1368→                          className={cn(
+   270→  1369→                            "h-7 w-7 rounded-md flex items-center justify-center",
+   271→  1370→                            userRoleColor(role)
+   272→  1371→                          )}
+   273→  1372→                        >
+   274→  1373→                          {Icon && <Icon className="h-3.5 w-3.5" />}
+   275→  1374→                        </div>
+   276→  1375→                        <span className="text-xs font-semibold">{role}</span>
+   277→  1376→                      </div>
+   278→  1377→                    </TableHead>
+   279→  1378→                  );
+   280→  1379→                })}
+   281→  1380→              </TableRow>
+   282→  1381→            </TableHeader>
+   283→  1382→            <TableBody>
+   284→  1383→              {ROLE_PERMISSIONS.map((row, idx) => (
+   285→  1384→                <TableRow
+   286→  1385→                  key={row.module}
+   287→  1386→                  className={cn(
+   288→  1387→                    "border-border transition-colors hover:bg-secondary/30",
+   289→  1388→                    idx % 2 === 1 && "bg-secondary/10"
+   290→  1389→                  )}
+   291→  1390→                >
+   292→  1391→                  <TableCell className="font-medium text-foreground">
+   293→  1392→                    <div className="flex items-center gap-2">
+   294→  1393→                      <div className="h-6 w-6 rounded bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
+   295→  1394→                        {idx + 1}
+   296→  1395→                      </div>
+   297→  1396→                      {row.module}
+   298→  1397→                    </div>
+   299→  1398→                  </TableCell>
+   300→  1399→                  <TableCell className="text-center">
+   301→  1400→                    <PermissionBadge value={row.admin} />
+   302→  1401→                  </TableCell>
+   303→  1402→                  <TableCell className="text-center">
+   304→  1403→                    <PermissionBadge value={row.manager} />
+   305→  1404→                  </TableCell>
+   306→  1405→                  <TableCell className="text-center">
+   307→  1406→                    <PermissionBadge value={row.officer} />
+   308→  1407→                  </TableCell>
+   309→  1408→                  <TableCell className="text-center">
+   310→  1409→                    <PermissionBadge value={row.clerk} />
+   311→  1410→                  </TableCell>
+   312→  1411→                  <TableCell className="text-center">
+   313→  1412→                    <PermissionBadge value={row.viewer} />
+   314→  1413→                  </TableCell>
+   315→  1414→                </TableRow>
+   316→  1415→              ))}
+   317→  1416→            </TableBody>
+   318→  1417→          </Table>
+   319→  1418→        </ScrollArea>
+   320→  1419→      </div>
+   321→  1420→
+   322→  1421→      {/* Legend */}
+   323→  1422→      <div className="bg-card border border-border rounded-xl p-4">
+   324→  1423→        <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-2">
+   325→  1424→          <Info className="h-4 w-4 text-primary" />
+   326→  1425→          Legend
+   327→  1426→        </p>
+   328→  1427→        <div className="flex flex-wrap gap-3">
+   329→  1428→          <CustomBadge className={permissionColor("Full")}>
+   330→  1429→            <CheckCircle2 className="h-3 w-3 mr-1" />
+   331→  1430→            Full Access
+   332→  1431→          </CustomBadge>
+   333→  1432→          <CustomBadge className={permissionColor("Edit")}>
+   334→  1433→            <Pencil className="h-3 w-3 mr-1" />
+   335→  1434→            Edit / Create
+   336→  1435→          </CustomBadge>
+   337→  1436→          <CustomBadge className={permissionColor("View")}>
+   338→  1437→            <Eye className="h-3 w-3 mr-1" />
+   339→  1438→            View Only
+   340→  1439→          </CustomBadge>
+   341→  1440→          <CustomBadge className={permissionColor("—")}>
+   342→  1441→            <XCircle className="h-3 w-3 mr-1" />
+   343→  1442→            No Access
+   344→  1443→          </CustomBadge>
+   345→  1444→        </div>
+   346→  1445→      </div>
+   347→  1446→    </div>
+   348→  1447→  );
+   349→  1448→}
+   350→  1449→
+   351→  1450→function PermissionBadge({ value }: { value: string }) {
+   352→  1451→  return (
+   353→  1452→    <CustomBadge className={cn("text-xs", permissionColor(value))}>
+   354→  1453→      {value === "—" ? (
+   355→  1454→        <XCircle className="h-3 w-3 mr-1" />
+   356→  1455→      ) : value === "Full" ? (
+   357→  1456→        <CheckCircle2 className="h-3 w-3 mr-1" />
+   358→  1457→      ) : value === "View" ? (
+   359→  1458→        <Eye className="h-3 w-3 mr-1" />
+   360→  1459→      ) : (
+   361→  1460→        <Pencil className="h-3 w-3 mr-1" />
+   362→  1461→      )}
+   363→  1462→      {value}
+   364→  1463→    </CustomBadge>
+   365→  1464→  );
+   366→  1465→}
+   367→  1466→
+   368→  1467→// ═════════════════════════════════════════════════════════
+   369→  1468→// TAB 3 — Authentication
+   370→  1469→// ═════════════════════════════════════════════════════════
+   371→  1470→function AuthenticationTab() {
+   372→  1471→  const { toast } = useToast();
+   373→  1472→  const [loginUsername, setLoginUsername] = useState("");
+   374→  1473→  const [loginPassword, setLoginPassword] = useState("");
+   375→  1474→  const [loginLoading, setLoginLoading] = useState(false);
+   376→  1475→  const [loginResult, setLoginResult] = useState<
+   377→  1476→    | { ok: boolean; user?: SessionUser; error?: string }
+   378→  1477→    | null
+   379→  1478→  >(null);
+   380→  1479→
+   381→  1480→  const {
+   382→  1481→    data: session,
+   383→  1482→    loading: sessionLoading,
+   384→  1483→    refresh: refreshSession,
+   385→  1484→  } = useFetch<SessionResponse>("/api/auth/session");
+   386→  1485→  const {
+   387→  1486→    data: users,
+   388→  1487→    loading: usersLoading,
+   389→  1488→    error: usersError,
+   390→  1489→    refresh: refreshUsers,
+   391→  1490→  } = useFetch<UserProfile[]>("/api/settings/users");
+   392→  1491→
+   393→  1492→  const [passwordTarget, setPasswordTarget] = useState<UserProfile | null>(
+   394→  1493→    null
+   395→  1494→  );
+   396→  1495→
+   397→  1496→  const defaultCredentials = [
+   398→  1497→    { u: "rperera", p: "admin123", role: "Admin" },
+   399→  1498→    { u: "tjaya", p: "manager123", role: "Manager" },
+   400→  1499→    { u: "mfernando", p: "officer123", role: "Officer" },
+   401→  1500→    { u: "pbandara", p: "clerk123", role: "Clerk" },
+   402→  1501→  ];
+   403→  1502→
+   404→  1503→  async function handleLogin(e: React.FormEvent) {
+   405→  1504→    e.preventDefault();
+   406→  1505→    if (!loginUsername.trim() || !loginPassword) {
+   407→  1506→      toast({
+   408→  1507→        title: "Username and password are required",
+   409→  1508→        variant: "destructive",
+   410→  1509→      });
+   411→  1510→      return;
+   412→  1511→    }
+   413→  1512→    setLoginLoading(true);
+   414→  1513→    setLoginResult(null);
+   415→  1514→    const res = await apiRequest("/api/auth/login", "POST", {
+   416→  1515→      username: loginUsername.trim(),
+   417→  1516→      password: loginPassword,
+   418→  1517→    });
+   419→  1518→    setLoginLoading(false);
+   420→  1519→    if (res.ok) {
+   421→  1520→      const data = res.data as { ok: boolean; user: SessionUser };
+   422→  1521→      setLoginResult({ ok: true, user: data.user });
+   423→  1522→      toast({
+   424→  1523→        title: "Login successful",
+   425→  1524→        description: `${data.user.displayName} (${data.user.role})`,
+   426→  1525→      });
+   427→  1526→      refreshSession();
+   428→  1527→    } else {
+   429→  1528→      setLoginResult({ ok: false, error: res.error });
+   430→  1529→      toast({
+   431→  1530→        title: "Login failed",
+   432→  1531→        description: res.error,
+   433→  1532→        variant: "destructive",
+   434→  1533→      });
+   435→  1534→    }
+   436→  1535→  }
+   437→  1536→
+   438→  1537→  async function handleLogout() {
+   439→  1538→    const res = await apiRequest("/api/auth/logout", "POST");
+   440→  1539→    if (res.ok) {
+   441→  1540→      toast({ title: "Logged out" });
+   442→  1541→      refreshSession();
+   443→  1542→    } else {
+   444→  1543→      toast({
+   445→  1544→        title: "Logout failed",
+   446→  1545→        description: res.error,
+   447→  1546→        variant: "destructive",
+   448→  1547→      });
+   449→  1548→    }
+   450→  1549→  }
+   451→  1550→
+   452→  1551→  const securedCount = users?.filter((u) => u.passwordHash).length ?? 0;
+   453→  1552→
+   454→  1553→  return (
+   455→  1554→    <div className="space-y-5">
+   456→  1555→      {/* Default credentials info card */}
+   457→  1556→      <div className="bg-gradient-to-r from-blue-500/10 via-cyan-500/5 to-transparent border border-blue-500/20 rounded-xl p-5">
+   458→  1557→        <div className="flex items-start gap-3">
+   459→  1558→          <div className="h-11 w-11 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0 ring-2 ring-blue-500/20">
+   460→  1559→            <Info className="h-6 w-6" />
+   461→  1560→          </div>
+   462→  1561→          <div className="flex-1 min-w-0">
+   463→  1562→            <h3 className="text-base font-semibold text-foreground">
+   464→  1563→              Authentication Overview
+   465→  1564→            </h3>
+   466→  1565→            <p className="text-sm text-muted-foreground mt-1">
+   467→  1566→              Users must have a password set to authenticate. Use the Set
+   468→  1567→              Password action to assign credentials. Below are the default
+   469→  1568→              seeded credentials:
+   470→  1569→            </p>
+   471→  1570→            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+   472→  1571→              {defaultCredentials.map((c) => (
+   473→  1572→                <div
+   474→  1573→                  key={c.u}
+   475→  1574→                  className="bg-card/60 border border-border rounded-lg p-2.5"
+   476→  1575→                >
+   477→  1576→                  <div className="flex items-center justify-between mb-1">
+   478→  1577→                    <span className="font-mono text-sm text-foreground">
+   479→  1578→                      {c.u}
+   480→  1579→                    </span>
+   481→  1580→                    <CustomBadge className={userRoleColor(c.role)}>
+   482→  1581→                      {c.role}
+   483→  1582→                    </CustomBadge>
+   484→  1583→                  </div>
+   485→  1584→                  <p className="text-xs text-muted-foreground font-mono">
+   486→  1585→                    pwd: {c.p}
+   487→  1586→                  </p>
+   488→  1587→                </div>
+   489→  1588→              ))}
+   490→  1589→            </div>
+   491→  1590→          </div>
+   492→  1591→        </div>
+   493→  1592→      </div>
+   494→  1593→
+   495→  1594→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+   496→  1595→        {/* Login test panel */}
+   497→  1596→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+   498→  1597→          <div className="bg-gradient-to-r from-emerald-500/10 to-transparent border-b border-border p-4 flex items-center gap-2">
+   499→  1598→            <div className="h-9 w-9 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+   500→  1599→              <LogIn className="h-5 w-5" />
+   501→  1600→            </div>
+   502→  1601→            <div>
+   503→  1602→              <h3 className="text-sm font-semibold text-foreground">
+   504→  1603→                Login Test Panel
+   505→  1604→              </h3>
+   506→  1605→              <p className="text-xs text-muted-foreground">
+   507→  1606→                Verify credentials and create a session
+   508→  1607→              </p>
+   509→  1608→            </div>
+   510→  1609→          </div>
+   511→  1610→          <form onSubmit={handleLogin} className="p-5 space-y-4">
+   512→  1611→            <Field label="Username" required>
+   513→  1612→              <Input
+   514→  1613→                value={loginUsername}
+   515→  1614→                onChange={(e) => setLoginUsername(e.target.value)}
+   516→  1615→                placeholder="e.g. rperera"
+   517→  1616→                className="bg-background font-mono"
+   518→  1617→                required
+   519→  1618→              />
+   520→  1619→            </Field>
+   521→  1620→            <Field label="Password" required>
+   522→  1621→              <Input
+   523→  1622→                type="password"
+   524→  1623→                value={loginPassword}
+   525→  1624→                onChange={(e) => setLoginPassword(e.target.value)}
+   526→  1625→                placeholder="Enter password"
+   527→  1626→                className="bg-background"
+   528→  1627→                required
+   529→  1628→              />
+   530→  1629→            </Field>
+   531→  1630→            <Button type="submit" disabled={loginLoading} className="w-full">
+   532→  1631→              {loginLoading ? (
+   533→  1632→                <>
+   534→  1633→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+   535→  1634→                  Authenticating...
+   536→  1635→                </>
+   537→  1636→              ) : (
+   538→  1637→                <>
+   539→  1638→                  <LogIn className="h-4 w-4 mr-1" />
+   540→  1639→                  Test Login
+   541→  1640→                </>
+   542→  1641→              )}
+   543→  1642→            </Button>
+   544→  1643→            {loginResult && (
+   545→  1644→              <div
+   546→  1645→                className={cn(
+   547→  1646→                  "rounded-lg border p-3 flex items-start gap-2",
+   548→  1647→                  loginResult.ok
+   549→  1648→                    ? "border-emerald-500/30 bg-emerald-500/5"
+   550→  1649→                    : "border-red-500/30 bg-red-500/5"
+   551→  1650→                )}
+   552→  1651→              >
+   553→  1652→                {loginResult.ok ? (
+   554→  1653→                  <>
+   555→  1654→                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+   556→  1655→                    <div className="text-sm">
+   557→  1656→                      <p className="font-semibold text-emerald-400">
+   558→  1657→                        Login successful
+   559→  1658→                      </p>
+   560→  1659→                      <p className="text-muted-foreground">
+   561→  1660→                        {loginResult.user?.displayName} (
+   562→  1661→                        {loginResult.user?.username}) — {loginResult.user?.role}
+   563→  1662→                      </p>
+   564→  1663→                    </div>
+   565→  1664→                  </>
+   566→  1665→                ) : (
+   567→  1666→                  <>
+   568→  1667→                    <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+   569→  1668→                    <div className="text-sm">
+   570→  1669→                      <p className="font-semibold text-red-400">
+   571→  1670→                        Login failed
+   572→  1671→                      </p>
+   573→  1672→                      <p className="text-muted-foreground">
+   574→  1673→                        {loginResult.error}
+   575→  1674→                      </p>
+   576→  1675→                    </div>
+   577→  1676→                  </>
+   578→  1677→                )}
+   579→  1678→              </div>
+   580→  1679→            )}
+   581→  1680→          </form>
+   582→  1681→        </div>
+   583→  1682→
+   584→  1683→        {/* Current session */}
+   585→  1684→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+   586→  1685→          <div className="bg-gradient-to-r from-violet-500/10 to-transparent border-b border-border p-4 flex items-center justify-between gap-2">
+   587→  1686→            <div className="flex items-center gap-2">
+   588→  1687→              <div className="h-9 w-9 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center">
+   589→  1688→                <Fingerprint className="h-5 w-5" />
+   590→  1689→              </div>
+   591→  1690→              <div>
+   592→  1691→                <h3 className="text-sm font-semibold text-foreground">
+   593→  1692→                  Current Session
+   594→  1693→                </h3>
+   595→  1694→                <p className="text-xs text-muted-foreground">
+   596→  1695→                  Active session on this client
+   597→  1696→                </p>
+   598→  1697→              </div>
+   599→  1698→            </div>
+   600→  1699→            {session?.authenticated && (
+   601→  1700→              <Button
+   602→  1701→                variant="outline"
+   603→  1702→                size="sm"
+   604→  1703→                onClick={handleLogout}
+   605→  1704→                className="text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30"
+   606→  1705→              >
+   607→  1706→                <LogOut className="h-3.5 w-3.5 mr-1" />
+   608→  1707→                Logout
+   609→  1708→              </Button>
+   610→  1709→            )}
+   611→  1710→          </div>
+   612→  1711→          <div className="p-5">
+   613→  1712→            {sessionLoading ? (
+   614→  1713→              <div className="flex items-center justify-center py-8">
+   615→  1714→                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+   616→  1715→              </div>
+   617→  1716→            ) : session?.authenticated && session.user ? (
+   618→  1717→              <div className="space-y-3">
+   619→  1718→                <div className="flex items-center gap-3 pb-3 border-b border-border">
+   620→  1719→                  <div className="h-12 w-12 rounded-full bg-primary/15 text-primary flex items-center justify-center text-base font-bold">
+   621→  1720→                    {session.user.username.slice(0, 2).toUpperCase()}
+   622→  1721→                  </div>
+   623→  1722→                  <div className="min-w-0">
+   624→  1723→                    <p className="text-base font-semibold text-foreground truncate">
+   625→  1724→                      {session.user.displayName}
+   626→  1725→                    </p>
+   627→  1726→                    <p className="text-xs text-muted-foreground font-mono">
+   628→  1727→                      @{session.user.username}
+   629→  1728→                    </p>
+   630→  1729→                  </div>
+   631→  1730→                  <CustomBadge
+   632→  1731→                    className={cn(
+   633→  1732→                      "ml-auto shrink-0",
+   634→  1733→                      userRoleColor(session.user.role)
+   635→  1734→                    )}
+   636→  1735→                  >
+   637→  1736→                    <Shield className="h-3 w-3 mr-1" />
+   638→  1737→                    {session.user.role}
+   639→  1738→                  </CustomBadge>
+   640→  1739→                </div>
+   641→  1740→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+   642→  1741→                  <div className="bg-secondary/40 rounded-lg p-2.5">
+   643→  1742→                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   644→  1743→                      User ID
+   645→  1744→                    </p>
+   646→  1745→                    <p className="text-xs font-mono text-foreground truncate">
+   647→  1746→                      {session.user.id}
+   648→  1747→                    </p>
+   649→  1748→                  </div>
+   650→  1749→                  <div className="bg-secondary/40 rounded-lg p-2.5">
+   651→  1750→                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   652→  1751→                      Department
+   653→  1752→                    </p>
+   654→  1753→                    <p className="text-sm text-foreground">
+   655→  1754→                      {session.user.department || "—"}
+   656→  1755→                    </p>
+   657→  1756→                  </div>
+   658→  1757→                </div>
+   659→  1758→                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
+   660→  1759→                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+   661→  1760→                  Session is active. Cookie-based session valid for 24 hours.
+   662→  1761→                </div>
+   663→  1762→              </div>
+   664→  1763→            ) : (
+   665→  1764→              <div className="flex flex-col items-center justify-center py-8 text-center">
+   666→  1765→                <div className="h-12 w-12 rounded-full bg-amber-500/10 flex items-center justify-center mb-3">
+   667→  1766→                  <Lock className="h-6 w-6 text-amber-400" />
+   668→  1767→                </div>
+   669→  1768→                <p className="text-sm font-semibold text-foreground">
+   670→  1769→                  Not authenticated
+   671→  1770→                </p>
+   672→  1771→                <p className="text-xs text-muted-foreground mt-1">
+   673→  1772→                  Use the Login Test Panel to start a session.
+   674→  1773→                </p>
+   675→  1774→              </div>
+   676→  1775→            )}
+   677→  1776→          </div>
+   678→  1777→        </div>
+   679→  1778→      </div>
+   680→  1779→
+   681→  1780→      {/* Users password status list */}
+   682→  1781→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+   683→  1782→        <div className="bg-gradient-to-r from-blue-500/10 to-transparent border-b border-border p-4 flex items-center justify-between gap-2">
+   684→  1783→          <div className="flex items-center gap-2">
+   685→  1784→            <div className="h-9 w-9 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center">
+   686→  1785→              <KeyRound className="h-5 w-5" />
+   687→  1786→            </div>
+   688→  1787→            <div>
+   689→  1788→              <h3 className="text-sm font-semibold text-foreground">
+   690→  1789→                User Password Status
+   691→  1790→              </h3>
+   692→  1791→              <p className="text-xs text-muted-foreground">
+   693→  1792→                Quick set or reset password for any user
+   694→  1793→              </p>
+   695→  1794→            </div>
+   696→  1795→          </div>
+   697→  1796→          <CustomBadge className="bg-secondary text-muted-foreground border-border">
+   698→  1797→            {securedCount} / {users?.length ?? 0} secured
+   699→  1798→          </CustomBadge>
+   700→  1799→        </div>
+   701→
+   702→[showing lines 1100-1799 of 5294; use offset=1800 with limit to continue reading]

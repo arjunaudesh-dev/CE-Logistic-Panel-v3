@@ -13,6 +13,13 @@ export async function PUT(
       data: {
         storeName: body.storeName,
         storeType: body.storeType || "Zone",
+        department: body.department || null,
+        responsiblePersons: body.responsiblePersons
+          ? JSON.stringify(body.responsiblePersons)
+          : null,
+        responsibleOfficers: body.responsibleOfficers
+          ? JSON.stringify(body.responsibleOfficers)
+          : null,
         responsiblePerson: body.responsiblePerson || null,
         location: body.location || null,
         active: body.active !== false,

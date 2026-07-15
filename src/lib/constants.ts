@@ -371,6 +371,54 @@ export const NUMBER_PREFIX_TYPES = [
   { docType: "FILE", label: "File Number", placeholder: "e.g. FILE/2025/" },
 ] as const;
 
+// ─── Vote Departments ───
+export const VOTE_DEPARTMENTS = ["SLN", "MOD"] as const;
+
+// ─── Financial Delegation Authorities ───
+export const FINANCIAL_AUTHORITIES = [
+  "Cdr",
+  "Capt",
+  "FC",
+  "AOE",
+  "CNC",
+] as const;
+
+// ─── New Process Step Stages ───
+export const PROCESS_STEP_STAGES = [
+  "PR Raised",
+  "GS Approval",
+  "RC Verification",
+  "Finalizing Specification",
+  "Pre-tender",
+  "Tender Called",
+  "Tender Opening",
+  "Quotation Received",
+  "BEC Evaluation",
+  "Financial Authority",
+  "AOE Approval",
+  "Contract Award",
+  "PO Placed",
+  "Order Placed",
+  "Part Supply",
+  "Items Dispatched",
+  "In Transit",
+  "Items Received",
+  "Collection and QCI",
+  "QC Pending",
+  "QC Passed",
+  "To be Oncharge",
+  "Awaiting Payment",
+  "Payment Done",
+  "Post Tender",
+  "Complete",
+] as const;
+
+// ─── Settings Departments ───
+export const SETTINGS_DEPARTMENTS = ["CCED", "CSLOG", "Others"] as const;
+
+// ─── Dimension Units ───
+export const DIMENSION_UNITS = ["meter", "inch"] as const;
+
 // ─── Theme Profiles (preset color combinations) ───
 export interface ThemeProfilePreset {
   name: string;

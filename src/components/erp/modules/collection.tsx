@@ -4,7 +4,7 @@ import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
 import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
-import { CustomBadge } from "@/components/erp/badges";
+import { CustomBadge, PositionBadge } from "@/components/erp/badges";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -58,6 +58,7 @@ import {
   AREA_STORE_CATEGORIES,
   NAV_REFERENCES,
   navRefColor,
+  DIMENSION_UNITS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -90,6 +91,10 @@ import {
   Store,
   MapPin,
   FileText,
+  ShoppingCart,
+  Calculator,
+  Ruler,
+  Anchor,
 } from "lucide-react";
 import {
   LineChart,
@@ -210,12 +215,80 @@ interface QCInspection {
   inspectedAt: string;
 }
 
+interface ProcurementFile {
+  id: string;
+  projectId: string | null;
+  projectName: string | null;
+  voteNumber: string | null;
+  prNumber: string;
+  itemCode: string;
+  itemName: string;
+  unit: string;
+  qty: number;
+  unitPrice: number;
+  fileCost: number;
+  supplier: string | null;
+  presentPosition: string;
+  fileCategory: string;
+  createdBy: string | null;
+  authorizedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  logs?: unknown[];
+}
+
+interface Stakeholder {
+  id: string;
+  name: string;
+  rankOrRate: string | null;
+  svcNumber: string | null;
+  appointment: string | null;
+  department: string;
+  category: string;
+  seniority: number | null;
+  areaStoreLocation: string | null;
+  subjectClerk: string | null;
+  ilmsCced: string | null;
+  officeNumber: string | null;
+  telephone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  availability: string;
+  role: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface Stats {
   collection: {
     partSupplyActive: number;
     dailyToday: number;
     dailyTotal: number;
   };
+}
+
+// Procurement present-positions where a PO is processed and items are on
+// their way for collection. Files at these stages show up in the
+// "Files to be Collected" dashboard card and the PO-item dropdowns.
+const PO_PROCESSED_POSITIONS = [
+  "PO Placed",
+  "Order Placed",
+  "Items Dispatched",
+  "In Transit",
+] as const;
+
+function isPoProcessed(position: string): boolean {
+  return (PO_PROCESSED_POSITIONS as readonly string[]).includes(position);
+}
+
+/** Format a stakeholder's name + rank for display in dropdowns. */
+function formatStakeholder(s: Stakeholder): string {
+  const rank = (s.rankOrRate || "").trim();
+  const appt = (s.appointment || "").trim();
+  const parts = [s.name];
+  if (rank) parts.push(`(${rank})`);
+  if (appt) parts.push(`· ${appt}`);
+  return parts.join(" ");
 }
 
 // ─────────────────────────────────────────────────────────
@@ -500,6 +573,8 @@ function DashboardTab() {
   );
   const { data: projects } = useFetch<Project[]>("/api/projects");
   const { data: stores } = useFetch<StoreItem[]>("/api/stores");
+  const { data: procurementFiles } =
+    useFetch<ProcurementFile[]>("/api/procurement");
 
   // Filter state
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -678,6 +753,20 @@ function DashboardTab() {
   }, [filteredItems, viewMode, storeByName]);
 
   const recentDaily = filteredDaily.slice(0, 5);
+
+  // Files with a processed PO — these items are on the way and ready to
+  // be collected (PO Placed / Order Placed / Items Dispatched / In Transit).
+  const poProcessedFiles = useMemo(() => {
+    return (procurementFiles ?? []).filter((f) =>
+      isPoProcessed(f.presentPosition)
+    );
+  }, [procurementFiles]);
+
+  const poProcessedQty = poProcessedFiles.reduce((s, f) => s + (f.qty || 0), 0);
+  const poProcessedValue = poProcessedFiles.reduce(
+    (s, f) => s + (f.fileCost || 0),
+    0
+  );
 
   if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
   if (itemsError) return <ErrorState message={itemsError} />;
@@ -1254,11 +1343,8 @@ function PartSupplyTab() {
                                 <TableHead className="text-muted-foreground">
                                   QC By
                                 </TableHead>
-                                <TableHead className="text-muted-foreground text-center">
-                                  Sailors
-                                </TableHead>
                                 <TableHead className="text-muted-foreground">
-                                  Driver
+                                  Provost Sailor
                                 </TableHead>
                                 <TableHead className="text-muted-foreground text-right">
                                   Cum. Bal.
@@ -1286,25 +1372,8 @@ function PartSupplyTab() {
                                   <TableCell className="text-foreground">
                                     {e.qcCheckedBy || "—"}
                                   </TableCell>
-                                  <TableCell className="text-foreground text-center">
-                                    {e.sailorCount || 0}
-                                  </TableCell>
                                   <TableCell className="text-foreground">
-                                    <div className="text-xs leading-tight">
-                                      <div>
-                                        {e.driverName || "—"}
-                                      </div>
-                                      {e.driverLicense && (
-                                        <div className="text-muted-foreground">
-                                          {e.driverLicense}
-                                        </div>
-                                      )}
-                                      {e.driverPhone && (
-                                        <div className="text-muted-foreground">
-                                          {e.driverPhone}
-                                        </div>
-                                      )}
-                                    </div>
+                                    {e.driverName || "—"}
                                   </TableCell>
                                   <TableCell className="text-foreground text-right font-medium whitespace-nowrap">
                                     {formatNumber(e.cumulativeBalance)}
@@ -1426,8 +1495,29 @@ function AddPartSupplyDialog({
   const [startDate, setStartDate] = useState(todayISO());
   const [expectedEndDate, setExpectedEndDate] = useState("");
   const [supplier, setSupplier] = useState("");
+  const [selectedPoId, setSelectedPoId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+
+  // Fetch PO-processed procurement files (only when the dialog is open) so
+  // the user can pick an item and auto-fill its details.
+  const { data: procurementFiles, loading: poLoading } =
+    useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+
+  const poOptions = useMemo(() => {
+    return (procurementFiles ?? []).filter((f) =>
+      isPoProcessed(f.presentPosition)
+    );
+  }, [procurementFiles]);
+
+  function handlePoSelect(id: string) {
+    setSelectedPoId(id);
+    const f = poOptions.find((p) => p.id === id);
+    if (!f) return;
+    setItemName(f.itemName);
+    setOrderedQty(String(f.qty || ""));
+    setSupplier(f.supplier || "");
+  }
 
   async function submit() {
     if (!itemName.trim()) {
@@ -1455,6 +1545,7 @@ function AddPartSupplyDialog({
     setOrderedQty("");
     setExpectedEndDate("");
     setSupplier("");
+    setSelectedPoId("");
     onCreated();
   }
 
@@ -1468,6 +1559,43 @@ function AddPartSupplyDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-1">
+          {/* Select PO Item — auto-fills item name, qty & supplier */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ShoppingCart className="h-3.5 w-3.5 text-amber-400" />
+              Select PO Item
+            </Label>
+            <Select value={selectedPoId} onValueChange={handlePoSelect}>
+              <SelectTrigger className="w-full">
+                <SelectValue
+                  placeholder={
+                    poLoading
+                      ? "Loading PO files..."
+                      : "Pick a PO-processed item to auto-fill"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {poOptions.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No PO-processed files
+                  </SelectItem>
+                ) : (
+                  poOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.prNumber} · {p.itemName} ({formatNumber(p.qty)}{" "}
+                      {p.unit})
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Pick a procurement file with PO Placed/Dispatched/In Transit
+              status — its item, qty &amp; supplier will be auto-filled below.
+            </p>
+          </div>
+
           <div className="space-y-1.5">
             <Label>Item Name</Label>
             <Input
@@ -1544,16 +1672,71 @@ function AddEntryDialog({
   const [date, setDate] = useState(todayISO());
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [qty, setQty] = useState("");
-  const [qcCheckedBy, setQcCheckedBy] = useState("");
-  const [sailorCount, setSailorCount] = useState("");
+  // driverName repurposed to hold the "Provost Sailor Checked" name (saved
+  // into the PartSupplyEntry.driverName column on the server).
   const [driverName, setDriverName] = useState("");
-  const [driverLicense, setDriverLicense] = useState("");
-  const [driverPhone, setDriverPhone] = useState("");
+  const [qcCheckedBy, setQcCheckedBy] = useState("");
+  // Dimension inputs — quantity is auto-calculated from H × W × D.
+  const [dimH, setDimH] = useState("");
+  const [dimW, setDimW] = useState("");
+  const [dimD, setDimD] = useState("");
+  const [dimUnit, setDimUnit] = useState<string>(DIMENSION_UNITS[0]);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
+  // Fetch stakeholders (only when dialog open) for the Provost Sailor and
+  // QC Checked-By dropdowns.
+  const { data: stakeholders } = useFetch<Stakeholder[]>(
+    open ? "/api/stakeholders" : null
+  );
+
+  // Provost Sailors — category contains "Sailor" OR department contains
+  // "Provost" (covers "CSLOG Sailor" and any future "Provost" dept).
+  const provostSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return cat.includes("sailor") || dept.includes("provost");
+    });
+  }, [stakeholders]);
+
+  // CCED Sailors for QC — category === "CCED Sailor" (preferred) but fall
+  // back to anyone with category/appointment containing "CCED" so the
+  // dropdown isn't empty when the category hasn't been seeded yet.
+  const ccedSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const appt = (s.appointment || "").toLowerCase();
+      return (
+        cat === "cced sailor" ||
+        cat.includes("cced") ||
+        appt.includes("cced")
+      );
+    });
+  }, [stakeholders]);
+
+  // Auto-calculate Quantity from dimensions: H × W × D in the selected
+  // unit (cubic meters or cubic inches).
+  const computedQty = useMemo(() => {
+    const h = Number(dimH);
+    const w = Number(dimW);
+    const d = Number(dimD);
+    if (!isFinite(h) || !isFinite(w) || !isFinite(d)) return null;
+    if (h <= 0 || w <= 0 || d <= 0) return null;
+    const product = h * w * d;
+    // Round to 4 decimal places to keep storage clean.
+    return Math.round(product * 10000) / 10000;
+  }, [dimH, dimW, dimD]);
+
+  // Sync the computed quantity into the qty state whenever it changes.
+  // Using a useEffect here would be flagged by react-hooks rules; instead
+  // we derive the displayed qty directly from computedQty when dimensions
+  // are present, and fall back to the manual `qty` string otherwise.
+  const effectiveQty = computedQty != null ? String(computedQty) : qty;
+
   async function submit() {
-    if (!qty || Number(qty) <= 0) {
+    const q = Number(effectiveQty);
+    if (!q || q <= 0) {
       toast({ title: "Valid qty required", variant: "destructive" });
       return;
     }
@@ -1564,12 +1747,17 @@ function AddEntryDialog({
       {
         date,
         vehicleNumber: vehicleNumber.trim() || undefined,
-        qty: Number(qty),
+        qty: q,
+        // CCED Sailor name → stored in the dedicated qcCheckedBy column.
         qcCheckedBy: qcCheckedBy.trim() || undefined,
-        sailorCount: Number(sailorCount) || 0,
+        // sailorCount field removed from the UI; preserve server contract
+        // by sending 0 (model default).
+        sailorCount: 0,
+        // Provost Sailor name → stored in driverName column (repurposed).
         driverName: driverName.trim() || undefined,
-        driverLicense: driverLicense.trim() || undefined,
-        driverPhone: driverPhone.trim() || undefined,
+        // driverLicense / driverPhone no longer captured in the UI.
+        driverLicense: undefined,
+        driverPhone: undefined,
       }
     );
     setSubmitting(false);
@@ -1580,16 +1768,17 @@ function AddEntryDialog({
     setVehicleNumber("");
     setQty("");
     setQcCheckedBy("");
-    setSailorCount("");
     setDriverName("");
-    setDriverLicense("");
-    setDriverPhone("");
+    setDimH("");
+    setDimW("");
+    setDimD("");
+    setDimUnit(DIMENSION_UNITS[0]);
     onCreated();
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto scrollbar-thin">
         <DialogHeader>
           <DialogTitle>Add Delivery Entry</DialogTitle>
           <DialogDescription>
@@ -1614,55 +1803,152 @@ function AddEntryDialog({
               placeholder="TN-01-AB-1234"
             />
           </div>
+
+          {/* Dimension fields — auto-fill Quantity */}
+          <div className="col-span-2 rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-1.5 text-foreground">
+                <Ruler className="h-3.5 w-3.5 text-primary" />
+                Dimensions
+              </Label>
+              <CustomBadge className="bg-primary/10 text-primary border-primary/30">
+                <Calculator className="h-3 w-3 mr-1" />
+                Qty = H × W × D
+              </CustomBadge>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">
+                  Height
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimH}
+                  onChange={(e) => setDimH(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">
+                  Width
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimW}
+                  onChange={(e) => setDimW(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">
+                  Depth
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimD}
+                  onChange={(e) => setDimD(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">
+                  Unit
+                </Label>
+                <Select value={dimUnit} onValueChange={setDimUnit}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIMENSION_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Quantity is auto-calculated as Height × Width × Depth in{" "}
+              {dimUnit === "meter" ? "cubic meters (m³)" : "cubic inches (in³)"}.
+              Leave dimensions blank to type the quantity manually.
+            </p>
+          </div>
+
           <div className="space-y-1.5">
-            <Label>Quantity</Label>
+            <Label className="flex items-center gap-1.5">
+              Quantity
+              {computedQty != null && (
+                <CustomBadge className="bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30">
+                  auto
+                </CustomBadge>
+              )}
+            </Label>
             <Input
               type="number"
-              value={qty}
+              value={effectiveQty}
               onChange={(e) => setQty(e.target.value)}
               placeholder="0"
+              readOnly={computedQty != null}
+              className={cn(
+                computedQty != null &&
+                  "bg-muted/50 text-muted-foreground cursor-not-allowed"
+              )}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>QC Checked By</Label>
-            <Input
-              value={qcCheckedBy}
-              onChange={(e) => setQcCheckedBy(e.target.value)}
-              placeholder="Inspector name"
-            />
+            <Label className="flex items-center gap-1.5">
+              <Anchor className="h-3.5 w-3.5 text-blue-400" />
+              Provost Sailor Checked
+            </Label>
+            <Select value={driverName} onValueChange={setDriverName}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select provost sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {provostSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No sailors in directory
+                  </SelectItem>
+                ) : (
+                  provostSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-1.5">
-            <Label>No. of Sailors</Label>
-            <Input
-              type="number"
-              value={sailorCount}
-              onChange={(e) => setSailorCount(e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Driver Name</Label>
-            <Input
-              value={driverName}
-              onChange={(e) => setDriverName(e.target.value)}
-              placeholder="Driver name"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Driver License</Label>
-            <Input
-              value={driverLicense}
-              onChange={(e) => setDriverLicense(e.target.value)}
-              placeholder="License no."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Driver Phone</Label>
-            <Input
-              value={driverPhone}
-              onChange={(e) => setDriverPhone(e.target.value)}
-              placeholder="Phone no."
-            />
+          <div className="col-span-2 space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              QC Checked By
+            </Label>
+            <Select value={qcCheckedBy} onValueChange={setQcCheckedBy}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select CCED sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {ccedSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No CCED sailors in directory
+                  </SelectItem>
+                ) : (
+                  ccedSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <DialogFooter>
@@ -1818,11 +2104,8 @@ function PrintReceiptDialog({
                   <TableHead className="text-muted-foreground">
                     QC By
                   </TableHead>
-                  <TableHead className="text-muted-foreground text-center">
-                    Sailors
-                  </TableHead>
                   <TableHead className="text-muted-foreground">
-                    Driver
+                    Provost Sailor
                   </TableHead>
                   <TableHead className="text-muted-foreground text-right">
                     Cum. Bal.
@@ -1833,7 +2116,7 @@ function PrintReceiptDialog({
                 {order.entries.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={7}
                       className="text-center text-muted-foreground"
                     >
                       No entries
@@ -1851,14 +2134,7 @@ function PrintReceiptDialog({
                         {formatNumber(e.qty)}
                       </TableCell>
                       <TableCell>{e.qcCheckedBy || "—"}</TableCell>
-                      <TableCell className="text-center">
-                        {e.sailorCount || 0}
-                      </TableCell>
-                      <TableCell>
-                        {[e.driverName, e.driverLicense, e.driverPhone]
-                          .filter(Boolean)
-                          .join(" / ") || "—"}
-                      </TableCell>
+                      <TableCell>{e.driverName || "—"}</TableCell>
                       <TableCell className="text-right">
                         {formatNumber(e.cumulativeBalance)}
                       </TableCell>
@@ -2305,8 +2581,29 @@ function RecordCollectionDialog({
   const [qty, setQty] = useState("");
   const [receivedFrom, setReceivedFrom] = useState("");
   const [recordedBy, setRecordedBy] = useState("");
+  const [selectedPoId, setSelectedPoId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+
+  // Fetch procurement files (only when dialog open) so the user can pick a
+  // PO-processed item to auto-fill the collection details.
+  const { data: procurementFiles, loading: poLoading } =
+    useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+
+  const poOptions = useMemo(() => {
+    return (procurementFiles ?? []).filter((f) =>
+      isPoProcessed(f.presentPosition)
+    );
+  }, [procurementFiles]);
+
+  function handlePoSelect(id: string) {
+    setSelectedPoId(id);
+    const f = poOptions.find((p) => p.id === id);
+    if (!f) return;
+    setItemName(f.itemName);
+    setQty(String(f.qty || ""));
+    setReceivedFrom(f.supplier || "");
+  }
 
   async function submit() {
     if (!itemName.trim()) {
@@ -2334,6 +2631,7 @@ function RecordCollectionDialog({
     setQty("");
     setReceivedFrom("");
     setRecordedBy("");
+    setSelectedPoId("");
     onCreated();
   }
 
@@ -2354,6 +2652,42 @@ function RecordCollectionDialog({
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
+          </div>
+          {/* Select PO Item — auto-fills item name, qty & receivedFrom */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ShoppingCart className="h-3.5 w-3.5 text-amber-400" />
+              Select PO Item
+            </Label>
+            <Select value={selectedPoId} onValueChange={handlePoSelect}>
+              <SelectTrigger className="w-full">
+                <SelectValue
+                  placeholder={
+                    poLoading
+                      ? "Loading PO files..."
+                      : "Pick a PO-processed item to auto-fill"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {poOptions.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No PO-processed files
+                  </SelectItem>
+                ) : (
+                  poOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.prNumber} · {p.itemName} ({formatNumber(p.qty)}{" "}
+                      {p.unit})
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Pick a procurement file with PO Placed/Dispatched/In Transit
+              status — its item, qty &amp; supplier will be auto-filled below.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Item Name</Label>

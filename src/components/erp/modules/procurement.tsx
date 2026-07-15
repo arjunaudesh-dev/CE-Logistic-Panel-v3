@@ -8,12 +8,14 @@ import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badg
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Popover,
@@ -59,6 +61,8 @@ import {
   RefreshCw,
   Files,
   ArrowRight,
+  CheckSquare,
+  ListChecks,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -143,6 +147,10 @@ export function ProcurementModule() {
   const [groupByFile, setGroupByFile] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  // Multi-select for bulk "Initiate Selected" — tracks selected ProcurementFile IDs.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
+
   // Dialogs
   const [addOpen, setAddOpen] = useState(false);
   const [logFile, setLogFile] = useState<ProcurementFile | null>(null);
@@ -156,6 +164,25 @@ export function ProcurementModule() {
       return next;
     });
   };
+
+  // ─── Multi-select helpers ───
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectMany = (ids: string[], on: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (on) ids.forEach((id) => next.add(id));
+      else ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
 
   // Derive unique suppliers & projects from data
   const suppliers = useMemo(() => {
@@ -323,6 +350,89 @@ export function ProcurementModule() {
     currentPage * PAGE_SIZE
   );
 
+  // ─── Multi-select derived state (depends on filteredFiles) ───
+  // All file IDs currently visible (post-filter, across all pages). Used by the
+  // "Select All" header checkbox.
+  const allVisibleIds = useMemo(
+    () => filteredFiles.map((f) => f.id),
+    [filteredFiles]
+  );
+  const visibleSelectedCount = useMemo(
+    () => allVisibleIds.filter((id) => selectedIds.has(id)).length,
+    [allVisibleIds, selectedIds]
+  );
+  const allVisibleSelected =
+    allVisibleIds.length > 0 && visibleSelectedCount === allVisibleIds.length;
+  const someVisibleSelected =
+    visibleSelectedCount > 0 && visibleSelectedCount < allVisibleIds.length;
+  const toggleSelectAllVisible = () =>
+    selectMany(allVisibleIds, !allVisibleSelected);
+
+  // Resolve the "next position" suggestion — picks the next index after the most
+  // common current position among the selected files.
+  const suggestedNextPosition = useMemo(() => {
+    if (selectedIds.size === 0) return "GS Approval";
+    const counts = new Map<string, number>();
+    filteredFiles.forEach((f) => {
+      if (selectedIds.has(f.id)) {
+        counts.set(f.presentPosition, (counts.get(f.presentPosition) || 0) + 1);
+      }
+    });
+    let top = "";
+    let topN = 0;
+    counts.forEach((n, pos) => {
+      if (n > topN) {
+        topN = n;
+        top = pos;
+      }
+    });
+    const idx = PRESENT_POSITIONS.indexOf(top as (typeof PRESENT_POSITIONS)[number]);
+    if (idx >= 0 && idx < PRESENT_POSITIONS.length - 1) {
+      return PRESENT_POSITIONS[idx + 1]!;
+    }
+    return top || "GS Approval";
+  }, [filteredFiles, selectedIds]);
+
+  // Bulk Initiate: updates the present position of every selected procurement
+  // file via PUT /api/procurement/{id}. Reports per-file success/failure counts
+  // via toast and refreshes the procurement list afterwards.
+  const handleBulkInitiate = async (input: {
+    newPosition: string;
+    changedBy: string;
+    comment: string;
+  }) => {
+    const selected = filteredFiles.filter((f) => selectedIds.has(f.id));
+    if (selected.length === 0) {
+      toast({ title: "No files selected", variant: "destructive" });
+      return;
+    }
+    const results = await Promise.all(
+      selected.map((f) =>
+        apiRequest(`/api/procurement/${f.id}`, "PUT", {
+          presentPosition: input.newPosition,
+          comment: input.comment.trim() || `Bulk initiated → ${input.newPosition}`,
+          changedBy: input.changedBy.trim() || "Officer",
+        })
+      )
+    );
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length === 0) {
+      toast({
+        title: `Initiated ${selected.length} file(s) → ${input.newPosition}`,
+        description: "Position updated for all selected files",
+      });
+    } else {
+      toast({
+        title: `${failed.length} of ${selected.length} update(s) failed`,
+        description: failed[0]?.error,
+        variant: "destructive",
+      });
+    }
+    clearSelection();
+    setBulkInitiateOpen(false);
+    refresh();
+  };
+
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
     else {
@@ -392,6 +502,19 @@ export function ProcurementModule() {
         icon={FileText}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            {selectedIds.size > 0 && (
+              <Button
+                onClick={() => setBulkInitiateOpen(true)}
+                size="sm"
+                className="gap-1.5"
+                title="Move all selected files to a new present position"
+              >
+                <CheckSquare className="h-4 w-4" /> Initiate Selected
+                <span className="ml-1 rounded bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                  {selectedIds.size}
+                </span>
+              </Button>
+            )}
             <Button
               variant={groupByFile ? "default" : "outline"}
               onClick={() => { setGroupByFile((v) => !v); setPage(1); }}
@@ -615,6 +738,34 @@ export function ProcurementModule() {
         </div>
       </div>
 
+      {/* Selection bar — appears when at least one file is selected */}
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-2.5">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <ListChecks className="h-4 w-4 text-primary" />
+            <span className="font-medium">{selectedIds.size} item{selectedIds.size > 1 ? "s" : ""} selected</span>
+            {visibleSelectedCount < selectedIds.size && (
+              <span className="text-xs text-muted-foreground">
+                ({visibleSelectedCount} on this page)
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-xs gap-1.5">
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setBulkInitiateOpen(true)}
+              className="gap-1.5"
+              title="Move all selected files to a new present position"
+            >
+              <CheckSquare className="h-4 w-4" /> Initiate Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Files table */}
       {!files || files.length === 0 ? (
         <div className="bg-card border border-border rounded-xl">
@@ -657,6 +808,19 @@ export function ProcurementModule() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border">
+                  <TableHead className="text-muted-foreground w-10">
+                    <Checkbox
+                      checked={
+                        allVisibleSelected
+                          ? true
+                          : someVisibleSelected
+                          ? "indeterminate"
+                          : false
+                      }
+                      onCheckedChange={toggleSelectAllVisible}
+                      aria-label="Select all visible files"
+                    />
+                  </TableHead>
                   <SortableTh
                     label="PR Number"
                     onClick={() => toggleSort("prNumber")}
@@ -676,6 +840,9 @@ export function ProcurementModule() {
                   </TableHead>
                   <TableHead className="text-muted-foreground text-right whitespace-nowrap">
                     Unit Price
+                  </TableHead>
+                  <TableHead className="text-muted-foreground text-right whitespace-nowrap">
+                    Cost
                   </TableHead>
                   <SortableTh
                     label="File Cost"
@@ -704,6 +871,20 @@ export function ProcurementModule() {
                           className="border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50"
                           onClick={() => toggleGroup(g.key)}
                         >
+                          <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                            {(() => {
+                              const groupIds = g.items.map((it) => it.id);
+                              const selCount = groupIds.filter((id) => selectedIds.has(id)).length;
+                              const checked = selCount === groupIds.length ? true : selCount > 0 ? "indeterminate" : false;
+                              return (
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() => selectMany(groupIds, selCount !== groupIds.length)}
+                                  aria-label={`Select all ${groupIds.length} items in group ${g.key}`}
+                                />
+                              );
+                            })()}
+                          </TableCell>
                           <TableCell className="font-mono text-xs text-foreground whitespace-nowrap">
                             <div className="flex items-center gap-2">
                               <button
@@ -737,6 +918,7 @@ export function ProcurementModule() {
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground italic whitespace-nowrap">{g.commonUnit || "varies"}</TableCell>
                           <TableCell className="text-right text-xs whitespace-nowrap">{g.totalQty}</TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground italic whitespace-nowrap">varies</TableCell>
                           <TableCell className="text-right text-xs text-muted-foreground italic whitespace-nowrap">varies</TableCell>
                           <TableCell className="text-right font-bold text-foreground whitespace-nowrap">{formatCurrency(g.totalCost)}</TableCell>
                           <TableCell className="text-xs whitespace-nowrap">
@@ -783,12 +965,25 @@ export function ProcurementModule() {
                           </TableCell>
                         </TableRow>
                         {/* Expanded child rows */}
-                        {expanded && g.items.map((f) => (
+                        {expanded && g.items.map((f) => {
+                          const childSelected = selectedIds.has(f.id);
+                          const childCost = (f.unitPrice || 0) * (f.qty || 0);
+                          return (
                           <TableRow
                             key={f.id}
-                            className="border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30"
+                            className={cn(
+                              "border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30",
+                              childSelected && "bg-primary/[0.06]"
+                            )}
                             onClick={() => setLogFile(f)}
                           >
+                            <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={childSelected}
+                                onCheckedChange={() => toggleSelect(f.id)}
+                                aria-label={`Select ${f.prNumber}`}
+                              />
+                            </TableCell>
                             <TableCell className="pl-8 font-mono text-xs text-muted-foreground whitespace-nowrap">
                               <span className="inline-flex items-center gap-1.5">
                                 <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
@@ -808,6 +1003,7 @@ export function ProcurementModule() {
                             <TableCell className="text-xs whitespace-nowrap">{f.unit}</TableCell>
                             <TableCell className="text-right text-xs whitespace-nowrap">{f.qty}</TableCell>
                             <TableCell className="text-right text-xs whitespace-nowrap">{formatCurrency(f.unitPrice)}</TableCell>
+                            <TableCell className="text-right text-xs whitespace-nowrap">{formatCurrency(childCost)}</TableCell>
                             <TableCell className="text-right text-xs font-medium whitespace-nowrap">{formatCurrency(f.fileCost)}</TableCell>
                             <TableCell className="text-xs whitespace-nowrap">{f.supplier || "—"}</TableCell>
                             <TableCell><PositionBadge position={f.presentPosition} /></TableCell>
@@ -848,17 +1044,30 @@ export function ProcurementModule() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </Fragment>
                     );
                   }
                   const f = row.file;
+                  const isSingleSelected = selectedIds.has(f.id);
+                  const singleCost = (f.unitPrice || 0) * (f.qty || 0);
                   return (
                     <TableRow
                       key={f.id}
-                      className="border-border cursor-pointer hover:bg-secondary/40"
+                      className={cn(
+                        "border-border cursor-pointer hover:bg-secondary/40",
+                        isSingleSelected && "bg-primary/[0.06]"
+                      )}
                       onClick={() => setLogFile(f)}
                     >
+                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={isSingleSelected}
+                          onCheckedChange={() => toggleSelect(f.id)}
+                          aria-label={`Select ${f.prNumber}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-mono text-xs text-foreground whitespace-nowrap">
                         {f.prNumber}
                       </TableCell>
@@ -886,6 +1095,9 @@ export function ProcurementModule() {
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         {formatCurrency(f.unitPrice)}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {formatCurrency(singleCost)}
                       </TableCell>
                       <TableCell className="text-right font-medium text-foreground whitespace-nowrap">
                         {formatCurrency(f.fileCost)}
@@ -1014,6 +1226,20 @@ export function ProcurementModule() {
             toast({ title: "Position updated" });
             refresh();
           }}
+        />
+      )}
+
+      {/* Bulk Initiate dialog — picks the target position then bulk-updates selected files.
+          The `key` forces a fresh mount whenever the user opens the dialog with a
+          different set of selections, so the suggested-next-position default refreshes. */}
+      {bulkInitiateOpen && (
+        <BulkInitiateDialog
+          key={`bulk-${selectedIds.size}-${suggestedNextPosition}`}
+          open={bulkInitiateOpen}
+          onOpenChange={setBulkInitiateOpen}
+          selectedCount={selectedIds.size}
+          defaultPosition={suggestedNextPosition}
+          onConfirm={handleBulkInitiate}
         />
       )}
     </div>
@@ -1624,6 +1850,113 @@ function Detail({
         {value}
       </p>
     </div>
+  );
+}
+
+// ─── Bulk Initiate Dialog (multi-select → pick target position → bulk PUT) ───
+function BulkInitiateDialog({
+  open,
+  onOpenChange,
+  selectedCount,
+  defaultPosition,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  selectedCount: number;
+  defaultPosition: string;
+  onConfirm: (input: { newPosition: string; changedBy: string; comment: string }) => Promise<void>;
+}) {
+  const [newPosition, setNewPosition] = useState(defaultPosition);
+  const [changedBy, setChangedBy] = useState("Officer");
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  // The parent uses a `key` based on the selected count + suggested position to
+  // remount this dialog whenever the user opens it with a fresh set of selections,
+  // so `useState(defaultPosition)` always picks up the latest suggested position.
+
+  const submit = async () => {
+    if (!newPosition) {
+      toast({ title: "Select a new position", variant: "destructive" });
+      return;
+    }
+    if (selectedCount === 0) {
+      toast({ title: "No files selected", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    await onConfirm({ newPosition, changedBy, comment });
+    setSaving(false);
+    // Reset form after submit (parent closes the dialog)
+    setComment("");
+    setChangedBy("Officer");
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+      <DialogContent className="max-w-md bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <CheckSquare className="h-5 w-5 text-primary" />
+            Initiate Selected Files
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Move <span className="font-medium text-foreground">{selectedCount}</span> selected file{selectedCount === 1 ? "" : "s"} to a new present position. A log entry is created for each file.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">New Position</Label>
+            <Select value={newPosition} onValueChange={setNewPosition}>
+              <SelectTrigger className="bg-background border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRESENT_POSITIONS.map((p) => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {defaultPosition && (
+              <p className="text-[11px] text-muted-foreground">
+                Suggested next position: <span className="text-foreground">{defaultPosition}</span>
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Changed By</Label>
+            <Input
+              value={changedBy}
+              onChange={(e) => setChangedBy(e.target.value)}
+              placeholder="Your name / rank"
+              className="bg-background border-border"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Comment (optional)</Label>
+            <Input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={`Bulk initiated → ${newPosition}`}
+              className="bg-background border-border"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={submit} disabled={saving || selectedCount === 0} className="gap-1.5">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+            Initiate {selectedCount} File{selectedCount === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

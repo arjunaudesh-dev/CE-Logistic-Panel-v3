@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
         voteNumber: body.voteNumber,
         description: body.description,
         voteType: body.voteType || "Capital",
+        department: body.department || null,
         allocation: Number(body.allocation) || 0,
         financialYear: body.financialYear || null,
         active: body.active !== false,

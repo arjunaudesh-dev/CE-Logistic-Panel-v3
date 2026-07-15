@@ -136,7 +136,10 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
     );
     setSaving(false);
     if (res.ok) {
-      toast({ title: `File initiated — ${form.prNumber}`, description: "PR raised and forwarded to project window" });
+      // CRITICAL: do NOT switch tabs / route away after initiation.
+      // Stay in the same window (the PR from Estimate / estimate items table)
+      // and let the item status update in place via the parent's refresh().
+      toast({ title: `File initiated — ${form.prNumber}`, description: "PR raised successfully. Item status updated below." });
       setForm({ prNumber: "", fileNumber: `FILE/${today}`, fileGroupKey: "", createdBy: "", authorizedBy: "" });
       setUsePrAsGroupKey(true);
       onInitiated();
@@ -145,7 +148,9 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
     }
   };
 
-  const unitPrice = item.isRC ? item.rcRate : item.approxCost / (item.qty || 1);
+  // Per-unit cost — approxCost is already per-unit (RC rate if RC, else estimateCost).
+  // The previous code divided approxCost by qty, which was incorrect.
+  const unitPrice = item.isRC ? item.rcRate : item.approxCost;
   const fileCost = item.qty * unitPrice;
 
   return (
@@ -157,7 +162,7 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
             Initiate File — {item.itemName}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Raise a PR/GORF from this estimate item. The file will be forwarded to the project&apos;s PR Raised Files window.
+            Raise a PR/GORF from this estimate item. The item&apos;s status will update in place — you stay on this tab to continue initiating more files.
           </DialogDescription>
         </DialogHeader>
 
@@ -190,9 +195,9 @@ export function InitiateFileDialog({ item, open, onOpenChange, onInitiated }: Pr
             </div>
           ) : (
             <div className="border-t border-border pt-3">
-              <p className="text-[10px] uppercase text-muted-foreground mb-2">Non-RC — Estimate Cost</p>
+              <p className="text-[10px] uppercase text-muted-foreground mb-2">Non-RC — Unit Cost</p>
               <div className="grid grid-cols-3 gap-3 text-sm">
-                <Detail label="Est. Unit Cost" value={formatCurrency(unitPrice)} tone="text-amber-400" />
+                <Detail label="Unit Cost" value={formatCurrency(unitPrice)} tone="text-amber-400" />
                 <Detail label="Last Purchase" value={item.lastPurchasePrice ? formatCurrency(item.lastPurchasePrice) : "—"} />
                 <Detail label="Available Stock" value={`${item.availableStock} ${item.unit}`} tone={item.availableStock > 0 ? "text-emerald-400" : "text-muted-foreground"} />
               </div>

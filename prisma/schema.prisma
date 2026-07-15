@@ -495,6 +495,7 @@ model ProcessFlow {
   id          String   @id @default(cuid())
   name        String   // RC | Non-Rate | ARO (Contractual)
   description String?
+  financialDelegationId String? // optional default delegation linked at the flow level
   createdAt   DateTime @default(now())
 
   steps ProcessStep[]
@@ -504,17 +505,32 @@ model ProcessStep {
   id               String   @id @default(cuid())
   flowId           String
   stepOrder        Int      @default(1)
-  positionName     String   // e.g. PR Raised, Tender Called, BEC Evaluation, AOE Approval
+  positionName     String   // e.g. PR Raised, Tender Called, BEC Evaluation, Finalizing Specification, Pre-tender, etc.
   description      String?
-  defaultResponsiblePerson String? // name/role of default responsible person
-  financialDelegationLevel String? // e.g. "Up to Rs. 500,000 — Cdr", "Up to Rs. 5,000,000 — Capt"
+  department       String?  // CCED | CSLOG | others
+  responsibleOfficers String? // JSON array of officer names (from stakeholder directory)
+  responsibleSailors String?  // JSON array of sailor names (from stakeholder directory)
+  financialDelegationId String? // link to FinancialDelegation
+  defaultResponsiblePerson String? // kept for backward compat
+  financialDelegationLevel String? // kept for backward compat (display)
   isTenderStage    Boolean  @default(false)
   isEvaluationStage Boolean @default(false)
+  prefixedNumber   String?  // auto-show prefixed number if relevant
   createdAt        DateTime @default(now())
 
   flow ProcessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
 
   @@index([flowId])
+}
+
+// ───────────────────────── FINANCIAL DELEGATION (Value & Step) ─────────────────────────
+model FinancialDelegation {
+  id          String   @id @default(cuid())
+  value       Float    @default(0) // e.g. 500000
+  authority   String   // e.g. "Cdr", "Capt", "FC", "AOE", "CNC"
+  label       String?  // computed: "Up to Rs. 500,000 — Cdr"
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
 }
 
 // ───────────────────────── USER PROFILES (Settings) ─────────────────────────
@@ -538,6 +554,7 @@ model Vote {
   voteNumber  String   @unique
   description String
   voteType    String   @default("Capital") // Capital | Recurring
+  department  String?  // SLN | MOD | custom
   allocation  Float    @default(0)
   financialYear String?
   active      Boolean  @default(true)
@@ -563,7 +580,10 @@ model StoreSetting {
   id              String   @id @default(cuid())
   storeName       String   @unique
   storeType       String   @default("Zone") // Zone | AreaStore | Ready-Use | Balance | Project
-  responsiblePerson String? // name of responsible person
+  department      String?  // CCED | CSLOG
+  responsiblePersons String? // JSON array of responsible person names (sailors)
+  responsibleOfficers String? // JSON array of responsible officer names
+  responsiblePerson String? // kept for backward compat
   location        String?
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -580,6 +600,7 @@ model NumberPrefix {
   suffix      String?  // optional suffix
   nextNumber  Int      @default(1) // auto-increment suggestion
   description String?
+  stepId      String?  // link to ProcessStep (for step-relevant prefixes)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

@@ -26,11 +26,34 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await req.json();
-    const updated = await db.processFlow.update({
-      where: { id },
-      data: { name: body.name, description: body.description || null },
-    });
-    return NextResponse.json(updated);
+    const baseData = {
+      name: body.name,
+      description: body.description || null,
+    };
+    // Defensive: try with financialDelegationId (new schema); fall back without
+    // it if the running Prisma client doesn't yet know about the field.
+    try {
+      const updated = await db.processFlow.update({
+        where: { id },
+        data: {
+          ...baseData,
+          financialDelegationId: body.financialDelegationId || null,
+        },
+      });
+      return NextResponse.json(updated);
+    } catch (innerErr) {
+      if (
+        innerErr instanceof Error &&
+        innerErr.message.includes("financialDelegationId")
+      ) {
+        const updated = await db.processFlow.update({
+          where: { id },
+          data: baseData,
+        });
+        return NextResponse.json(updated);
+      }
+      throw innerErr;
+    }
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });

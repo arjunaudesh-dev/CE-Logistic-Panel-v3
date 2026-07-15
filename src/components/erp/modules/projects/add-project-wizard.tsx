@@ -71,12 +71,16 @@ interface EstimateRow {
   itemName: string;
   qty: string;
   unit: string;
+  /** Per-unit cost (renamed from "estimateCost" in earlier versions).
+   *  The CSV column header is `UnitCost`; the parser also accepts the legacy
+   *  `EstimateCost` header for backward compatibility. The API field name stays
+   *  `estimateCost` but it represents the per-unit cost. */
   estimateCost: string;
   /** Total cost for the row — from CSV's TotalCost column when present,
-   *  otherwise computed as Qty × EstimateCost. Stored on the row so the
-   *  CSV-supplied value is preserved until the user edits Qty/EstimateCost
+   *  otherwise computed as Qty × UnitCost. Stored on the row so the
+   *  CSV-supplied value is preserved until the user edits Qty/UnitCost
    *  (which auto-recomputes the total). Used for display only — the API still
-   *  stores EstimateCost as the per-unit cost. */
+   *  stores estimateCost as the per-unit cost. */
   totalCost: string;
 }
 
@@ -181,8 +185,8 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const removeRow = (idx: number) =>
     setEstimateRows(estimateRows.filter((_, i) => i !== idx));
 
-  // Update a single field on a row. When Qty or EstimateCost changes,
-  // recompute the row's TotalCost automatically (= Qty × EstimateCost) so the
+  // Update a single field on a row. When Qty or UnitCost changes,
+  // recompute the row's TotalCost automatically (= Qty × UnitCost) so the
   // editable grid always shows a live total. Manual edits to TotalCost itself
   // (or other fields) leave the total as-is.
   const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
@@ -207,9 +211,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
   const hasValidEstimate = validEstimateRows.length > 0;
 
   const downloadTemplate = () => {
-    // Template now includes a TotalCost column. The sample row demonstrates
-    // the relationship TotalCost = Qty × EstimateCost (2 × 185000 = 370000).
-    const header = "ItemName,Qty,Unit,EstimateCost,TotalCost";
+    // Template now uses `UnitCost` as the column header (renamed from `EstimateCost`).
+    // The sample row demonstrates the relationship TotalCost = Qty × UnitCost (2 × 185000 = 370000).
+    const header = "ItemName,Qty,Unit,UnitCost,TotalCost";
     const sample = "Centrifugal Pump 15kW,2,NOS,185000,370000";
     const sample2 = ",,NOS,,";
     const csv = `${header}\n${sample}\n${sample2}\n`;
@@ -223,7 +227,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
     toast({
       title: "Template downloaded",
       description:
-        "Columns: ItemName, Qty, Unit, EstimateCost (per unit), TotalCost (= Qty × EstimateCost — leave blank to auto-compute).",
+        "Columns: ItemName, Qty, Unit, UnitCost (per unit), TotalCost (= Qty × UnitCost — leave blank to auto-compute).",
     });
   };
 
@@ -287,10 +291,14 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
       const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
       const idxQty = header.findIndex((h) => h.includes("qty"));
       const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
+      // Find the per-unit cost column. Prefer `UnitCost` (new name); fall back to
+      // the legacy `EstimateCost` header for backward compatibility. Also matches
+      // any column with "cost"/"price" but without "total".
       const idxCost = header.findIndex(
         (h) =>
-          (h.includes("cost") || h.includes("price")) &&
-          !h.includes("total")
+          (h === "unitcost" || h.includes("unit cost") || h.includes("unitcost")) ||
+          ((h.includes("estimate") && (h.includes("cost") || h.includes("price"))) ||
+           ((h.includes("cost") || h.includes("price")) && !h.includes("total")))
       );
       const idxTotal = header.findIndex(
         (h) => h.includes("total") && (h.includes("cost") || h.includes("price"))
@@ -301,9 +309,10 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
           const itemName = idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim();
           const qty = idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim();
           const unit = (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS";
+          // Per-unit cost — read from the UnitCost (or legacy EstimateCost) column.
           const estimateCost = idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim();
           // TotalCost: prefer the CSV's TotalCost column when present & non-blank,
-          // otherwise compute it as Qty × EstimateCost (per the task spec).
+          // otherwise compute it as Qty × UnitCost (per the task spec).
           const totalRaw =
             idxTotal >= 0 ? (r[idxTotal] || "").trim() : "";
           let totalCost = "";
@@ -712,7 +721,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                     <span>Item Name</span>
                     <span className="text-right">Qty</span>
                     <span>Deno</span>
-                    <span className="text-right">Est. Cost / Unit (Rs.)</span>
+                    <span className="text-right">Unit Cost (Rs.)</span>
                     <span className="text-right">Total Cost (Rs.)</span>
                     <span></span>
                   </div>
@@ -736,7 +745,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                           readOnly
                           tabIndex={-1}
                           className="bg-secondary/40 border-border h-8 text-sm text-right font-medium text-emerald-500 dark:text-emerald-400 cursor-not-allowed focus-visible:ring-0"
-                          title="Total Cost = Qty × Estimate Cost (auto-computed)"
+                          title="Total Cost = Qty × Unit Cost (auto-computed)"
                         />
                         <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
                           <Trash2 className="h-4 w-4" />
@@ -748,7 +757,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
               </div>
               <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                 <Info className="h-3 w-3" />
-                Tip: Estimate cost is per-unit; Total Cost auto-computes as Qty × Estimate Cost (or use the CSV TotalCost column). After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+                Tip: Unit Cost is per-unit; Total Cost auto-computes as Qty × Unit Cost (or use the CSV TotalCost column). After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
                 {!hasValidEstimate && (
                   <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
                 )}
@@ -841,7 +850,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                   <span>Item Name</span>
                   <span className="text-right">Qty</span>
                   <span>Unit</span>
-                  <span className="text-right">Est. Cost / Unit</span>
+                  <span className="text-right">Unit Cost</span>
                   <span className="text-right">Total Cost</span>
                 </div>
                 <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">

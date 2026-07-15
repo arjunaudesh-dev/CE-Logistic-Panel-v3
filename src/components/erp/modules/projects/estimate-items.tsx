@@ -10,6 +10,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CustomBadge } from "@/components/erp/badges";
 import { LoadingState, EmptyState } from "@/components/erp/states";
 import { InitiateFileDialog, EstimateItem } from "./initiate-file";
@@ -31,6 +49,14 @@ import {
   Group as GroupIcon,
   Files,
   ChevronRight,
+  CheckSquare,
+  ListChecks,
+  X,
+  UserCheck,
+  User,
+  Layers,
+  Info,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,9 +77,29 @@ interface EstimateWithProject {
   } | null;
 }
 
+interface Stakeholder {
+  id: string;
+  name: string;
+  rankOrRate?: string | null;
+  svcNumber?: string | null;
+  appointment?: string | null;
+  department?: string | null;
+  category?: string | null;
+  seniority?: number | null;
+}
+
+interface NumberPrefix {
+  id: string;
+  docType: string;
+  prefix: string;
+  suffix: string | null;
+  nextNumber: number;
+  description: string | null;
+}
+
 type SectionVariant = "rc" | "non-rate" | "contractual";
 type ThemeKey = "emerald" | "amber" | "violet";
-type SortKey = "srNo" | "itemName" | "itemCode" | "qty" | "approxCost";
+type SortKey = "srNo" | "itemName" | "itemCode" | "qty" | "unitCost" | "totalCost";
 type SortDir = "asc" | "desc";
 
 const SECTION_THEME: Record<SectionVariant, { key: ThemeKey; bar: string; title: string; summary: string; desc: string }> = {
@@ -84,8 +130,13 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
   const { data: estimate, loading, refresh } = useFetch<EstimateWithProject>(
     `/api/estimates/${estimateId}`
   );
+  const { data: prefixes } = useFetch<NumberPrefix[]>("/api/number-prefixes");
+  const { data: stakeholders } = useFetch<Stakeholder[]>("/api/stakeholders");
   const [processing, setProcessing] = useState(false);
   const [initiateItem, setInitiateItem] = useState<EstimateItem | null>(null);
+  // Multi-select for bulk "Initiate Selected" — tracks selected EstimateItem IDs.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
   const { toast } = useToast();
 
   // Sorting state — shared across all 3 sections (single preference)
@@ -117,6 +168,124 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
   const rcItems = items.filter((i) => i.isRC);
   const contractualItems = items.filter((i) => !i.isRC && isProjectContractual);
   const nonRateItems = items.filter((i) => !i.isRC && !isProjectContractual);
+
+  // ─── Multi-select helpers ───
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectMany = (ids: string[], on: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (on) ids.forEach((id) => next.add(id));
+      else ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+  // All pending item IDs (only Pending items are eligible for PR initiation).
+  // Computed inline (no useMemo) since pendingItems is itself derived from items.
+  const allPendingIds = pendingItems.map((i) => i.id);
+  const visibleSelectedCount = allPendingIds.filter((id) => selectedIds.has(id)).length;
+  const allPendingSelected =
+    allPendingIds.length > 0 && visibleSelectedCount === allPendingIds.length;
+  const somePendingSelected =
+    visibleSelectedCount > 0 && visibleSelectedCount < allPendingIds.length;
+  const toggleSelectAllPending = () =>
+    selectMany(allPendingIds, !allPendingSelected);
+
+  // Officers + sailors for the BulkInitiatePRDialog selects (sorted by seniority)
+  const officers = useMemo(
+    () =>
+      (stakeholders || [])
+        .filter((s) => (s.category || "").toLowerCase().includes("officer"))
+        .sort((a, b) => {
+          const sa = a.seniority ?? 99;
+          const sb = b.seniority ?? 99;
+          if (sa !== sb) return sa - sb;
+          return (a.name || "").localeCompare(b.name || "");
+        }),
+    [stakeholders]
+  );
+  const sailors = useMemo(
+    () =>
+      (stakeholders || [])
+        .filter((s) => (s.category || "").toLowerCase().includes("sailor"))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    [stakeholders]
+  );
+
+  // PR prefix auto-suggest — find the "PR" doc type in the number prefixes
+  const prPrefix = useMemo(
+    () => (prefixes || []).find((p) => p.docType === "PR"),
+    [prefixes]
+  );
+  const suggestedPrNumber = useMemo(() => {
+    if (!prPrefix) return "";
+    const num = String(prPrefix.nextNumber).padStart(3, "0");
+    return `${prPrefix.prefix}${num}${prPrefix.suffix || ""}`;
+  }, [prPrefix]);
+
+  // Bulk initiate: creates a PR for every selected estimate item via
+  // POST /api/estimates/{estimateId}/items/{itemId}. The same PR number, file
+  // number, authorized-by and created-by are reused across all items so they
+  // share a fileGroupKey (and thus collapse into a single grouped row in the
+  // PR Raised Files window).
+  const handleBulkInitiate = async (input: {
+    prNumber: string;
+    fileNumber: string;
+    fileGroupKey: string;
+    authorizedById: string;
+    createdById: string;
+  }) => {
+    const selected = pendingItems.filter((it) => selectedIds.has(it.id));
+    if (selected.length === 0) {
+      toast({ title: "No items selected", variant: "destructive" });
+      return;
+    }
+    const officer = officers.find((o) => o.id === input.authorizedById);
+    const sailor = sailors.find((s) => s.id === input.createdById);
+    const authorizedBy = officer
+      ? `${officer.name}${officer.appointment ? ` (${officer.appointment})` : ""}`
+      : input.authorizedById;
+    const createdBy = sailor
+      ? `${sailor.name}${sailor.appointment ? ` (${sailor.appointment})` : ""}`
+      : input.createdById;
+    const effectiveGroupKey = input.fileGroupKey.trim() || input.prNumber;
+    const results = await Promise.all(
+      selected.map((it) =>
+        apiRequest(`/api/estimates/${estimateId}/items/${it.id}`, "POST", {
+          prNumber: input.prNumber,
+          fileNumber: input.fileNumber,
+          fileGroupKey: effectiveGroupKey,
+          createdBy,
+          authorizedBy,
+          responsiblePerson: authorizedBy,
+        })
+      )
+    );
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length === 0) {
+      toast({
+        title: `Initiated ${selected.length} file${selected.length === 1 ? "" : "s"} — ${input.prNumber}`,
+        description: "PR raised successfully. Item statuses updated below.",
+      });
+    } else {
+      toast({
+        title: `${failed.length} of ${selected.length} initiate(s) failed`,
+        description: failed[0]?.error,
+        variant: "destructive",
+      });
+    }
+    clearSelection();
+    setBulkInitiateOpen(false);
+    refresh();
+    onChanged?.();
+  };
 
   const handleProcess = async () => {
     setProcessing(true);
@@ -154,12 +323,13 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
         </div>
       )}
 
-      {/* summary tiles — kept identical to original */}
+      {/* summary tiles — Total Cost now correctly sums (Unit Cost × Qty) per row,
+          where Unit Cost = rcRate for RC items and approxCost for non-RC items */}
       {items.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <SummaryTile
-            label="Total Approx Cost"
-            value={formatCurrency(items.reduce((s, i) => s + (i.approxCost || 0), 0))}
+            label="Total Cost"
+            value={formatCurrency(items.reduce((s, i) => s + (i.isRC ? i.rcRate : i.approxCost) * (i.qty || 0), 0))}
             tone="text-blue-400"
             icon={<PackageSearch className="h-4 w-4" />}
           />
@@ -184,15 +354,55 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
         </div>
       )}
 
+      {/* Selection bar — appears when at least one pending item is selected */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-2.5">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <ListChecks className="h-4 w-4 text-primary" />
+            <span className="font-medium">{selectedIds.size} item{selectedIds.size > 1 ? "s" : ""} selected</span>
+            <span className="text-xs text-muted-foreground">· ready to initiate</span>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-xs gap-1.5">
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setBulkInitiateOpen(true)}
+              className="gap-1.5"
+              title="Raise a single PR covering all selected estimate items"
+            >
+              <CheckSquare className="h-4 w-4" /> Initiate Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Group-by-file toggle — only enabled when at least one item has been initiated */}
       {items.length > 0 && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-            <GroupIcon className="h-3 w-3" />
-            Sortable headers · {initiatedItems.length > 0
-              ? "Toggle to group multiple items sharing the same PR/File number"
-              : "Initiate files to enable the group-by-file view"}
-          </p>
+          <div className="flex items-center gap-2">
+            {pendingItems.length > 0 && (
+              <Checkbox
+                checked={
+                  allPendingSelected
+                    ? true
+                    : somePendingSelected
+                    ? "indeterminate"
+                    : false
+                }
+                onCheckedChange={toggleSelectAllPending}
+                aria-label="Select all pending items"
+                className="mr-1"
+              />
+            )}
+            <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+              <GroupIcon className="h-3 w-3" />
+              Sortable headers · {initiatedItems.length > 0
+                ? "Toggle to group multiple items sharing the same PR/File number"
+                : "Initiate files to enable the group-by-file view"}
+            </p>
+          </div>
           <Button
             size="sm"
             variant={groupByFile ? "default" : "outline"}
@@ -227,6 +437,8 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               sortDir={sortDir}
               onSort={handleSort}
               groupByFile={groupByFile}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           )}
           {nonRateItems.length > 0 && (
@@ -241,6 +453,8 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               sortDir={sortDir}
               onSort={handleSort}
               groupByFile={groupByFile}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           )}
           {contractualItems.length > 0 && (
@@ -255,6 +469,8 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
               sortDir={sortDir}
               onSort={handleSort}
               groupByFile={groupByFile}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           )}
         </div>
@@ -271,6 +487,22 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
             refresh();
             onChanged?.();
           }}
+        />
+      )}
+
+      {/* Bulk Initiate PR dialog — creates a single PR covering all selected estimate items.
+          The `key` forces a fresh mount whenever the user opens the dialog with a
+          different set of selections so the suggested PR number refreshes. */}
+      {bulkInitiateOpen && (
+        <BulkInitiatePRDialog
+          key={`bulk-${selectedIds.size}-${suggestedPrNumber}`}
+          open={bulkInitiateOpen}
+          onOpenChange={setBulkInitiateOpen}
+          selectedCount={selectedIds.size}
+          suggestedPrNumber={suggestedPrNumber}
+          officers={officers}
+          sailors={sailors}
+          onConfirm={handleBulkInitiate}
         />
       )}
     </div>
@@ -333,6 +565,8 @@ function ItemsSection({
   sortDir,
   onSort,
   groupByFile,
+  selectedIds,
+  onToggleSelect,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -344,10 +578,17 @@ function ItemsSection({
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
   groupByFile: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }) {
   const theme = SECTION_THEME[variant];
   const showRcCols = variant === "rc";
   const DescIcon = variant === "rc" ? CheckCircle2 : AlertCircle;
+
+  // Per-item unit cost — approxCost is already per-unit (RC rate or estimateCost).
+  // No "divided by qty" here.
+  const unitCostOf = (it: EstimateItem) => (it.isRC ? it.rcRate : it.approxCost) || 0;
+  const totalCostOf = (it: EstimateItem) => unitCostOf(it) * (it.qty || 0);
 
   // Sort items — sort is applied within each section
   const sortedItems = useMemo(() => {
@@ -367,8 +608,11 @@ function ItemsSection({
         case "qty":
           cmp = a.qty - b.qty;
           break;
-        case "approxCost":
-          cmp = a.approxCost - b.approxCost;
+        case "unitCost":
+          cmp = unitCostOf(a) - unitCostOf(b);
+          break;
+        case "totalCost":
+          cmp = totalCostOf(a) - totalCostOf(b);
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;
@@ -407,7 +651,7 @@ function ItemsSection({
     return { groups: realGroups, individuals };
   }, [sortedItems, groupByFile]);
 
-  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+  const totalCost = items.reduce((s, i) => s + totalCostOf(i), 0);
   const groupedItemCount = groupedView.groups.reduce((s, g) => s + g.items.length, 0);
 
   return (
@@ -422,7 +666,7 @@ function ItemsSection({
           </span>
         </div>
         <div className="text-xs">
-          <span className="opacity-80">Total Approx Cost: </span>
+          <span className="opacity-80">Total Cost: </span>
           <span className={cn("font-semibold", theme.summary)}>{formatCurrency(totalCost)}</span>
         </div>
       </div>
@@ -458,6 +702,7 @@ function ItemsSection({
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-secondary/95 backdrop-blur">
               <TableRow className="hover:bg-transparent border-border">
+                <TableHead className="text-muted-foreground w-10">Select</TableHead>
                 <SortHeader
                   label="Sr"
                   sortKey="srNo"
@@ -491,8 +736,17 @@ function ItemsSection({
                 />
                 <TableHead className="text-muted-foreground">Deno</TableHead>
                 <SortHeader
-                  label="Approx Cost"
-                  sortKey="approxCost"
+                  label="Unit Cost"
+                  sortKey="unitCost"
+                  currentSortKey={sortKey}
+                  currentSortDir={sortDir}
+                  onSort={onSort}
+                  className="text-right"
+                  align="right"
+                />
+                <SortHeader
+                  label="Total Cost"
+                  sortKey="totalCost"
                   currentSortKey={sortKey}
                   currentSortDir={sortDir}
                   onSort={onSort}
@@ -513,6 +767,8 @@ function ItemsSection({
                   it={it}
                   showRcCols={showRcCols}
                   onInitiate={onInitiate}
+                  isSelected={selectedIds.has(it.id)}
+                  onToggleSelect={onToggleSelect}
                 />
               ))}
             </TableBody>
@@ -546,7 +802,7 @@ function GroupCard({
   const theme = SECTION_THEME[variant];
   const showRcCols = variant === "rc";
 
-  const totalCost = items.reduce((s, i) => s + (i.approxCost || 0), 0);
+  const totalCost = items.reduce((s, i) => s + (i.isRC ? i.rcRate : i.approxCost) * (i.qty || 0), 0);
   const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
 
   // Common attributes across the group (only show if all items share the same value)
@@ -616,7 +872,8 @@ function GroupCard({
                   <TableHead className="text-muted-foreground">Item Code</TableHead>
                   <TableHead className="text-muted-foreground text-right">Qty</TableHead>
                   <TableHead className="text-muted-foreground">Deno</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Approx Cost</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Unit Cost</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
                   {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
                   {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
                   <TableHead className="text-muted-foreground text-right">Action</TableHead>
@@ -647,15 +904,38 @@ function ItemRow({
   showRcCols,
   onInitiate,
   compact,
+  isSelected,
+  onToggleSelect,
 }: {
   it: EstimateItem;
   showRcCols: boolean;
   onInitiate: (item: EstimateItem) => void;
   compact?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
-  const unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1);
+  // Per-unit cost — approxCost is already per-unit (RC rate if RC, else estimateCost).
+  // The previous code divided approxCost by qty, which was incorrect.
+  const unitCost = it.isRC ? it.rcRate : it.approxCost;
+  const totalCost = (unitCost || 0) * (it.qty || 0);
+  // Selection is only available for Pending items (Initiated items are already raised)
+  const canSelect = it.status === "Pending" && !!onToggleSelect;
   return (
-    <TableRow className="border-border">
+    <TableRow className={cn("border-border", isSelected && "bg-primary/[0.06]")}>
+      {/* Checkbox cell — only rendered for non-compact (main) view + Pending items */}
+      {!compact && (
+        <TableCell className="w-10">
+          {canSelect ? (
+            <Checkbox
+              checked={!!isSelected}
+              onCheckedChange={() => onToggleSelect!(it.id)}
+              aria-label={`Select ${it.itemName}`}
+            />
+          ) : (
+            <span className="text-muted-foreground/40 text-xs">—</span>
+          )}
+        </TableCell>
+      )}
       <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
       <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
       <TableCell className="font-mono text-xs">
@@ -668,13 +948,13 @@ function ItemRow({
       <TableCell className="text-right">{it.qty}</TableCell>
       <TableCell className="text-xs">{it.unit}</TableCell>
       <TableCell className="text-right font-medium text-foreground">
-        {formatCurrency(it.approxCost)}
+        {formatCurrency(unitCost)}
         {it.isRC && (
-          <span className="block text-[10px] text-emerald-400">@{formatCurrency(it.rcRate)}</span>
+          <span className="block text-[10px] text-emerald-400">@RC rate</span>
         )}
-        {!it.isRC && (
-          <span className="block text-[10px] text-amber-400">@{formatCurrency(unitPrice)}</span>
-        )}
+      </TableCell>
+      <TableCell className="text-right font-semibold text-foreground">
+        {formatCurrency(totalCost)}
       </TableCell>
       {showRcCols && (
         <TableCell>
@@ -758,5 +1038,235 @@ function SummaryTile({
         <p className={cn("text-sm font-semibold truncate", tone)}>{value}</p>
       </div>
     </div>
+  );
+}
+
+// ─── Bulk Initiate PR Dialog (multi-select → raise a single PR covering all selected estimate items) ───
+// Reuses the same shape as InitiateFileDialog (PR number + file number + group key + officer + sailor)
+// but applies the SAME values to every selected estimate item, so they collapse into a single grouped
+// file in the PR Raised Files window.
+function BulkInitiatePRDialog({
+  open,
+  onOpenChange,
+  selectedCount,
+  suggestedPrNumber,
+  officers,
+  sailors,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  selectedCount: number;
+  suggestedPrNumber: string;
+  officers: Stakeholder[];
+  sailors: Stakeholder[];
+  onConfirm: (input: {
+    prNumber: string;
+    fileNumber: string;
+    fileGroupKey: string;
+    authorizedById: string;
+    createdById: string;
+  }) => Promise<void>;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [prNumber, setPrNumber] = useState(suggestedPrNumber || "");
+  const [fileNumber, setFileNumber] = useState(`FILE/${today}`);
+  const [fileGroupKey, setFileGroupKey] = useState("");
+  const [usePrAsGroupKey, setUsePrAsGroupKey] = useState(true);
+  const [authorizedById, setAuthorizedById] = useState("");
+  const [createdById, setCreatedById] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const selectedOfficer = officers.find((o) => o.id === authorizedById);
+  const selectedSailor = sailors.find((s) => s.id === createdById);
+
+  const submit = async () => {
+    if (!prNumber.trim()) {
+      toast({ title: "PR/GORF Number is required", variant: "destructive" });
+      return;
+    }
+    if (!authorizedById) {
+      toast({ title: "Authorized By (Officer) is required", variant: "destructive" });
+      return;
+    }
+    if (!createdById) {
+      toast({ title: "Created By (Sailor) is required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    await onConfirm({
+      prNumber: prNumber.trim(),
+      fileNumber: fileNumber.trim(),
+      fileGroupKey: usePrAsGroupKey ? prNumber.trim() : fileGroupKey.trim(),
+      authorizedById,
+      createdById,
+    });
+    setSaving(false);
+    // Reset form after submit (parent closes the dialog)
+    setFileGroupKey("");
+    setUsePrAsGroupKey(true);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <CheckSquare className="h-5 w-5 text-primary" />
+            Initiate {selectedCount} Selected Item{selectedCount === 1 ? "" : "s"} as a Single PR
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Raise one PR/GORF covering all {selectedCount} selected estimate item{selectedCount === 1 ? "" : "s"}. They will share the same PR number, file number, and file group key — collapsing into a single grouped row in the PR Raised Files window. Status updates in place; you stay on this tab.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">PR / GORF Number *</Label>
+              <Input
+                value={prNumber}
+                onChange={(e) => setPrNumber(e.target.value)}
+                placeholder={suggestedPrNumber || "e.g. PR/2025/001"}
+                className="bg-background border-border"
+              />
+              {suggestedPrNumber && (
+                <p className="text-[11px] text-muted-foreground">
+                  Suggested: <span className="font-mono text-foreground">{suggestedPrNumber}</span> (from Settings → Number Prefixes)
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">File Number (with date)</Label>
+              <Input
+                value={fileNumber}
+                onChange={(e) => setFileNumber(e.target.value)}
+                className="bg-background border-border"
+              />
+            </div>
+          </div>
+
+          {/* File Group Key (optional) — defaults to PR number so multiple items share a file */}
+          <div className="space-y-1.5">
+            <Label className="text-xs flex items-center gap-1">
+              <Layers className="h-3 w-3 text-primary" />
+              File Group Key (optional)
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                value={usePrAsGroupKey ? prNumber : fileGroupKey}
+                onChange={(e) => {
+                  setUsePrAsGroupKey(false);
+                  setFileGroupKey(e.target.value);
+                }}
+                placeholder={prNumber || "Defaults to PR Number"}
+                className="bg-background border-border"
+              />
+              {!usePrAsGroupKey && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUsePrAsGroupKey(true);
+                    setFileGroupKey("");
+                  }}
+                  className="gap-1.5 shrink-0"
+                >
+                  <RotateCcw className="h-3 w-3" /> Reset
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+              <Info className="h-3 w-3 mt-0.5 shrink-0" />
+              {usePrAsGroupKey
+                ? `Currently mirroring the PR Number (${prNumber || "—"}). All ${selectedCount} selected items will be grouped under one file.`
+                : "Custom group key set. Items initiated with the same key will be grouped together in the file register."}
+            </p>
+          </div>
+
+          {/* Authorized By (Officer) */}
+          <div className="space-y-1.5">
+            <Label className="text-xs flex items-center gap-1">
+              <UserCheck className="h-3 w-3 text-primary" />
+              Authorized By (Officer) *
+            </Label>
+            <Select
+              value={authorizedById}
+              onValueChange={setAuthorizedById}
+            >
+              <SelectTrigger className="bg-background border-border">
+                <SelectValue placeholder="Select authorizing officer" />
+              </SelectTrigger>
+              <SelectContent>
+                {officers.length === 0 ? (
+                  <SelectItem value="_none" disabled>No officers found</SelectItem>
+                ) : (
+                  officers.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.name}
+                      {o.rankOrRate ? ` — ${o.rankOrRate}` : ""}
+                      {o.appointment ? ` (${o.appointment})` : ""}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {selectedOfficer && (
+              <p className="text-[11px] text-muted-foreground">
+                {selectedOfficer.name}
+                {selectedOfficer.appointment ? ` (${selectedOfficer.appointment})` : ""}
+                {selectedOfficer.department ? ` · ${selectedOfficer.department}` : ""}
+              </p>
+            )}
+          </div>
+
+          {/* Created By (Sailor) */}
+          <div className="space-y-1.5">
+            <Label className="text-xs flex items-center gap-1">
+              <User className="h-3 w-3 text-primary" />
+              Created By (Sailor) *
+            </Label>
+            <Select
+              value={createdById}
+              onValueChange={setCreatedById}
+            >
+              <SelectTrigger className="bg-background border-border">
+                <SelectValue placeholder="Select creating sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {sailors.length === 0 ? (
+                  <SelectItem value="_none" disabled>No sailors found</SelectItem>
+                ) : (
+                  sailors.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.rankOrRate ? ` — ${s.rankOrRate}` : ""}
+                      {s.appointment ? ` (${s.appointment})` : ""}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {selectedSailor && (
+              <p className="text-[11px] text-muted-foreground">
+                {selectedSailor.name}
+                {selectedSailor.appointment ? ` (${selectedSailor.appointment})` : ""}
+                {selectedSailor.department ? ` · ${selectedSailor.department}` : ""}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={submit} disabled={saving || selectedCount === 0} className="gap-1.5">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+            Initiate {selectedCount} PR{selectedCount === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

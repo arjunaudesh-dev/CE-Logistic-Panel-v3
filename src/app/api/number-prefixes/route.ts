@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
         suffix: body.suffix || null,
         nextNumber: Number(body.nextNumber) || 1,
         description: body.description || null,
+        stepId: body.stepId || null,
       },
     });
     return NextResponse.json(prefix, { status: 201 });

@@ -38,6 +38,7 @@ export async function POST() {
     await db.navyListImport.deleteMany();
     await db.numberPrefix.deleteMany();
     await db.themeProfile.deleteMany();
+    await db.financialDelegation.deleteMany();
     await db.project.deleteMany();
 
     // ── Projects (Real Vote Data) ──
@@ -786,11 +787,25 @@ export async function POST() {
     // ── Votes (Vote/Funds management) ──
     await db.vote.createMany({
       data: [
-        { voteNumber: "223-1-01-2104", description: "New Construction", voteType: "Capital", allocation: 292000000, financialYear: "2025" },
-        { voteNumber: "223-1-01-2001", description: "Renovation", voteType: "Capital", allocation: 85000000, financialYear: "2025" },
-        { voteNumber: "223-1-01-2506", description: "Infrastructure Development", voteType: "Capital", allocation: 250000000, financialYear: "2025" },
-        { voteNumber: "223-1-01-1303", description: "Maintenance", voteType: "Recurring", allocation: 18000000, financialYear: "2025" },
-        { voteNumber: "223-1-01-2103", description: "General Requirement (Equipment)", voteType: "Capital", allocation: 75000000, financialYear: "2026" },
+        { voteNumber: "223-1-01-2104", description: "New Construction", voteType: "Capital", department: "SLN", allocation: 292000000, financialYear: "2025", active: true },
+        { voteNumber: "223-1-01-2001", description: "Renovation", voteType: "Capital", department: "SLN", allocation: 85000000, financialYear: "2025", active: true },
+        { voteNumber: "223-1-01-2506", description: "Infrastructure Development", voteType: "Capital", department: "SLN", allocation: 250000000, financialYear: "2025", active: true },
+        { voteNumber: "223-1-01-1303", description: "Maintenance", voteType: "Recurring", department: "SLN", allocation: 18000000, financialYear: "2025", active: true },
+        { voteNumber: "223-1-01-2103", description: "General Requirement (Equipment)", voteType: "Capital", department: "SLN", allocation: 75000000, financialYear: "2026", active: true },
+        { voteNumber: "223-1-01-2099", description: "Inactive Vote (Archived)", voteType: "Capital", department: "MOD", allocation: 5000000, financialYear: "2024", active: false },
+      ],
+    });
+
+    // ── Financial Delegations (Value & Step) ──
+    await db.financialDelegation.createMany({
+      data: [
+        { value: 500000, authority: "Cdr", label: "Up to Rs. 500,000 — Cdr", active: true },
+        { value: 1000000, authority: "Cdr", label: "Up to Rs. 1,000,000 — Cdr", active: true },
+        { value: 2000000, authority: "Capt", label: "Up to Rs. 2,000,000 — Capt", active: true },
+        { value: 5000000, authority: "Capt", label: "Up to Rs. 5,000,000 — Capt", active: true },
+        { value: 10000000, authority: "FC", label: "Up to Rs. 10,000,000 — FC", active: true },
+        { value: 20000000, authority: "AOE", label: "Up to Rs. 20,000,000 — AOE", active: true },
+        { value: 50000000, authority: "CNC", label: "Up to Rs. 50,000,000 — CNC", active: true },
       ],
     });
 

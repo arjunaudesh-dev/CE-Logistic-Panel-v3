@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
@@ -59,6 +59,10 @@ import {
   THEME_PROFILE_PRESETS,
   type ThemeProfilePreset,
   formatCurrency,
+  VOTE_DEPARTMENTS,
+  FINANCIAL_AUTHORITIES,
+  PROCESS_STEP_STAGES,
+  SETTINGS_DEPARTMENTS,
 } from "@/lib/constants";
 import {
   useThemeProfile,
@@ -115,6 +119,10 @@ import {
   Star,
   RefreshCw,
   PlusCircle,
+  DollarSign,
+  ChevronDown,
+  ChevronUp,
+  Filter,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────
@@ -139,6 +147,9 @@ interface StoreConfig {
   storeName: string;
   storeType: string;
   responsiblePerson: string | null;
+  department?: string | null;
+  responsiblePersons?: string | string[] | null; // JSON-encoded array (from API) or already-parsed array
+  responsibleOfficers?: string | string[] | null;
   location: string | null;
   active: boolean;
   createdAt: string;
@@ -151,10 +162,15 @@ interface ProcessStep {
   stepOrder: number;
   positionName: string;
   description: string | null;
+  department?: string | null;
+  responsibleOfficers?: string | string[] | null;
+  responsibleSailors?: string | string[] | null;
+  financialDelegationId?: string | null;
   defaultResponsiblePerson: string | null;
   financialDelegationLevel: string | null;
   isTenderStage: boolean;
   isEvaluationStage: boolean;
+  prefixedNumber?: string | null;
   createdAt: string;
 }
 
@@ -162,6 +178,7 @@ interface ProcessFlow {
   id: string;
   name: string;
   description: string | null;
+  financialDelegationId?: string | null;
   createdAt: string;
   steps: ProcessStep[];
 }
@@ -172,6 +189,7 @@ interface Vote {
   description: string;
   voteType: string;
   allocation: number;
+  department?: string | null;
   financialYear: string | null;
   active: boolean;
   createdAt: string;
@@ -198,8 +216,30 @@ interface NumberPrefix {
   suffix: string | null;
   nextNumber: number;
   description: string | null;
+  stepId?: string | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface FinancialDelegation {
+  id: string;
+  value: number;
+  authority: string;
+  label: string | null;
+  active: boolean;
+  createdAt?: string;
+}
+
+interface Stakeholder {
+  id: string;
+  name: string;
+  rankOrRate?: string | null;
+  svcNumber?: string | null;
+  appointment?: string | null;
+  department: string;
+  category: string;
+  seniority?: number | null;
+  areaStoreLocation?: string | null;
 }
 
 interface ThemeProfileRecord {
@@ -211,6 +251,18 @@ interface ThemeProfileRecord {
   isDefault: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+// Parse a JSON-encoded array field safely (Prisma stores them as JSON strings)
+function parseJsonArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -330,7 +382,8 @@ type SettingsTab =
   | "stores"
   | "process"
   | "prefixes"
-  | "theme";
+  | "theme"
+  | "value-step";
 
 export function SettingsModule() {
   const [tab, setTab] = useState<SettingsTab>("users");
@@ -398,13 +451,20 @@ export function SettingsModule() {
       icon: Palette,
       iconClass: "bg-fuchsia-500/15 text-fuchsia-400",
     },
+    {
+      value: "value-step",
+      label: "Value & Step",
+      short: "Value",
+      icon: DollarSign,
+      iconClass: "bg-emerald-500/15 text-emerald-400",
+    },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Manage users, roles, authentication, votes, stores & procurement process flows"
+        description="Manage users, roles, authentication, votes, stores, procurement process flows, financial delegations & steps"
         icon={Settings}
       />
       <Tabs
@@ -460,6 +520,9 @@ export function SettingsModule() {
         </TabsContent>
         <TabsContent value="theme" className="mt-4">
           <ThemeColorsTab />
+        </TabsContent>
+        <TabsContent value="value-step" className="mt-4">
+          <ValueAndStepTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -930,12 +993,26 @@ interface UserFormProps {
   onOpenChange: (o: boolean) => void;
   initial: UserProfile | null;
   onSaved: () => void;
+  stakeholders?: Stakeholder[];
 }
 
-function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps) {
+function UserFormDialog({
+  open,
+  onOpenChange,
+  initial,
+  onSaved,
+  stakeholders,
+}: UserFormProps) {
   const isEdit = !!initial;
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+
+  // Fetch stakeholders if not passed in (so the dialog can be used standalone
+  // from either the User Profiles tab or the Authentication tab)
+  const { data: fetchedStakeholders } = useFetch<Stakeholder[]>(
+    "/api/stakeholders"
+  );
+  const stakeholderList = stakeholders ?? fetchedStakeholders ?? [];
 
   const [username, setUsername] = useState(initial?.username ?? "");
   const [displayName, setDisplayName] = useState(initial?.displayName ?? "");
@@ -944,6 +1021,11 @@ function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps)
   const [department, setDepartment] = useState<string>(
     initial?.department ?? "CSLOG"
   );
+  const [stakeholderId, setStakeholderId] = useState<string>(
+    initial?.stakeholderId ?? ""
+  );
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [active, setActive] = useState<boolean>(initial?.active ?? true);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -962,25 +1044,63 @@ function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps)
       email: email.trim() || null,
       role,
       department,
+      stakeholderId: stakeholderId || null,
       active,
     };
     const res = isEdit
       ? await apiRequest(`/api/settings/users/${initial!.id}`, "PUT", body)
       : await apiRequest("/api/settings/users", "POST", body);
-    setSaving(false);
-    if (res.ok) {
-      toast({
-        title: isEdit ? "User updated" : "User created",
-        description: body.displayName,
-      });
-      onSaved();
-    } else {
+    if (!res.ok) {
+      setSaving(false);
       toast({
         title: "Failed to save",
         description: res.error,
         variant: "destructive",
       });
+      return;
     }
+    // Set password if provided (initial set on create, optional override on edit)
+    const pw = password.trim();
+    if (pw) {
+      if (pw.length < 4) {
+        setSaving(false);
+        toast({
+          title: "Password too short",
+          description: "Use at least 4 characters.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const userId = isEdit
+        ? initial!.id
+        : (res.data as UserProfile)?.id;
+      if (userId) {
+        const pwRes = await apiRequest("/api/auth/set-password", "POST", {
+          userId,
+          password: pw,
+        });
+        if (!pwRes.ok) {
+          setSaving(false);
+          toast({
+            title: "User saved but password set failed",
+            description: pwRes.error,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+    }
+    setSaving(false);
+    toast({
+      title: isEdit ? "User updated" : "User created",
+      description:
+        pw && isEdit
+          ? `${body.displayName} (password updated)`
+          : pw
+          ? `${body.displayName} (password set)`
+          : body.displayName,
+    });
+    onSaved();
   }
 
   return (
@@ -992,8 +1112,8 @@ function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps)
             {isEdit ? "Edit User Profile" : "Add User Profile"}
           </DialogTitle>
           <DialogDescription>
-            Configure login identity, role permissions and department
-            assignment.
+            Configure login identity, role permissions, department, optional
+            stakeholder link and an initial password.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1054,6 +1174,80 @@ function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps)
               </Select>
             </Field>
           </div>
+          <Field label="Stakeholder Link (optional)">
+            <Select
+              value={stakeholderId || "__none__"}
+              onValueChange={(v) =>
+                setStakeholderId(v === "__none__" ? "" : v)
+              }
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Link to a stakeholder (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— None —</SelectItem>
+                {stakeholderList.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="text-foreground">{s.name}</span>
+                      {s.rankOrRate && (
+                        <span className="text-xs text-muted-foreground">
+                          ({s.rankOrRate})
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        · {s.department} / {s.category}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Optionally link this user to a stakeholder record (officer or
+              sailor) from the directory.
+            </p>
+          </Field>
+          <Field
+            label={
+              isEdit
+                ? "Reset Password (leave blank to keep existing)"
+                : "Initial Password"
+            }
+            required={!isEdit}
+          >
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={
+                  isEdit
+                    ? "Leave blank to keep existing password"
+                    : "Minimum 4 characters"
+                }
+                className="bg-background pr-10"
+                required={!isEdit}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {isEdit
+                ? "Only enter a value if you want to reset this user's password."
+                : "The user will sign in with this password. Can be changed later."}
+            </p>
+          </Field>
           <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
             <Checkbox
               id="user-active"
@@ -1254,6 +1448,7 @@ function SetPasswordDialog({
 // TAB 2 — Roles & Access
 // ═════════════════════════════════════════════════════════
 function RolesAccessTab() {
+  const { toast } = useToast();
   const roleDescriptions: {
     role: string;
     description: string;
@@ -1288,6 +1483,148 @@ function RolesAccessTab() {
     },
   ];
 
+  // Permission value options for the Select dropdowns
+  const PERM_OPTIONS = [
+    "—",
+    "View",
+    "Edit",
+    "Create/Edit",
+    "Create/Edit Files",
+    "Create/Edit Items",
+    "Full",
+  ] as const;
+
+  // Local state for editable modules — initialized from ROLE_PERMISSIONS, with
+  // any user overrides from localStorage applied on top.
+  type ModuleRow = {
+    module: string;
+    admin: string;
+    manager: string;
+    officer: string;
+    clerk: string;
+    viewer: string;
+    custom: boolean; // true if user-added (not from ROLE_PERMISSIONS presets)
+  };
+
+  const STORAGE_KEY = "erp-settings-role-permissions-v1";
+
+  // Merge preset + custom modules (custom modules are appended at the end)
+  function loadModules(): ModuleRow[] {
+    const presets: ModuleRow[] = ROLE_PERMISSIONS.map((r) => ({
+      module: r.module,
+      admin: r.admin,
+      manager: r.manager,
+      officer: r.officer,
+      clerk: r.clerk,
+      viewer: r.viewer,
+      custom: false,
+    }));
+    if (typeof window === "undefined") return presets;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return presets;
+      const stored = JSON.parse(raw) as ModuleRow[];
+      if (!Array.isArray(stored)) return presets;
+      // Apply stored overrides: presets are replaced by stored entries that
+      // share the same module name; custom entries (custom: true) are appended.
+      const presetNames = new Set(presets.map((p) => p.module));
+      const customRows: ModuleRow[] = [];
+      const overridesByName = new Map<string, ModuleRow>();
+      stored.forEach((s) => {
+        if (presetNames.has(s.module)) {
+          overridesByName.set(s.module, { ...s, custom: false });
+        } else {
+          customRows.push({ ...s, custom: true });
+        }
+      });
+      return [
+        ...presets.map((p) => overridesByName.get(p.module) ?? p),
+        ...customRows,
+      ];
+    } catch {
+      return presets;
+    }
+  }
+
+  const [rows, setRows] = useState<ModuleRow[]>(() => loadModules());
+  const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<ModuleRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ModuleRow | null>(null);
+
+  // Persist any change to localStorage
+  function persist(next: ModuleRow[]) {
+    setRows(next);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      }
+    } catch {
+      /* ignore quota errors */
+    }
+  }
+
+  function handleAdd(row: Omit<ModuleRow, "custom">) {
+    const exists = rows.some(
+      (r) => r.module.toLowerCase() === row.module.toLowerCase()
+    );
+    if (exists) {
+      toast({
+        title: "Module already exists",
+        description: `A module named "${row.module}" is already in the matrix.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    persist([...rows, { ...row, custom: true }]);
+    toast({
+      title: "Module added",
+      description: `${row.module} has been added to the matrix.`,
+    });
+    setAddOpen(false);
+  }
+
+  function handleEdit(originalName: string, updated: ModuleRow) {
+    const next = rows.map((r) =>
+      r.module === originalName ? { ...updated, custom: r.custom } : r
+    );
+    persist(next);
+    toast({
+      title: "Module updated",
+      description: `${updated.module} permissions saved.`,
+    });
+    setEditTarget(null);
+  }
+
+  function handleDelete() {
+    if (!deleteTarget) return;
+    const next = rows.filter((r) => r.module !== deleteTarget.module);
+    persist(next);
+    toast({
+      title: deleteTarget.custom ? "Custom module deleted" : "Module removed",
+      description: `${deleteTarget.module} has been removed from the matrix.`,
+    });
+    setDeleteTarget(null);
+  }
+
+  function handleReset() {
+    const presets: ModuleRow[] = ROLE_PERMISSIONS.map((r) => ({
+      module: r.module,
+      admin: r.admin,
+      manager: r.manager,
+      officer: r.officer,
+      clerk: r.clerk,
+      viewer: r.viewer,
+      custom: false,
+    }));
+    persist(presets);
+    toast({
+      title: "Matrix reset",
+      description: "All custom modules removed; presets restored to defaults.",
+    });
+  }
+
+  const customCount = rows.filter((r) => r.custom).length;
+
   return (
     <div className="space-y-5">
       {/* Header banner */}
@@ -1295,15 +1632,15 @@ function RolesAccessTab() {
         <div className="h-12 w-12 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center shrink-0 ring-2 ring-violet-500/20">
           <Shield className="h-6 w-6" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-foreground">
             Roles &amp; Access Permissions
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            The permission matrix below defines what each role can do across
-            every module of the CE Logistic Panel. This is a reference
-            configuration — admins assign roles to users in the User Profiles
-            tab.
+            The permission matrix defines what each role can do across every
+            module of the CE Logistic Panel. Admins can add new modules, edit
+            permissions, or remove custom modules. Changes are stored locally
+            (in this browser) and can be reset to defaults anytime.
           </p>
         </div>
       </div>
@@ -1335,26 +1672,48 @@ function RolesAccessTab() {
 
       {/* Permission matrix */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex items-center justify-between gap-3">
+        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <ListTree className="h-4 w-4 text-primary" />
               Module Permission Matrix
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Read-only reference of role-based access control (RBAC) for the
-              ERP modules.
+              Editable RBAC matrix — preset modules can be edited, custom
+              modules can be added or deleted.
             </p>
           </div>
-          <CustomBadge className="bg-secondary text-muted-foreground border-border">
-            {ROLE_PERMISSIONS.length} modules × {USER_ROLES.length} roles
-          </CustomBadge>
+          <div className="flex items-center gap-2 flex-wrap">
+            <CustomBadge className="bg-secondary text-muted-foreground border-border">
+              {rows.length} modules × {USER_ROLES.length} roles
+            </CustomBadge>
+            {customCount > 0 && (
+              <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+                <Plus className="h-3 w-3 mr-1" />
+                {customCount} custom
+              </CustomBadge>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleReset}
+              title="Restore default matrix"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              Reset
+            </Button>
+            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add Module
+            </Button>
+          </div>
         </div>
         <ScrollArea className="max-h-[60vh]">
           <Table>
             <TableHeader className="sticky top-0 bg-card z-10">
               <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="min-w-[180px]">Module</TableHead>
+                <TableHead className="min-w-[220px]">Module</TableHead>
                 {USER_ROLES.map((role) => {
                   const Icon = roleDescriptions.find((r) => r.role === role)
                     ?.icon;
@@ -1377,15 +1736,17 @@ function RolesAccessTab() {
                     </TableHead>
                   );
                 })}
+                <TableHead className="text-right min-w-[100px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ROLE_PERMISSIONS.map((row, idx) => (
+              {rows.map((row, idx) => (
                 <TableRow
                   key={row.module}
                   className={cn(
                     "border-border transition-colors hover:bg-secondary/30",
-                    idx % 2 === 1 && "bg-secondary/10"
+                    idx % 2 === 1 && "bg-secondary/10",
+                    row.custom && "bg-violet-500/5"
                   )}
                 >
                   <TableCell className="font-medium text-foreground">
@@ -1393,7 +1754,12 @@ function RolesAccessTab() {
                       <div className="h-6 w-6 rounded bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
                         {idx + 1}
                       </div>
-                      {row.module}
+                      <span className="truncate">{row.module}</span>
+                      {row.custom && (
+                        <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]">
+                          custom
+                        </CustomBadge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
@@ -1410,6 +1776,28 @@ function RolesAccessTab() {
                   </TableCell>
                   <TableCell className="text-center">
                     <PermissionBadge value={row.viewer} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => setEditTarget(row)}
+                        title="Edit module"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                        onClick={() => setDeleteTarget(row)}
+                        title="Delete module"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1443,6 +1831,76 @@ function RolesAccessTab() {
           </CustomBadge>
         </div>
       </div>
+
+      {/* Add Module dialog */}
+      {addOpen && (
+        <ModuleFormDialog
+          key="add-module"
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          initial={null}
+          permOptions={[...PERM_OPTIONS]}
+          onSubmit={handleAdd}
+        />
+      )}
+
+      {/* Edit Module dialog */}
+      {editTarget && (
+        <ModuleFormDialog
+          key={`edit-module-${editTarget.module}`}
+          open={!!editTarget}
+          onOpenChange={(o) => !o && setEditTarget(null)}
+          initial={editTarget}
+          permOptions={[...PERM_OPTIONS]}
+          onSubmit={(row) => handleEdit(editTarget.module, row)}
+        />
+      )}
+
+      {/* Delete confirm */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.custom
+                ? "Delete custom module?"
+                : "Remove module from matrix?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.custom ? (
+                <>
+                  This will permanently remove the custom module{" "}
+                  <span className="font-semibold text-foreground">
+                    {deleteTarget?.module}
+                  </span>{" "}
+                  from the permission matrix. This action cannot be undone.
+                </>
+              ) : (
+                <>
+                  This will remove the preset module{" "}
+                  <span className="font-semibold text-foreground">
+                    {deleteTarget?.module}
+                  </span>{" "}
+                  from the local matrix. Use the &quot;Reset&quot; button
+                  above to restore all preset modules at any time.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete Module
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1461,6 +1919,162 @@ function PermissionBadge({ value }: { value: string }) {
       )}
       {value}
     </CustomBadge>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Module Form Dialog (Add/Edit a permission matrix row)
+// ─────────────────────────────────────────────────────────
+interface ModuleFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  initial: {
+    module: string;
+    admin: string;
+    manager: string;
+    officer: string;
+    clerk: string;
+    viewer: string;
+    custom?: boolean;
+  } | null;
+  permOptions: string[];
+  onSubmit: (row: {
+    module: string;
+    admin: string;
+    manager: string;
+    officer: string;
+    clerk: string;
+    viewer: string;
+  }) => void;
+}
+
+function ModuleFormDialog({
+  open,
+  onOpenChange,
+  initial,
+  permOptions,
+  onSubmit,
+}: ModuleFormProps) {
+  const isEdit = !!initial;
+  const { toast } = useToast();
+  const [module, setModule] = useState(initial?.module ?? "");
+  const [admin, setAdmin] = useState(initial?.admin ?? "—");
+  const [manager, setManager] = useState(initial?.manager ?? "—");
+  const [officer, setOfficer] = useState(initial?.officer ?? "—");
+  const [clerk, setClerk] = useState(initial?.clerk ?? "—");
+  const [viewer, setViewer] = useState(initial?.viewer ?? "—");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!module.trim()) {
+      toast({ title: "Module name is required", variant: "destructive" });
+      return;
+    }
+    onSubmit({
+      module: module.trim(),
+      admin,
+      manager,
+      officer,
+      clerk,
+      viewer,
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-primary" />
+            {isEdit ? "Edit Module Permissions" : "Add Module to Matrix"}
+          </DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? "Rename the module or adjust permissions for each role."
+              : "Define a new module and set the access level for each role. The module will be marked as custom in the matrix."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Field label="Module Name" required>
+            <Input
+              value={module}
+              onChange={(e) => setModule(e.target.value)}
+              placeholder="e.g. Reports / Audit Logs / Inventory"
+              className="bg-background"
+              required
+              autoFocus
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {([
+              { key: "admin", label: "Admin", val: admin, set: setAdmin },
+              { key: "manager", label: "Manager", val: manager, set: setManager },
+              { key: "officer", label: "Officer", val: officer, set: setOfficer },
+              { key: "clerk", label: "Clerk", val: clerk, set: setClerk },
+              { key: "viewer", label: "Viewer", val: viewer, set: setViewer },
+            ] as const).map((f) => (
+              <Field key={f.key} label={f.label}>
+                <Select value={f.val} onValueChange={f.set}>
+                  <SelectTrigger className="bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {permOptions.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "h-2 w-2 rounded-full",
+                              opt === "Full"
+                                ? "bg-emerald-500"
+                                : opt === "View"
+                                ? "bg-slate-400"
+                                : opt === "—"
+                                ? "bg-red-400"
+                                : "bg-blue-500"
+                            )}
+                          />
+                          {opt}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            ))}
+          </div>
+          {/* Live preview */}
+          <div className="rounded-lg border border-border bg-background/40 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Preview
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <CustomBadge className="bg-primary/15 text-primary border-primary/30">
+                {module || "Module Name"}
+              </CustomBadge>
+              <PermissionBadge value={admin} />
+              <PermissionBadge value={manager} />
+              <PermissionBadge value={officer} />
+              <PermissionBadge value={clerk} />
+              <PermissionBadge value={viewer} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              {isEdit ? "Save Changes" : "Add Module"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1488,10 +2102,20 @@ function AuthenticationTab() {
     error: usersError,
     refresh: refreshUsers,
   } = useFetch<UserProfile[]>("/api/settings/users");
+  // Stakeholders for the optional user ↔ stakeholder link in Add/Edit User dialogs
+  const { data: stakeholders } = useFetch<Stakeholder[]>("/api/stakeholders");
 
   const [passwordTarget, setPasswordTarget] = useState<UserProfile | null>(
     null
   );
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [editUserTarget, setEditUserTarget] = useState<UserProfile | null>(
+    null
+  );
+  const [deleteUserTarget, setDeleteUserTarget] = useState<UserProfile | null>(
+    null
+  );
+  const [deletingUser, setDeletingUser] = useState(false);
 
   const defaultCredentials = [
     { u: "rperera", p: "admin123", role: "Admin" },
@@ -1542,6 +2166,30 @@ function AuthenticationTab() {
     } else {
       toast({
         title: "Logout failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteUserTarget) return;
+    setDeletingUser(true);
+    const res = await apiRequest(
+      `/api/settings/users/${deleteUserTarget.id}`,
+      "DELETE"
+    );
+    setDeletingUser(false);
+    if (res.ok) {
+      toast({
+        title: "User deleted",
+        description: deleteUserTarget.displayName,
+      });
+      setDeleteUserTarget(null);
+      refreshUsers();
+    } else {
+      toast({
+        title: "Failed to delete user",
         description: res.error,
         variant: "destructive",
       });
@@ -1777,25 +2425,31 @@ function AuthenticationTab() {
         </div>
       </div>
 
-      {/* Users password status list */}
+      {/* User CRUD section */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="bg-gradient-to-r from-blue-500/10 to-transparent border-b border-border p-4 flex items-center justify-between gap-2">
+        <div className="bg-gradient-to-r from-blue-500/10 to-transparent border-b border-border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="h-9 w-9 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center">
               <KeyRound className="h-5 w-5" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">
-                User Password Status
+                User Management
               </h3>
               <p className="text-xs text-muted-foreground">
-                Quick set or reset password for any user
+                Add, edit, delete users and set passwords
               </p>
             </div>
           </div>
-          <CustomBadge className="bg-secondary text-muted-foreground border-border">
-            {securedCount} / {users?.length ?? 0} secured
-          </CustomBadge>
+          <div className="flex items-center gap-2 flex-wrap">
+            <CustomBadge className="bg-secondary text-muted-foreground border-border">
+              {securedCount} / {users?.length ?? 0} secured
+            </CustomBadge>
+            <Button size="sm" onClick={() => setAddUserOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add User
+            </Button>
+          </div>
         </div>
         {usersLoading ? (
           <LoadingState label="Loading users..." />
@@ -1809,9 +2463,10 @@ function AuthenticationTab() {
                   <TableHead className="w-[40px]">Sr</TableHead>
                   <TableHead>User</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Department</TableHead>
                   <TableHead>Password</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1845,6 +2500,9 @@ function AuthenticationTab() {
                           <Shield className="h-3 w-3 mr-1" />
                           {u.role}
                         </CustomBadge>
+                      </TableCell>
+                      <TableCell className="text-sm text-foreground">
+                        {u.department || "—"}
                       </TableCell>
                       <TableCell>
                         <CustomBadge
@@ -1883,14 +2541,36 @@ function AuthenticationTab() {
                         </CustomBadge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPasswordTarget(u)}
-                        >
-                          <KeyRound className="h-3.5 w-3.5 mr-1" />
-                          Set Password
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-emerald-400 hover:text-emerald-500 hover:bg-emerald-500/10"
+                            onClick={() => setPasswordTarget(u)}
+                            title="Set or reset password"
+                          >
+                            <KeyRound className="h-3.5 w-3.5 mr-1" />
+                            <span className="text-xs">Password</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setEditUserTarget(u)}
+                            title="Edit user"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            onClick={() => setDeleteUserTarget(u)}
+                            title="Delete user"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -1902,7 +2582,13 @@ function AuthenticationTab() {
           <EmptyState
             icon={Users}
             title="No users found"
-            description="Create users in the User Profiles tab first."
+            description="Add a new user to grant them login access."
+            action={
+              <Button size="sm" onClick={() => setAddUserOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add User
+              </Button>
+            }
           />
         )}
       </div>
@@ -1919,6 +2605,69 @@ function AuthenticationTab() {
           }}
         />
       )}
+
+      {addUserOpen && (
+        <UserFormDialog
+          key="auth-add-user"
+          open={addUserOpen}
+          onOpenChange={setAddUserOpen}
+          initial={null}
+          stakeholders={stakeholders ?? []}
+          onSaved={() => {
+            setAddUserOpen(false);
+            refreshUsers();
+          }}
+        />
+      )}
+
+      {editUserTarget && (
+        <UserFormDialog
+          key={`auth-edit-${editUserTarget.id}`}
+          open={!!editUserTarget}
+          onOpenChange={(o) => !o && setEditUserTarget(null)}
+          initial={editUserTarget}
+          stakeholders={stakeholders ?? []}
+          onSaved={() => {
+            setEditUserTarget(null);
+            refreshUsers();
+          }}
+        />
+      )}
+
+      <AlertDialog
+        open={!!deleteUserTarget}
+        onOpenChange={(o) => !o && setDeleteUserTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user profile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold text-foreground">
+                {deleteUserTarget?.displayName}
+              </span>{" "}
+              ({deleteUserTarget?.username}). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingUser}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              disabled={deletingUser}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deletingUser ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete User"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -2098,6 +2847,7 @@ function VoteManagementTab() {
                   <TableHead>Vote Number</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Department</TableHead>
                   <TableHead className="text-right">Allocation</TableHead>
                   <TableHead>Financial Year</TableHead>
                   <TableHead>Status</TableHead>
@@ -2130,6 +2880,25 @@ function VoteManagementTab() {
                         )}
                         {v.voteType}
                       </CustomBadge>
+                    </TableCell>
+                    <TableCell>
+                      {v.department ? (
+                        <CustomBadge
+                          className={cn(
+                            "border",
+                            (VOTE_DEPARTMENTS as readonly string[]).includes(
+                              v.department
+                            )
+                              ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                              : "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                          )}
+                        >
+                          <Building2 className="h-3 w-3 mr-1" />
+                          {v.department}
+                        </CustomBadge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-medium text-foreground">
                       {formatCurrency(v.allocation ?? 0)}
@@ -2281,6 +3050,9 @@ function VoteFormDialog({
   const [allocation, setAllocation] = useState<string>(
     initial ? String(initial.allocation) : "0"
   );
+  const [department, setDepartment] = useState<string>(
+    initial?.department ?? "SLN"
+  );
   const [financialYear, setFinancialYear] = useState(
     initial?.financialYear ?? ""
   );
@@ -2298,6 +3070,7 @@ function VoteFormDialog({
       description: description.trim(),
       voteType,
       allocation: Number(allocation) || 0,
+      department: department.trim() || null,
       financialYear: financialYear.trim() || null,
       active,
     };
@@ -2320,6 +3093,11 @@ function VoteFormDialog({
     }
   }
 
+  // Determine if the current department value matches a preset (for badge styling)
+  const isPresetDept = (VOTE_DEPARTMENTS as readonly string[]).includes(
+    department
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -2330,7 +3108,8 @@ function VoteFormDialog({
           </DialogTitle>
           <DialogDescription>
             Configure a Treasury vote (fund) — used to track the financial
-            allocation for projects and maintenance.
+            allocation for projects and maintenance. Only active votes appear
+            in the Projects wizard.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -2385,6 +3164,51 @@ function VoteFormDialog({
               />
             </Field>
           </div>
+          <Field label="Department">
+            <div className="relative">
+              <Input
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="e.g. SLN / MOD / custom"
+                className="bg-background"
+                list="vote-dept-options"
+              />
+              <datalist id="vote-dept-options">
+                {VOTE_DEPARTMENTS.map((d) => (
+                  <option key={d} value={d} />
+                ))}
+              </datalist>
+            </div>
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span className="text-[11px] text-muted-foreground">
+                Quick pick:
+              </span>
+              {VOTE_DEPARTMENTS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDepartment(d)}
+                  className={cn(
+                    "text-[11px] px-2 py-0.5 rounded-md border transition-colors",
+                    department === d
+                      ? "bg-primary/15 text-primary border-primary/30"
+                      : "border-border text-muted-foreground hover:bg-secondary/60"
+                  )}
+                >
+                  {d}
+                </button>
+              ))}
+              {!isPresetDept && department && (
+                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]">
+                  custom
+                </CustomBadge>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Pick SLN or MOD, or type a custom department code. Used to filter
+              votes in the Projects wizard.
+            </p>
+          </Field>
           <Field label="Financial Year">
             <Input
               value={financialYear}
@@ -2675,67 +3499,114 @@ function StoreManagementTab() {
                   <TableHead className="w-[40px]">Sr</TableHead>
                   <TableHead>Store Name</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Responsible Person</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Responsible Officers</TableHead>
+                  <TableHead>Responsible Persons</TableHead>
                   <TableHead>Location</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((s, idx) => (
-                  <TableRow key={s.id} className="border-border">
-                    <TableCell className="text-xs text-muted-foreground">
-                      {idx + 1}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-md bg-primary/15 text-primary flex items-center justify-center">
-                          <Warehouse className="h-4 w-4" />
+                {filtered.map((s, idx) => {
+                  const officers = parseJsonArray(s.responsibleOfficers);
+                  const persons = parseJsonArray(s.responsiblePersons);
+                  return (
+                    <TableRow key={s.id} className="border-border">
+                      <TableCell className="text-xs text-muted-foreground">
+                        {idx + 1}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-md bg-primary/15 text-primary flex items-center justify-center">
+                            <Warehouse className="h-4 w-4" />
+                          </div>
+                          <span className="font-medium text-foreground">
+                            {s.storeName}
+                          </span>
                         </div>
-                        <span className="font-medium text-foreground">
-                          {s.storeName}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <CustomBadge className={storeTypeColor(s.storeType)}>
-                        {storeTypeLabel(s.storeType)}
-                      </CustomBadge>
-                    </TableCell>
-                    <TableCell>
-                      {s.responsiblePerson ? (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
-                          <UserCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          {s.responsiblePerson}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {s.location ? (
-                        <span className="text-sm text-foreground">
-                          {s.location}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <CustomBadge className={activeBadgeClass(s.active)}>
-                        {s.active ? (
-                          <>
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                            Active
-                          </>
+                      </TableCell>
+                      <TableCell>
+                        <CustomBadge className={storeTypeColor(s.storeType)}>
+                          {storeTypeLabel(s.storeType)}
+                        </CustomBadge>
+                      </TableCell>
+                      <TableCell>
+                        {s.department ? (
+                          <CustomBadge
+                            className={cn(
+                              "border",
+                              s.department === "CSLOG"
+                                ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                : "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                            )}
+                          >
+                            {s.department}
+                          </CustomBadge>
                         ) : (
-                          <>
-                            <XCircle className="h-3 w-3 mr-1" />
-                            Inactive
-                          </>
+                          <span className="text-muted-foreground">—</span>
                         )}
-                      </CustomBadge>
-                    </TableCell>
+                      </TableCell>
+                      <TableCell>
+                        {officers.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {officers.map((name) => (
+                              <CustomBadge
+                                key={name}
+                                className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]"
+                              >
+                                {name}
+                              </CustomBadge>
+                            ))}
+                          </div>
+                        ) : s.responsiblePerson ? (
+                          <span className="text-xs text-muted-foreground italic">
+                            {s.responsiblePerson}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {persons.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {persons.map((name) => (
+                              <CustomBadge
+                                key={name}
+                                className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]"
+                              >
+                                {name}
+                              </CustomBadge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {s.location ? (
+                          <span className="text-sm text-foreground">
+                            {s.location}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <CustomBadge className={activeBadgeClass(s.active)}>
+                          {s.active ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Active
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Inactive
+                            </>
+                          )}
+                        </CustomBadge>
+                      </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button
@@ -2759,7 +3630,8 @@ function StoreManagementTab() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </ScrollArea>
@@ -2850,15 +3722,59 @@ function StoreFormDialog({
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
+  // Fetch stakeholders for multi-select responsible persons/officers
+  const { data: stakeholders, loading: stakeholdersLoading } =
+    useFetch<Stakeholder[]>("/api/stakeholders");
+
   const [storeName, setStoreName] = useState(initial?.storeName ?? "");
   const [storeType, setStoreType] = useState<string>(
     initial?.storeType ?? "Zone"
   );
+  const [department, setDepartment] = useState<string>(
+    initial?.department ?? "CSLOG"
+  );
+  // Parse JSON-encoded arrays from the API response
+  const [responsiblePersons, setResponsiblePersons] = useState<string[]>(
+    () => parseJsonArray(initial?.responsiblePersons)
+  );
+  const [responsibleOfficers, setResponsibleOfficers] = useState<string[]>(
+    () => parseJsonArray(initial?.responsibleOfficers)
+  );
+  // Backward-compat single responsible person field (kept for display)
   const [responsiblePerson, setResponsiblePerson] = useState(
     initial?.responsiblePerson ?? ""
   );
   const [location, setLocation] = useState(initial?.location ?? "");
   const [active, setActive] = useState<boolean>(initial?.active ?? true);
+
+  // Filter stakeholders by department + category for the multi-selects.
+  // Department mapping: store dept "CSLOG" → stakeholder dept "CSLOG";
+  // store dept "CCED" → stakeholder dept "CE".
+  const deptForStakeholder = department === "CCED" ? "CE" : "CSLOG";
+  const officerList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("officer");
+    });
+  }, [stakeholders, deptForStakeholder]);
+  const sailorList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("sailor");
+    });
+  }, [stakeholders, deptForStakeholder]);
+
+  function toggleInList(
+    list: string[],
+    setList: (v: string[]) => void,
+    name: string
+  ) {
+    if (list.includes(name)) {
+      setList(list.filter((v) => v !== name));
+    } else {
+      setList([...list, name]);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -2870,12 +3786,19 @@ function StoreFormDialog({
     const body = {
       storeName: storeName.trim(),
       storeType,
+      department,
+      responsiblePersons,
+      responsibleOfficers,
       responsiblePerson: responsiblePerson.trim() || null,
       location: location.trim() || null,
       active,
     };
     const res = isEdit
-      ? await apiRequest(`/api/settings/stores-config/${initial!.id}`, "PUT", body)
+      ? await apiRequest(
+          `/api/settings/stores-config/${initial!.id}`,
+          "PUT",
+          body
+        )
       : await apiRequest("/api/settings/stores-config", "POST", body);
     setSaving(false);
     if (res.ok) {
@@ -2895,47 +3818,95 @@ function StoreFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Warehouse className="h-5 w-5 text-primary" />
             {isEdit ? "Edit Store Configuration" : "Add Store Configuration"}
           </DialogTitle>
           <DialogDescription>
-            Define the store name, type, responsible person and location.
+            Define the store name, type, department and multiple responsible
+            officers / persons (from the stakeholder directory).
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Store Name" required>
-            <Input
-              value={storeName}
-              onChange={(e) => setStoreName(e.target.value)}
-              placeholder="e.g. Zone A / BMS Area Store / Ready-Use Stores"
-              className="bg-background"
-              required
-            />
-          </Field>
-          <Field label="Store Type">
-            <Select value={storeType} onValueChange={setStoreType}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Store Name" required>
+              <Input
+                value={storeName}
+                onChange={(e) => setStoreName(e.target.value)}
+                placeholder="e.g. Zone A / BMS Area Store / Ready-Use Stores"
+                className="bg-background"
+                required
+              />
+            </Field>
+            <Field label="Store Type">
+              <Select value={storeType} onValueChange={setStoreType}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Select store type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STORE_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {storeTypeLabel(t)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <Field label="Department">
+            <Select
+              value={department}
+              onValueChange={(v) => {
+                setDepartment(v);
+                // Reset selections when department changes (stakeholders are dept-filtered)
+                setResponsiblePersons([]);
+                setResponsibleOfficers([]);
+              }}
+            >
               <SelectTrigger className="bg-background">
-                <SelectValue placeholder="Select store type" />
+                <SelectValue placeholder="Select department" />
               </SelectTrigger>
               <SelectContent>
-                {STORE_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {storeTypeLabel(t)}
-                  </SelectItem>
-                ))}
+                <SelectItem value="CSLOG">CSLOG</SelectItem>
+                <SelectItem value="CCED">CCED</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Filters the stakeholder directory: CSLOG → CSLOG officers/sailors,
+              CCED → CE officers/sailors.
+            </p>
           </Field>
-          <Field label="Responsible Person">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <MultiStakeholderPicker
+              label="Responsible Officers"
+              value={responsibleOfficers}
+              onChange={setResponsibleOfficers}
+              options={officerList}
+              loading={stakeholdersLoading}
+              emptyHint={`No officers found in ${department} department`}
+            />
+            <MultiStakeholderPicker
+              label="Responsible Persons (Sailors)"
+              value={responsiblePersons}
+              onChange={setResponsiblePersons}
+              options={sailorList}
+              loading={stakeholdersLoading}
+              emptyHint={`No sailors found in ${department} department`}
+            />
+          </div>
+          <Field label="Responsible Person (legacy free-text)">
             <Input
               value={responsiblePerson}
               onChange={(e) => setResponsiblePerson(e.target.value)}
               placeholder="e.g. PO Bandara / LS Silva"
               className="bg-background"
             />
+            <p className="text-[11px] text-muted-foreground">
+              Optional free-text fallback for backward compatibility. Prefer the
+              multi-selects above.
+            </p>
           </Field>
           <Field label="Location">
             <Input
@@ -2992,6 +3963,122 @@ function StoreFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Multi-Stakeholder Picker (reusable multi-select from stakeholder directory)
+// ─────────────────────────────────────────────────────────
+interface MultiStakeholderPickerProps {
+  label: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+  options: Stakeholder[];
+  loading?: boolean;
+  emptyHint?: string;
+}
+
+function MultiStakeholderPicker({
+  label,
+  value,
+  onChange,
+  options,
+  loading,
+  emptyHint,
+}: MultiStakeholderPickerProps) {
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    if (!s) return options;
+    return options.filter((o) =>
+      `${o.name} ${o.rankOrRate ?? ""} ${o.appointment ?? ""} ${o.svcNumber ?? ""}`.toLowerCase().includes(s)
+    );
+  }, [options, search]);
+
+  function toggle(name: string) {
+    if (value.includes(name)) {
+      onChange(value.filter((v) => v !== name));
+    } else {
+      onChange([...value, name]);
+    }
+  }
+
+  return (
+    <Field label={label}>
+      <div className="rounded-lg border border-border bg-background overflow-hidden">
+        <div className="border-b border-border p-2 bg-secondary/30">
+          <div className="relative">
+            <Search className="h-3 w-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search stakeholders..."
+              className="h-7 pl-7 text-xs bg-background border-0 focus-visible:ring-1 focus-visible:ring-primary/40"
+            />
+          </div>
+        </div>
+        <div className="max-h-44 overflow-y-auto scrollbar-thin">
+          {loading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <p className="text-xs text-muted-foreground p-3 text-center">
+              {emptyHint ?? "No stakeholders available"}
+            </p>
+          ) : (
+            filtered.map((s) => {
+              const checked = value.includes(s.name);
+              return (
+                <label
+                  key={s.id}
+                  className={cn(
+                    "flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-secondary/40 border-b border-border last:border-b-0",
+                    checked && "bg-primary/5"
+                  )}
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={() => toggle(s.name)}
+                    className="data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-foreground truncate">
+                      {s.name}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {[s.rankOrRate, s.appointment, s.areaStoreLocation]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                </label>
+              );
+            })
+          )}
+        </div>
+      </div>
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {value.map((name) => (
+            <CustomBadge
+              key={name}
+              className="bg-primary/15 text-primary border-primary/30 text-[10px] gap-1"
+            >
+              {name}
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((v) => v !== name))}
+                className="hover:text-red-400"
+                aria-label={`Remove ${name}`}
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </CustomBadge>
+          ))}
+        </div>
+      )}
+    </Field>
   );
 }
 
@@ -3641,8 +4728,16 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
+  // Fetch financial delegations for the optional flow-level link
+  const { data: delegations } = useFetch<FinancialDelegation[]>(
+    "/api/financial-delegations"
+  );
+
   const [name, setName] = useState<string>(initial?.name ?? "RC");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [financialDelegationId, setFinancialDelegationId] = useState<string>(
+    initial?.financialDelegationId ?? ""
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -3654,6 +4749,7 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
     const body = {
       name: name.trim(),
       description: description.trim() || null,
+      financialDelegationId: financialDelegationId || null,
     };
     const res = isEdit
       ? await apiRequest(`/api/process-flows/${initial!.id}`, "PUT", body)
@@ -3674,6 +4770,10 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
     }
   }
 
+  const selectedDelegation = delegations?.find(
+    (d) => d.id === financialDelegationId
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -3684,7 +4784,8 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
           </DialogTitle>
           <DialogDescription>
             Define a procurement process flow (RC, Non-Rate, ARO Contractual).
-            Steps are added separately after creation.
+            Steps are added separately after creation. Optionally link a
+            default financial delegation for the flow.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -3721,6 +4822,42 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
               placeholder="e.g. Rate Contract procurement flow — items under active RC list"
               className="bg-background min-h-[80px]"
             />
+          </Field>
+          <Field label="Default Financial Delegation (optional)">
+            <Select
+              value={financialDelegationId || "__none__"}
+              onValueChange={(v) =>
+                setFinancialDelegationId(v === "__none__" ? "" : v)
+              }
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Link a default delegation level for this flow" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— None —</SelectItem>
+                {(delegations ?? [])
+                  .filter((d) => d.active)
+                  .map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.label ||
+                        `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {selectedDelegation && (
+              <div className="mt-1.5">
+                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+                  <Award className="h-3 w-3 mr-1" />
+                  {selectedDelegation.label}
+                </CustomBadge>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Optional default delegation for the entire flow. Individual
+              financial authority steps can override this with their own
+              delegation link.
+            </p>
           </Field>
           <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-1.5">
             <p className="font-medium text-foreground flex items-center gap-1.5">
@@ -3796,6 +4933,16 @@ function StepFormDialog({
 
   const accent = flowAccent(flow.name);
 
+  // Fetch stakeholders + financial delegations + number prefixes for the form
+  const { data: stakeholders, loading: stakeholdersLoading } =
+    useFetch<Stakeholder[]>("/api/stakeholders");
+  const { data: delegations } = useFetch<FinancialDelegation[]>(
+    "/api/financial-delegations"
+  );
+  const { data: numberPrefixes } = useFetch<NumberPrefix[]>(
+    "/api/number-prefixes"
+  );
+
   const nextOrder = useMemo(() => {
     const max = flow.steps?.reduce(
       (m, s) => Math.max(m, s.stepOrder),
@@ -3807,15 +4954,33 @@ function StepFormDialog({
   const [stepOrder, setStepOrder] = useState<string>(
     String(initial?.stepOrder ?? nextOrder)
   );
+  const [stageSelect, setStageSelect] = useState<string>(
+    initial?.positionName ?? ""
+  );
   const [positionName, setPositionName] = useState(
     initial?.positionName ?? ""
   );
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [department, setDepartment] = useState<string>(
+    initial?.department ?? "CSLOG"
+  );
+  const [responsibleOfficers, setResponsibleOfficers] = useState<string[]>(
+    () => parseJsonArray(initial?.responsibleOfficers)
+  );
+  const [responsibleSailors, setResponsibleSailors] = useState<string[]>(
+    () => parseJsonArray(initial?.responsibleSailors)
+  );
+  const [financialDelegationId, setFinancialDelegationId] = useState<string>(
+    initial?.financialDelegationId ?? ""
+  );
   const [defaultResponsiblePerson, setDefaultResponsiblePerson] = useState(
     initial?.defaultResponsiblePerson ?? ""
   );
   const [financialDelegationLevel, setFinancialDelegationLevel] = useState(
     initial?.financialDelegationLevel ?? ""
+  );
+  const [prefixedNumber, setPrefixedNumber] = useState(
+    initial?.prefixedNumber ?? ""
   );
   const [isTenderStage, setIsTenderStage] = useState(
     initial?.isTenderStage ?? false
@@ -3823,6 +4988,72 @@ function StepFormDialog({
   const [isEvaluationStage, setIsEvaluationStage] = useState(
     initial?.isEvaluationStage ?? false
   );
+
+  // When a predefined stage is selected, auto-fill positionName + auto-check
+  // tender/evaluation flags based on the stage name.
+  function applyStage(stage: string) {
+    setStageSelect(stage);
+    setPositionName(stage);
+    const lower = stage.toLowerCase();
+    // Tender-related stages
+    if (
+      lower.includes("tender called") ||
+      lower.includes("tender opening") ||
+      lower.includes("quotation received") ||
+      lower.includes("pre-tender") ||
+      lower.includes("post tender")
+    ) {
+      setIsTenderStage(true);
+    }
+    // Evaluation-related stages
+    if (lower.includes("bec evaluation") || lower.includes("evaluation")) {
+      setIsEvaluationStage(true);
+    }
+    // Auto-suggest a prefixed number based on the stage name
+    suggestPrefixForStage(stage);
+  }
+
+  function suggestPrefixForStage(stage: string) {
+    if (!numberPrefixes || numberPrefixes.length === 0) return;
+    const lower = stage.toLowerCase();
+    // Map stage keywords → docType
+    let docType: string | null = null;
+    if (lower.includes("pr raised") || lower.includes("pr")) docType = "PR";
+    if (lower.includes("collection and qci") || lower.includes("nav 255"))
+      docType = "NAV255";
+    if (lower.includes("nav 254")) docType = "NAV254";
+    if (lower.includes("po placed") || lower.includes("order placed"))
+      docType = "PO";
+    if (lower.includes("file")) docType = "FILE";
+    if (!docType) return;
+    const match = numberPrefixes.find((p) => p.docType === docType);
+    if (match) {
+      setPrefixedNumber(match.prefix);
+    }
+  }
+
+  // Filter stakeholders by department + category
+  const deptForStakeholder = department === "CCED" ? "CE" : "CSLOG";
+  const officerList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("officer");
+    });
+  }, [stakeholders, deptForStakeholder]);
+  const sailorList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("sailor");
+    });
+  }, [stakeholders, deptForStakeholder]);
+
+  // Show the Financial Delegation Select only when the step is a financial
+  // authority step (or when an existing step already has one set).
+  const isFinancialAuthorityStep =
+    positionName.toLowerCase().includes("financial authority") ||
+    positionName.toLowerCase().includes("financial delegation") ||
+    positionName.toLowerCase().includes("aoe approval") ||
+    !!financialDelegationId;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -3843,10 +5074,15 @@ function StepFormDialog({
       stepOrder: orderNum,
       positionName: positionName.trim(),
       description: description.trim() || null,
+      department,
+      responsibleOfficers,
+      responsibleSailors,
+      financialDelegationId: financialDelegationId || null,
       defaultResponsiblePerson: defaultResponsiblePerson.trim() || null,
       financialDelegationLevel: financialDelegationLevel.trim() || null,
       isTenderStage,
       isEvaluationStage,
+      prefixedNumber: prefixedNumber.trim() || null,
     };
     const res = isEdit
       ? await apiRequest(
@@ -3871,6 +5107,10 @@ function StepFormDialog({
     }
   }
 
+  const selectedDelegation = delegations?.find(
+    (d) => d.id === financialDelegationId
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
@@ -3882,8 +5122,9 @@ function StepFormDialog({
           <DialogDescription>
             Configure a step in the{" "}
             <CustomBadge className={accent.badge}>{flow.name}</CustomBadge> flow
-            — including tender/evaluation branch flags and financial delegation
-            level.
+            — pick a predefined stage, set the department, responsible
+            officers/sailors, and (if a financial authority step) link a
+            financial delegation.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -3900,17 +5141,47 @@ function StepFormDialog({
               />
             </Field>
             <div className="sm:col-span-2">
-              <Field label="Position Name" required>
-                <Input
-                  value={positionName}
-                  onChange={(e) => setPositionName(e.target.value)}
-                  placeholder="e.g. PR Raised / Tender Called / BEC Evaluation"
-                  className="bg-background"
-                  required
-                />
+              <Field label="Select Predefined Stage" required>
+                <Select
+                  value={stageSelect}
+                  onValueChange={(v) => {
+                    if (v === "__custom__") {
+                      setStageSelect("__custom__");
+                      return;
+                    }
+                    applyStage(v);
+                  }}
+                >
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Pick a stage or type custom below" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROCESS_STEP_STAGES.map((stage) => (
+                      <SelectItem key={stage} value={stage}>
+                        {stage}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__custom__">
+                      — Custom (type below) —
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
           </div>
+
+          <Field label="Position Name" required>
+            <Input
+              value={positionName}
+              onChange={(e) => setPositionName(e.target.value)}
+              placeholder="e.g. PR Raised / Tender Called / BEC Evaluation / Financial Authority"
+              className="bg-background"
+              required
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Auto-filled when you pick a stage above. Edit freely if needed.
+            </p>
+          </Field>
 
           <Field label="Description">
             <Textarea
@@ -3921,8 +5192,67 @@ function StepFormDialog({
             />
           </Field>
 
+          <Field label="Department">
+            <Select
+              value={department}
+              onValueChange={(v) => {
+                setDepartment(v);
+                // Reset stakeholder selections when department changes
+                setResponsibleOfficers([]);
+                setResponsibleSailors([]);
+              }}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select department" />
+              </SelectTrigger>
+              <SelectContent>
+                {SETTINGS_DEPARTMENTS.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Filters the stakeholder directory for the multi-selects below.
+              CCED → CE officers/sailors, CSLOG → CSLOG officers/sailors.
+            </p>
+          </Field>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Default Responsible Person">
+            <MultiStakeholderPicker
+              label="Responsible Officers"
+              value={responsibleOfficers}
+              onChange={setResponsibleOfficers}
+              options={officerList}
+              loading={stakeholdersLoading}
+              emptyHint={`No officers found in ${department} department`}
+            />
+            <MultiStakeholderPicker
+              label="Responsible Sailors"
+              value={responsibleSailors}
+              onChange={setResponsibleSailors}
+              options={sailorList}
+              loading={stakeholdersLoading}
+              emptyHint={`No sailors found in ${department} department`}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Prefixed Number (auto-suggested)">
+              <Input
+                value={prefixedNumber}
+                onChange={(e) => setPrefixedNumber(e.target.value)}
+                placeholder="e.g. PR/2025/ — auto-suggested by stage"
+                className="bg-background font-mono"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Auto-suggests a prefix from /api/number-prefixes based on the
+                stage (e.g. PR Raised → PR prefix, Collection and QCI → NAV 255
+                prefix). Edit freely.
+              </p>
+            </Field>
+            <Field label="Default Responsible Person (legacy free-text)">
               <Input
                 value={defaultResponsiblePerson}
                 onChange={(e) => setDefaultResponsiblePerson(e.target.value)}
@@ -3930,15 +5260,61 @@ function StepFormDialog({
                 className="bg-background"
               />
             </Field>
-            <Field label="Financial Delegation Level">
-              <Input
-                value={financialDelegationLevel}
-                onChange={(e) => setFinancialDelegationLevel(e.target.value)}
-                placeholder="e.g. Up to Rs. 2,000,000 — Capt"
-                className="bg-background"
-              />
-            </Field>
           </div>
+
+          {/* Financial Delegation — only shown when step is a financial
+              authority step (or already has one set). */}
+          {isFinancialAuthorityStep && (
+            <div className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Award className="h-4 w-4 text-blue-400" />
+                <p className="text-sm font-semibold text-blue-400">
+                  Financial Authority Step
+                </p>
+              </div>
+              <Field label="Link Financial Delegation">
+                <Select
+                  value={financialDelegationId || "__none__"}
+                  onValueChange={(v) =>
+                    setFinancialDelegationId(v === "__none__" ? "" : v)
+                  }
+                >
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Pick a delegation level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— None —</SelectItem>
+                    {(delegations ?? [])
+                      .filter((d) => d.active)
+                      .map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.label || `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {selectedDelegation && (
+                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+                  <Award className="h-3 w-3 mr-1" />
+                  {selectedDelegation.label}
+                </CustomBadge>
+              )}
+              <Field label="Financial Delegation Level (legacy free-text)">
+                <Input
+                  value={financialDelegationLevel}
+                  onChange={(e) =>
+                    setFinancialDelegationLevel(e.target.value)
+                  }
+                  placeholder="e.g. Up to Rs. 2,000,000 — Capt"
+                  className="bg-background"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Optional free-text fallback for backward compatibility.
+                </p>
+              </Field>
+            </div>
+          )}
 
           {/* Branch flags */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3966,7 +5342,7 @@ function StepFormDialog({
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Marks this as part of the tender branch — quotation called,
-                  received or opened.
+                  received or opened. Auto-checked for tender-related stages.
                 </p>
               </div>
             </label>
@@ -3995,7 +5371,7 @@ function StepFormDialog({
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Marks this as part of the BEC evaluation branch — bid
-                  evaluation & recommendation.
+                  evaluation & recommendation. Auto-checked for BEC Evaluation.
                 </p>
               </div>
             </label>
@@ -4020,6 +5396,20 @@ function StepFormDialog({
               <CustomBadge className={cn("font-semibold", accent.badge)}>
                 {positionName || "Position Name"}
               </CustomBadge>
+              {department && (
+                <CustomBadge
+                  className={cn(
+                    "border",
+                    department === "CSLOG"
+                      ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                      : department === "CCED"
+                      ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                      : "bg-slate-500/15 text-slate-300 border-slate-500/30"
+                  )}
+                >
+                  {department}
+                </CustomBadge>
+              )}
               {isTenderStage && (
                 <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
                   <Gavel className="h-3 w-3 mr-1" />
@@ -4030,6 +5420,30 @@ function StepFormDialog({
                 <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
                   <ClipboardCheck className="h-3 w-3 mr-1" />
                   EVALUATION
+                </CustomBadge>
+              )}
+              {prefixedNumber && (
+                <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 font-mono">
+                  <Hash className="h-3 w-3 mr-1" />
+                  {prefixedNumber}
+                </CustomBadge>
+              )}
+              {selectedDelegation && (
+                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+                  <Award className="h-3 w-3 mr-1" />
+                  {selectedDelegation.label}
+                </CustomBadge>
+              )}
+              {responsibleOfficers.length > 0 && (
+                <CustomBadge className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px]">
+                  {responsibleOfficers.length} officer
+                  {responsibleOfficers.length === 1 ? "" : "s"}
+                </CustomBadge>
+              )}
+              {responsibleSailors.length > 0 && (
+                <CustomBadge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px]">
+                  {responsibleSailors.length} sailor
+                  {responsibleSailors.length === 1 ? "" : "s"}
                 </CustomBadge>
               )}
               {financialDelegationLevel &&
@@ -4138,11 +5552,24 @@ function NumberPrefixesTab() {
     error,
     refresh,
   } = useFetch<NumberPrefix[]>("/api/number-prefixes");
+  // Fetch process flows to map stepId → step name in the table
+  const { data: flows } = useFetch<ProcessFlow[]>("/api/process-flows");
   const { toast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<NumberPrefix | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<NumberPrefix | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Flatten all steps across all flows for stepId → {name, flow} lookup
+  const stepLookup = useMemo(() => {
+    const map = new Map<string, { positionName: string; flowName: string }>();
+    (flows ?? []).forEach((f) => {
+      (f.steps ?? []).forEach((s) => {
+        map.set(s.id, { positionName: s.positionName, flowName: f.name });
+      });
+    });
+    return map;
+  }, [flows]);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -4282,6 +5709,7 @@ function NumberPrefixesTab() {
                 <TableHead className="text-xs">Prefix</TableHead>
                 <TableHead className="text-xs">Suffix</TableHead>
                 <TableHead className="text-xs text-right">Next Number</TableHead>
+                <TableHead className="text-xs">Linked Step</TableHead>
                 <TableHead className="text-xs">Description</TableHead>
                 <TableHead className="text-xs text-right">Actions</TableHead>
               </TableRow>
@@ -4290,7 +5718,7 @@ function NumberPrefixesTab() {
               {!list || list.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center text-muted-foreground py-8"
                   >
                     No number prefixes configured. Click &quot;Add Prefix&quot;
@@ -4298,53 +5726,71 @@ function NumberPrefixesTab() {
                   </TableCell>
                 </TableRow>
               ) : (
-                list.map((p) => (
-                  <TableRow key={p.id} className="border-border">
-                    <TableCell>
-                      <CustomBadge className={cn("border", docTypeColor(p.docType))}>
-                        {p.docType}
-                      </CustomBadge>
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-mono text-foreground bg-secondary/60 px-2 py-0.5 rounded-md text-sm">
-                        {p.prefix || "—"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm font-mono">
-                      {p.suffix || "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-mono font-semibold text-foreground">
-                        {String(p.nextNumber).padStart(4, "0")}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {p.description || "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditTarget(p)}
-                          className="h-8 w-8 p-0"
-                          title="Edit"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeleteTarget(p)}
-                          className="h-8 w-8 p-0 hover:text-red-400"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                list.map((p) => {
+                  const linkedStep = p.stepId
+                    ? stepLookup.get(p.stepId)
+                    : null;
+                  return (
+                    <TableRow key={p.id} className="border-border">
+                      <TableCell>
+                        <CustomBadge className={cn("border", docTypeColor(p.docType))}>
+                          {p.docType}
+                        </CustomBadge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-foreground bg-secondary/60 px-2 py-0.5 rounded-md text-sm">
+                          {p.prefix || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm font-mono">
+                        {p.suffix || "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-mono font-semibold text-foreground">
+                          {String(p.nextNumber).padStart(4, "0")}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {linkedStep ? (
+                          <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 text-[10px]">
+                            <ListTree className="h-3 w-3 mr-1" />
+                            {linkedStep.positionName}
+                            <span className="text-[10px] text-muted-foreground ml-1">
+                              ({linkedStep.flowName})
+                            </span>
+                          </CustomBadge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {p.description || "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditTarget(p)}
+                            className="h-8 w-8 p-0"
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteTarget(p)}
+                            className="h-8 w-8 p-0 hover:text-red-400"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -4433,6 +5879,9 @@ function PrefixFormDialog({
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
+  // Fetch process flows (with steps) to populate the optional Step dropdown
+  const { data: flows } = useFetch<ProcessFlow[]>("/api/process-flows");
+
   const [docType, setDocType] = useState<string>(initial?.docType ?? "PR");
   const [prefix, setPrefix] = useState(initial?.prefix ?? "");
   const [suffix, setSuffix] = useState(initial?.suffix ?? "");
@@ -4440,6 +5889,7 @@ function PrefixFormDialog({
     String(initial?.nextNumber ?? 1)
   );
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [stepId, setStepId] = useState<string>(initial?.stepId ?? "");
 
   const selectedMeta =
     NUMBER_PREFIX_TYPES.find((t) => t.docType === docType) ??
@@ -4448,6 +5898,20 @@ function PrefixFormDialog({
   const previewFull = `${prefix || selectedMeta.placeholder}${previewEnd}${
     suffix || ""
   }`;
+
+  // Flatten all steps across all flows for the Step dropdown
+  const allSteps = useMemo(() => {
+    if (!flows) return [];
+    return flows.flatMap((f) =>
+      (f.steps ?? []).map((s) => ({
+        id: s.id,
+        positionName: s.positionName,
+        flowName: f.name,
+      }))
+    );
+  }, [flows]);
+
+  const selectedStep = allSteps.find((s) => s.id === stepId);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -4474,6 +5938,7 @@ function PrefixFormDialog({
       suffix: suffix.trim() || null,
       nextNumber: nNum,
       description: description.trim() || null,
+      stepId: stepId || null,
     };
     const res = isEdit
       ? await apiRequest(`/api/number-prefixes/${initial!.id}`, "PUT", body)
@@ -4504,8 +5969,8 @@ function PrefixFormDialog({
           </DialogTitle>
           <DialogDescription>
             Configure the predetermined prefix used when initiating a document
-            of this type. Only the end number is entered during initiation —
-            the prefix is auto-prepended.
+            of this type. Optionally link it to a process step so it
+            auto-shows when that step is reached.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -4578,6 +6043,51 @@ function PrefixFormDialog({
               placeholder="e.g. PR numbers for 2025 — Engineering Dept"
               className="bg-background"
             />
+          </Field>
+          <Field label="Link to Process Step (optional)">
+            <Select
+              value={stepId || "__none__"}
+              onValueChange={(v) => setStepId(v === "__none__" ? "" : v)}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Auto-show this prefix when a step is reached" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— None —</SelectItem>
+                {allSteps.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          s.flowName === "RC"
+                            ? "bg-emerald-500"
+                            : s.flowName === "Non-Rate"
+                            ? "bg-amber-500"
+                            : "bg-violet-500"
+                        )}
+                      />
+                      <span className="text-foreground">{s.positionName}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        ({s.flowName})
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedStep && (
+              <div className="mt-1.5">
+                <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 text-[10px]">
+                  <ListTree className="h-3 w-3 mr-1" />
+                  {selectedStep.positionName} · {selectedStep.flowName}
+                </CustomBadge>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              When linked, this prefix will auto-suggest when the linked step is
+              reached during file processing.
+            </p>
           </Field>
           {/* Live preview */}
           <div className="rounded-lg border border-border bg-background/40 p-3">
@@ -5282,6 +6792,1178 @@ function CustomThemeFormDialog({
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4 mr-1" /> Create Profile
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// TAB 9 — Value & Step (Financial Delegations + Step Management)
+// ═════════════════════════════════════════════════════════
+function ValueAndStepTab() {
+  return (
+    <div className="space-y-6">
+      <FinancialDelegationSection />
+      <StepManagementSection />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Financial Delegation Section
+// ─────────────────────────────────────────────────────────
+function financialAuthorityColor(authority: string): string {
+  switch (authority) {
+    case "Cdr":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Capt":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "FC":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "AOE":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "CNC":
+      return "bg-red-500/15 text-red-400 border-red-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+function FinancialDelegationSection() {
+  const {
+    data: list,
+    loading,
+    error,
+    refresh,
+  } = useFetch<FinancialDelegation[]>("/api/financial-delegations");
+  const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<FinancialDelegation | null>(
+    null
+  );
+  const [deleteTarget, setDeleteTarget] = useState<FinancialDelegation | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await apiRequest(
+      `/api/financial-delegations/${deleteTarget.id}`,
+      "DELETE"
+    );
+    setDeleting(false);
+    if (res.ok) {
+      toast({
+        title: "Delegation deleted",
+        description: deleteTarget.label || deleteTarget.authority,
+      });
+      setDeleteTarget(null);
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  const activeCount = list?.filter((d) => d.active).length ?? 0;
+  const totalValue = list?.reduce((acc, d) => acc + (d.value ?? 0), 0) ?? 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Header banner */}
+      <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/20 rounded-xl p-5 flex items-start gap-3">
+        <div className="h-12 w-12 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0 ring-2 ring-emerald-500/20">
+          <DollarSign className="h-6 w-6" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-xl font-bold text-foreground">
+            Financial Delegations
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Define financial delegation levels (e.g. Cdr, Capt, FC, AOE, CNC).
+            These can be linked to process steps that require financial
+            authority.
+          </p>
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Delegations"
+          value={list?.length ?? 0}
+          icon={Award}
+          accent="green"
+          sub="All configured"
+        />
+        <StatCard
+          label="Active"
+          value={activeCount}
+          icon={CheckCircle2}
+          accent="blue"
+          sub="Currently usable"
+        />
+        <StatCard
+          label="Highest Authority"
+          value={list?.find((d) => d.authority === "CNC") ? "CNC" : "—"}
+          icon={Crown}
+          accent="red"
+          sub="Top delegation"
+        />
+        <StatCard
+          label="Combined Ceiling"
+          value={formatCurrency(totalValue)}
+          icon={Banknote}
+          accent="purple"
+          sub="Sum of all values"
+        />
+      </div>
+
+      {/* Table */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-primary" />
+              Delegation Register
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Manage financial delegation levels (value + authority)
+            </p>
+          </div>
+          <Button onClick={() => setAddOpen(true)} className="shrink-0">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Delegation
+          </Button>
+        </div>
+        {loading ? (
+          <LoadingState label="Loading financial delegations..." />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : !list || list.length === 0 ? (
+          <EmptyState
+            icon={DollarSign}
+            title="No delegations configured"
+            description="Add your first financial delegation level (e.g. Up to Rs. 500,000 — Cdr)."
+            action={
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Delegation
+              </Button>
+            }
+          />
+        ) : (
+          <ScrollArea className="max-h-[60vh]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="w-[40px]">Sr</TableHead>
+                  <TableHead className="text-right">Value (Rs.)</TableHead>
+                  <TableHead>Authority</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.map((d, idx) => (
+                  <TableRow
+                    key={d.id}
+                    className="border-border hover:bg-secondary/30 transition-colors"
+                  >
+                    <TableCell className="text-xs text-muted-foreground">
+                      {idx + 1}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-foreground">
+                      {formatCurrency(d.value ?? 0)}
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge
+                        className={financialAuthorityColor(d.authority)}
+                      >
+                        <Award className="h-3 w-3 mr-1" />
+                        {d.authority}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell className="text-sm text-foreground">
+                      {d.label || `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
+                    </TableCell>
+                    <TableCell>
+                      <CustomBadge className={activeBadgeClass(d.active)}>
+                        {d.active ? (
+                          <>
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Active
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Inactive
+                          </>
+                        )}
+                      </CustomBadge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => setEditTarget(d)}
+                          title="Edit delegation"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                          onClick={() => setDeleteTarget(d)}
+                          title="Delete delegation"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        )}
+      </div>
+
+      {addOpen && (
+        <FinancialDelegationFormDialog
+          key="add-delegation"
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          initial={null}
+          onSaved={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+      {editTarget && (
+        <FinancialDelegationFormDialog
+          key={`edit-delegation-${editTarget.id}`}
+          open={!!editTarget}
+          onOpenChange={(o) => !o && setEditTarget(null)}
+          initial={editTarget}
+          onSaved={() => {
+            setEditTarget(null);
+            refresh();
+          }}
+        />
+      )}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete financial delegation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the delegation{" "}
+              <span className="font-semibold text-foreground">
+                {deleteTarget?.label || deleteTarget?.authority}
+              </span>
+              . Steps linked to it will lose their delegation reference. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Delegation"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Financial Delegation Form Dialog
+// ─────────────────────────────────────────────────────────
+interface FinancialDelegationFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  initial: FinancialDelegation | null;
+  onSaved: () => void;
+}
+
+function FinancialDelegationFormDialog({
+  open,
+  onOpenChange,
+  initial,
+  onSaved,
+}: FinancialDelegationFormProps) {
+  const isEdit = !!initial;
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [value, setValue] = useState<string>(
+    initial ? String(initial.value) : ""
+  );
+  const [authority, setAuthority] = useState<string>(
+    initial?.authority ?? "Cdr"
+  );
+  const [active, setActive] = useState<boolean>(initial?.active ?? true);
+
+  const valueNum = Number(value) || 0;
+  const computedLabel = `Up to Rs. ${valueNum.toLocaleString("en-IN")} — ${authority}`;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!value.trim() || isNaN(valueNum) || valueNum <= 0) {
+      toast({
+        title: "A positive value is required",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!authority.trim()) {
+      toast({
+        title: "Authority is required",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaving(true);
+    const body = { value: valueNum, authority, active };
+    const res = isEdit
+      ? await apiRequest(
+          `/api/financial-delegations/${initial!.id}`,
+          "PUT",
+          body
+        )
+      : await apiRequest("/api/financial-delegations", "POST", body);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: isEdit ? "Delegation updated" : "Delegation added",
+        description: computedLabel,
+      });
+      onSaved();
+    } else {
+      toast({
+        title: "Failed to save",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-primary" />
+            {isEdit ? "Edit Financial Delegation" : "Add Financial Delegation"}
+          </DialogTitle>
+          <DialogDescription>
+            Define a delegation level by value (Rs.) and authority. The label
+            auto-computes as &quot;Up to Rs. {`{value}`} — {`{authority}`}&quot;.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Value (Rs.)" required>
+              <Input
+                type="number"
+                min={0}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="e.g. 500000"
+                className="bg-background font-mono"
+                required
+              />
+            </Field>
+            <Field label="Authority" required>
+              <Select value={authority} onValueChange={setAuthority}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Select authority" />
+                </SelectTrigger>
+                <SelectContent>
+                  {FINANCIAL_AUTHORITIES.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "h-2 w-2 rounded-full",
+                            a === "Cdr"
+                              ? "bg-blue-500"
+                              : a === "Capt"
+                              ? "bg-emerald-500"
+                              : a === "FC"
+                              ? "bg-amber-500"
+                              : a === "AOE"
+                              ? "bg-violet-500"
+                              : "bg-red-500"
+                          )}
+                        />
+                        {a}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          {/* Auto-computed label preview */}
+          <div className="rounded-lg border border-border bg-background/40 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Auto-computed Label
+            </p>
+            <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+              <Award className="h-3 w-3 mr-1" />
+              {computedLabel}
+            </CustomBadge>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+            <Checkbox
+              id="delegation-active"
+              checked={active}
+              onCheckedChange={(v) => setActive(v === true)}
+            />
+            <div className="flex-1">
+              <Label
+                htmlFor="delegation-active"
+                className="text-sm font-medium cursor-pointer"
+              >
+                Active delegation
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Inactive delegations are hidden from step-link dropdowns.
+              </p>
+            </div>
+            <CustomBadge className={activeBadgeClass(active)}>
+              {active ? "Active" : "Inactive"}
+            </CustomBadge>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                  {isEdit ? "Save Changes" : "Add Delegation"}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Step Management Section (independent reusable steps)
+// ─────────────────────────────────────────────────────────
+// Steps added here are stored as ProcessStep records under a "General Steps"
+// flow (auto-created if it doesn't exist).
+const GENERAL_STEPS_FLOW_NAME = "General Steps";
+
+function StepManagementSection() {
+  const {
+    data: flows,
+    loading,
+    error,
+    refresh,
+  } = useFetch<ProcessFlow[]>("/api/process-flows");
+  const { toast } = useToast();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<ProcessStep | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProcessStep | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [generalFlowId, setGeneralFlowId] = useState<string | null>(null);
+
+  // Find (or auto-create) the "General Steps" flow
+  useEffect(() => {
+    let cancelled = false;
+    async function ensureGeneralFlow() {
+      if (!flows) return;
+      const existing = flows.find(
+        (f) => f.name === GENERAL_STEPS_FLOW_NAME
+      );
+      if (existing) {
+        if (!cancelled) setGeneralFlowId(existing.id);
+        return;
+      }
+      // Auto-create the General Steps flow (only once)
+      const res = await apiRequest("/api/process-flows", "POST", {
+        name: GENERAL_STEPS_FLOW_NAME,
+        description:
+          "Reference pool of reusable process steps — managed from the Value & Step tab.",
+      });
+      if (res.ok) {
+        const created = res.data as ProcessFlow;
+        if (!cancelled) {
+          setGeneralFlowId(created.id);
+          refresh();
+        }
+      }
+    }
+    ensureGeneralFlow();
+    return () => {
+      cancelled = true;
+    };
+  }, [flows, refresh]);
+
+  const generalFlow = flows?.find((f) => f.name === GENERAL_STEPS_FLOW_NAME);
+  const steps = useMemo(() => {
+    if (!generalFlow) return [];
+    return [...(generalFlow.steps ?? [])].sort(
+      (a, b) => a.stepOrder - b.stepOrder
+    );
+  }, [generalFlow]);
+
+  async function handleDelete() {
+    if (!deleteTarget || !generalFlowId) return;
+    setDeleting(true);
+    const res = await apiRequest(
+      `/api/process-flows/${generalFlowId}/steps/${deleteTarget.id}`,
+      "DELETE"
+    );
+    setDeleting(false);
+    if (res.ok) {
+      toast({
+        title: "Step deleted",
+        description: deleteTarget.positionName,
+      });
+      setDeleteTarget(null);
+      refresh();
+    } else {
+      toast({
+        title: "Failed to delete step",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header banner */}
+      <div className="bg-gradient-to-r from-sky-500/10 via-cyan-500/5 to-transparent border border-sky-500/20 rounded-xl p-5 flex items-start gap-3">
+        <div className="h-12 w-12 rounded-lg bg-sky-500/15 text-sky-400 flex items-center justify-center shrink-0 ring-2 ring-sky-500/20">
+          <ListTree className="h-6 w-6" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-xl font-bold text-foreground">
+            Step Management
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Define reusable process steps (independent of any specific flow).
+            Steps added here live under a hidden &quot;General Steps&quot; flow
+            and can be referenced from any procurement flow.
+          </p>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <ListTree className="h-4 w-4 text-primary" />
+              General Steps Pool
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {steps.length} reusable step
+              {steps.length === 1 ? "" : "s"} defined
+            </p>
+          </div>
+          <Button
+            onClick={() => setAddOpen(true)}
+            className="shrink-0"
+            disabled={!generalFlowId}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Add Step
+          </Button>
+        </div>
+        {loading ? (
+          <LoadingState label="Loading steps..." />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : steps.length === 0 ? (
+          <EmptyState
+            icon={ListTree}
+            title="No general steps yet"
+            description="Add reusable steps here (e.g. PR Raised, Tender Called, BEC Evaluation) that can be referenced from any flow."
+            action={
+              <Button
+                onClick={() => setAddOpen(true)}
+                disabled={!generalFlowId}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Add First Step
+              </Button>
+            }
+          />
+        ) : (
+          <ScrollArea className="max-h-[60vh]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="w-[40px]">Sr</TableHead>
+                  <TableHead>Step Name</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Responsible Officers</TableHead>
+                  <TableHead>Responsible Sailors</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {steps.map((s, idx) => {
+                  const officers = parseJsonArray(s.responsibleOfficers);
+                  const sailors = parseJsonArray(s.responsibleSailors);
+                  return (
+                    <TableRow
+                      key={s.id}
+                      className="border-border hover:bg-secondary/30 transition-colors"
+                    >
+                      <TableCell className="text-xs text-muted-foreground">
+                        {idx + 1}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
+                              "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                            )}
+                          >
+                            #{s.stepOrder}
+                          </span>
+                          <span className="font-medium text-foreground">
+                            {s.positionName}
+                          </span>
+                          {s.isTenderStage && (
+                            <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">
+                              <Gavel className="h-3 w-3 mr-1" />
+                              TENDER
+                            </CustomBadge>
+                          )}
+                          {s.isEvaluationStage && (
+                            <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]">
+                              <ClipboardCheck className="h-3 w-3 mr-1" />
+                              EVAL
+                            </CustomBadge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {s.department ? (
+                          <CustomBadge
+                            className={cn(
+                              "border",
+                              s.department === "CSLOG"
+                                ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                : s.department === "CCED"
+                                ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                                : "bg-slate-500/15 text-slate-300 border-slate-500/30"
+                            )}
+                          >
+                            {s.department}
+                          </CustomBadge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {officers.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {officers.map((name) => (
+                              <CustomBadge
+                                key={name}
+                                className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-[10px]"
+                              >
+                                {name}
+                              </CustomBadge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {sailors.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {sailors.map((name) => (
+                              <CustomBadge
+                                key={name}
+                                className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]"
+                              >
+                                {name}
+                              </CustomBadge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setEditTarget(s)}
+                            title="Edit step"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            onClick={() => setDeleteTarget(s)}
+                            title="Delete step"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        )}
+      </div>
+
+      {generalFlowId && addOpen && (
+        <GeneralStepFormDialog
+          key="add-general-step"
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          flowId={generalFlowId}
+          existingSteps={steps}
+          initial={null}
+          onSaved={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+      {generalFlowId && editTarget && (
+        <GeneralStepFormDialog
+          key={`edit-general-step-${editTarget.id}`}
+          open={!!editTarget}
+          onOpenChange={(o) => !o && setEditTarget(null)}
+          flowId={generalFlowId}
+          existingSteps={steps.filter((s) => s.id !== editTarget.id)}
+          initial={editTarget}
+          onSaved={() => {
+            setEditTarget(null);
+            refresh();
+          }}
+        />
+      )}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete general step?</AlertDialogTitle>
+          <AlertDialogDescription>
+              This will permanently remove{" "}
+              <span className="font-semibold text-foreground">
+                {deleteTarget?.positionName}
+              </span>{" "}
+              from the General Steps pool. Number prefixes linked to this step
+              will lose their reference. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Step"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// General Step Form Dialog (for the Value & Step tab Step pool)
+// ─────────────────────────────────────────────────────────
+interface GeneralStepFormProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  flowId: string;
+  existingSteps: ProcessStep[];
+  initial: ProcessStep | null;
+  onSaved: () => void;
+}
+
+function GeneralStepFormDialog({
+  open,
+  onOpenChange,
+  flowId,
+  existingSteps,
+  initial,
+  onSaved,
+}: GeneralStepFormProps) {
+  const isEdit = !!initial;
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const { data: stakeholders, loading: stakeholdersLoading } =
+    useFetch<Stakeholder[]>("/api/stakeholders");
+
+  const nextOrder = useMemo(() => {
+    const max = existingSteps.reduce((m, s) => Math.max(m, s.stepOrder), 0);
+    return max + 1;
+  }, [existingSteps]);
+
+  const [stepOrder, setStepOrder] = useState<string>(
+    String(initial?.stepOrder ?? nextOrder)
+  );
+  const [stageSelect, setStageSelect] = useState<string>(
+    initial?.positionName ?? ""
+  );
+  const [positionName, setPositionName] = useState(
+    initial?.positionName ?? ""
+  );
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [department, setDepartment] = useState<string>(
+    initial?.department ?? "CSLOG"
+  );
+  const [responsibleOfficers, setResponsibleOfficers] = useState<string[]>(
+    () => parseJsonArray(initial?.responsibleOfficers)
+  );
+  const [responsibleSailors, setResponsibleSailors] = useState<string[]>(
+    () => parseJsonArray(initial?.responsibleSailors)
+  );
+  const [isTenderStage, setIsTenderStage] = useState(
+    initial?.isTenderStage ?? false
+  );
+  const [isEvaluationStage, setIsEvaluationStage] = useState(
+    initial?.isEvaluationStage ?? false
+  );
+
+  const deptForStakeholder = department === "CCED" ? "CE" : "CSLOG";
+  const officerList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("officer");
+    });
+  }, [stakeholders, deptForStakeholder]);
+  const sailorList = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      if (s.department !== deptForStakeholder) return false;
+      return s.category.toLowerCase().includes("sailor");
+    });
+  }, [stakeholders, deptForStakeholder]);
+
+  function applyStage(stage: string) {
+    setStageSelect(stage);
+    setPositionName(stage);
+    const lower = stage.toLowerCase();
+    if (
+      lower.includes("tender called") ||
+      lower.includes("tender opening") ||
+      lower.includes("quotation received") ||
+      lower.includes("pre-tender") ||
+      lower.includes("post tender")
+    ) {
+      setIsTenderStage(true);
+    }
+    if (lower.includes("bec evaluation") || lower.includes("evaluation")) {
+      setIsEvaluationStage(true);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const orderNum = Number(stepOrder);
+    if (!positionName.trim()) {
+      toast({ title: "Step name is required", variant: "destructive" });
+      return;
+    }
+    if (isNaN(orderNum) || orderNum < 1) {
+      toast({
+        title: "Step order must be a positive number",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaving(true);
+    const body = {
+      stepOrder: orderNum,
+      positionName: positionName.trim(),
+      description: description.trim() || null,
+      department,
+      responsibleOfficers,
+      responsibleSailors,
+      isTenderStage,
+      isEvaluationStage,
+    };
+    const res = isEdit
+      ? await apiRequest(
+          `/api/process-flows/${flowId}/steps/${initial!.id}`,
+          "PUT",
+          body
+        )
+      : await apiRequest(`/api/process-flows/${flowId}/steps`, "POST", body);
+    setSaving(false);
+    if (res.ok) {
+      toast({
+        title: isEdit ? "Step updated" : "Step added",
+        description: `${body.positionName} → General Steps pool`,
+      });
+      onSaved();
+    } else {
+      toast({
+        title: "Failed to save step",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ListTree className="h-5 w-5 text-primary" />
+            {isEdit ? "Edit General Step" : "Add General Step"}
+          </DialogTitle>
+          <DialogDescription>
+            Define a reusable process step. Pick a predefined stage or type a
+            custom one. Set the department to filter the stakeholder
+            directory.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Field label="Step Order" required>
+              <Input
+                type="number"
+                min={1}
+                value={stepOrder}
+                onChange={(e) => setStepOrder(e.target.value)}
+                placeholder="1"
+                className="bg-background"
+                required
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Select Predefined Stage" required>
+                <Select
+                  value={stageSelect}
+                  onValueChange={(v) => {
+                    if (v === "__custom__") {
+                      setStageSelect("__custom__");
+                      return;
+                    }
+                    applyStage(v);
+                  }}
+                >
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Pick a stage or type custom below" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROCESS_STEP_STAGES.map((stage) => (
+                      <SelectItem key={stage} value={stage}>
+                        {stage}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__custom__">
+                      — Custom (type below) —
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </div>
+          <Field label="Step Name" required>
+            <Input
+              value={positionName}
+              onChange={(e) => setPositionName(e.target.value)}
+              placeholder="e.g. PR Raised / Tender Called / BEC Evaluation"
+              className="bg-background"
+              required
+            />
+          </Field>
+          <Field label="Description">
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief description of this step..."
+              className="bg-background min-h-[70px]"
+            />
+          </Field>
+          <Field label="Department">
+            <Select
+              value={department}
+              onValueChange={(v) => {
+                setDepartment(v);
+                setResponsibleOfficers([]);
+                setResponsibleSailors([]);
+              }}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select department" />
+              </SelectTrigger>
+              <SelectContent>
+                {SETTINGS_DEPARTMENTS.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <MultiStakeholderPicker
+              label="Responsible Officers"
+              value={responsibleOfficers}
+              onChange={setResponsibleOfficers}
+              options={officerList}
+              loading={stakeholdersLoading}
+              emptyHint={`No officers found in ${department} department`}
+            />
+            <MultiStakeholderPicker
+              label="Responsible Sailors"
+              value={responsibleSailors}
+              onChange={setResponsibleSailors}
+              options={sailorList}
+              loading={stakeholdersLoading}
+              emptyHint={`No sailors found in ${department} department`}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label
+              htmlFor="gs-tender-stage"
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+                isTenderStage
+                  ? "border-amber-500/50 bg-amber-500/5"
+                  : "border-border bg-secondary/30 hover:bg-secondary/50"
+              )}
+            >
+              <Checkbox
+                id="gs-tender-stage"
+                checked={isTenderStage}
+                onCheckedChange={(v) => setIsTenderStage(v === true)}
+                className="mt-0.5 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5">
+                  <Gavel className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="text-sm font-medium text-foreground">
+                    Tender Stage
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Auto-checked for tender-related stages.
+                </p>
+              </div>
+            </label>
+            <label
+              htmlFor="gs-eval-stage"
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+                isEvaluationStage
+                  ? "border-violet-500/50 bg-violet-500/5"
+                  : "border-border bg-secondary/30 hover:bg-secondary/50"
+              )}
+            >
+              <Checkbox
+                id="gs-eval-stage"
+                checked={isEvaluationStage}
+                onCheckedChange={(v) => setIsEvaluationStage(v === true)}
+                className="mt-0.5 data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5">
+                  <ClipboardCheck className="h-3.5 w-3.5 text-violet-400" />
+                  <span className="text-sm font-medium text-foreground">
+                    Evaluation Stage
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Auto-checked for BEC Evaluation.
+                </p>
+              </div>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                  {isEdit ? "Save Changes" : "Add Step"}
                 </>
               )}
             </Button>

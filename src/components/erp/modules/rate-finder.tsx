@@ -57,6 +57,7 @@ import {
   Ban,
   Loader2,
   X,
+  ArrowRightLeft,
 } from "lucide-react";
 
 // ─────────────────────────────── Types ───────────────────────────────
@@ -189,6 +190,15 @@ const DISCONTINUED_TEMPLATE =
   "RC-2020-045,Old Brass Valve,NOS,800,2020,2024-03-15,Obsolete,RC-2025-012;RC-2025-015\n" +
   "RC-2019-012,Legacy Pipe Fitting,NOS,450,2019,2024-01-10,Supplier Discontinued,RC-2025-022\n";
 
+// Single-column CSV template for "Discontinue by Rate Code" bulk upload.
+// Each row is one Rate Code — the matching RateContract entries will be moved
+// to the Discontinued list automatically.
+const DISCONTINUE_BY_RC_TEMPLATE =
+  "Rate code\n" +
+  "RC-2025-001\n" +
+  "RC-2025-002\n" +
+  "RC-2024-018\n";
+
 // ───────────────────────────── Main Module ─────────────────────────────
 
 export function RateFinderModule() {
@@ -256,6 +266,8 @@ export function RateFinderModule() {
             loading={dLoading}
             error={dError}
             refresh={dRefresh}
+            rcItems={rcItems ?? null}
+            rcRefresh={rcRefresh}
           />
         </TabsContent>
       </Tabs>
@@ -1285,13 +1297,23 @@ interface DiscontinuedTabProps {
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  rcItems: RCItem[] | null;
+  rcRefresh: () => void;
 }
 
-function DiscontinuedTab({ items, loading, error, refresh }: DiscontinuedTabProps) {
+function DiscontinuedTab({
+  items,
+  loading,
+  error,
+  refresh,
+  rcItems,
+  rcRefresh,
+}: DiscontinuedTabProps) {
   const { toast } = useToast();
   const [year, setYear] = useState<string>("All");
   const [addOpen, setAddOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadByRcOpen, setUploadByRcOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const years = useMemo(() => {
@@ -1355,6 +1377,15 @@ function DiscontinuedTab({ items, loading, error, refresh }: DiscontinuedTabProp
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setUploadByRcOpen(true)}
+            title="Upload a single-column CSV of Rate Codes — matching RC items will be moved here automatically"
+          >
+            <ArrowRightLeft className="h-4 w-4" /> Upload Discontinue List
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1503,6 +1534,18 @@ function DiscontinuedTab({ items, loading, error, refresh }: DiscontinuedTabProp
         onDone={() => {
           setUploadOpen(false);
           refresh();
+        }}
+      />
+
+      {/* Upload Discontinue by Rate Code dialog */}
+      <UploadDiscontinueByRateCodeDialog
+        open={uploadByRcOpen}
+        onOpenChange={setUploadByRcOpen}
+        rcItems={rcItems}
+        onDone={() => {
+          setUploadByRcOpen(false);
+          refresh();
+          rcRefresh();
         }}
       />
     </div>
@@ -1898,6 +1941,399 @@ function UploadDiscontinuedDialog({
           <Button onClick={submit} disabled={!parsed || uploading} className="gap-1.5">
             {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
             Upload {parsed ? `${parsed.length} ` : ""}Items
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ───────────────────────────── Upload Discontinue by Rate Code Dialog ─────────────────────────────
+//
+// Single-column CSV upload: just a list of Rate Codes.
+// For each Rate Code, the matching RateContract items are looked up,
+// turned into DiscontinuedItem records (POST bulk array), and the
+// corresponding RC entries are DELETEd so they disappear from the RC list.
+//
+// Net effect: items "move" from the RC list to the Discontinued list.
+
+interface UploadDiscontinueByRateCodeDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  rcItems: RCItem[] | null;
+  onDone: () => void;
+}
+
+interface PreviewRow {
+  rateCode: string;
+  matches: RCItem[];
+}
+
+function UploadDiscontinueByRateCodeDialog({
+  open,
+  onOpenChange,
+  rcItems,
+  onDone,
+}: UploadDiscontinueByRateCodeDialogProps) {
+  const { toast } = useToast();
+  const [parsedCodes, setParsedCodes] = useState<string[] | null>(null);
+  const [fileName, setFileName] = useState<string>("");
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setParsedCodes(null);
+    setFileName("");
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const handleFile = async (file: File) => {
+    setFileName(file.name);
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      toast({ title: "Failed to read file", variant: "destructive" });
+      return;
+    }
+    const rows = parseCSV(text);
+    if (rows.length === 0) {
+      toast({ title: "CSV file is empty", variant: "destructive" });
+      setParsedCodes(null);
+      return;
+    }
+    const headers = rows[0].map((h) => h.trim().toLowerCase());
+    // Look for a "rate code" column. If not found, assume the file is a
+    // single-column list of rate codes (with or without a header row).
+    let rcCol = headers.findIndex(
+      (h) => h === "rate code" || h === "ratecode" || h === "rate_code"
+    );
+    let dataRows: string[][];
+    if (rcCol >= 0) {
+      dataRows = rows.slice(1);
+    } else {
+      rcCol = 0;
+      const firstVal = (rows[0][0] || "").trim().toLowerCase();
+      // If the first row literally says "rate code" treat it as a header.
+      if (
+        firstVal === "rate code" ||
+        firstVal === "ratecode" ||
+        firstVal === "rate_code"
+      ) {
+        dataRows = rows.slice(1);
+      } else {
+        dataRows = rows;
+      }
+    }
+    const codes = dataRows
+      .map((r) => (r[rcCol] || "").trim())
+      .filter(Boolean)
+      // Preserve order but de-duplicate (case-insensitive).
+      .filter(
+        (c, i, arr) =>
+          arr.findIndex((x) => x.toLowerCase() === c.toLowerCase()) === i
+      );
+
+    if (codes.length === 0) {
+      toast({ title: "No rate codes found in CSV", variant: "destructive" });
+      setParsedCodes(null);
+      return;
+    }
+    setParsedCodes(codes);
+  };
+
+  // Build a preview: each code → matched rcItems (case-insensitive).
+  const preview: PreviewRow[] = useMemo(() => {
+    if (!parsedCodes) return [];
+    return parsedCodes.map((code) => {
+      const matches = (rcItems ?? []).filter(
+        (r) => (r.rateCode || "").toLowerCase() === code.toLowerCase()
+      );
+      return { rateCode: code, matches };
+    });
+  }, [parsedCodes, rcItems]);
+
+  const totalMatches = preview.reduce((s, p) => s + p.matches.length, 0);
+  const matchedCodes = preview.filter((p) => p.matches.length > 0).length;
+  const unmatchedCodes = preview.length - matchedCodes;
+
+  const submit = async () => {
+    if (!parsedCodes || parsedCodes.length === 0) {
+      toast({ title: "No data to upload", variant: "destructive" });
+      return;
+    }
+    const allMatches = preview.flatMap((p) => p.matches);
+    if (allMatches.length === 0) {
+      toast({
+        title: "No matching RC items found",
+        description:
+          "None of the supplied Rate Codes matched any RateContract item. Check the codes and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setUploading(true);
+    const today = new Date().toISOString().slice(0, 10);
+    const discontinuePayload = allMatches.map((rc) => ({
+      itemCode: rc.itemCode,
+      description: rc.description,
+      unit: rc.unit || "NOS",
+      lastRCPrice: rc.rcPrice || 0,
+      lastRCYear: rc.rcYear || null,
+      discontinuedDate: today,
+      reason: "Discontinued via bulk upload",
+      alternatives: null,
+    }));
+
+    // 1) Bulk-create discontinued items.
+    const postRes = await apiRequest(
+      "/api/rate-finder/discontinued",
+      "POST",
+      discontinuePayload
+    );
+    if (!postRes.ok) {
+      setUploading(false);
+      toast({
+        title: "Failed to create discontinued items",
+        description: postRes.error,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 2) Delete the matched RC items one-by-one so they leave the RC list.
+    let deletedCount = 0;
+    let failedDeletes = 0;
+    for (const rc of allMatches) {
+      const delRes = await apiRequest(`/api/rate-finder/rc/${rc.id}`, "DELETE");
+      if (delRes.ok) deletedCount++;
+      else failedDeletes++;
+    }
+
+    setUploading(false);
+    toast({
+      title: `${allMatches.length} items moved from RC list to Discontinued list`,
+      description: `${deletedCount} RC item${
+        deletedCount !== 1 ? "s" : ""
+      } deleted from RC list${
+        failedDeletes > 0 ? ` · ${failedDeletes} delete(s) failed` : ""
+      } · ${unmatchedCodes} rate code${
+        unmatchedCodes !== 1 ? "s" : ""
+      } had no match`,
+    });
+    reset();
+    onDone();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) reset();
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <ArrowRightLeft className="h-4 w-4 text-primary" />
+            Upload Discontinue List (by Rate Code)
+          </DialogTitle>
+          <DialogDescription>
+            Upload a single-column CSV containing only a list of{" "}
+            <span className="text-foreground font-medium">Rate Codes</span>.
+            Each matching RateContract item will be moved into the Discontinued
+            list (with last RC price/year preserved) and removed from the RC
+            list.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => inputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4" /> Choose CSV File
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5"
+              onClick={() =>
+                downloadCSV(
+                  "discontinue-by-rate-code-template.csv",
+                  DISCONTINUE_BY_RC_TEMPLATE
+                )
+              }
+            >
+              <Download className="h-4 w-4" /> Download Template
+            </Button>
+          </div>
+
+          {fileName && (
+            <p className="text-sm text-muted-foreground">
+              Selected:{" "}
+              <span className="text-foreground font-medium">{fileName}</span>
+            </p>
+          )}
+
+          {parsedCodes && (
+            <div className="rounded-lg border border-border bg-background overflow-hidden">
+              <div className="px-3 py-2 border-b border-border flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">
+                  Preview · {parsedCodes.length} rate code
+                  {parsedCodes.length !== 1 ? "s" : ""}
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <CustomBadge className="bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30">
+                    {matchedCodes} matched
+                  </CustomBadge>
+                  <CustomBadge className="bg-blue-500/10 text-blue-500 dark:text-blue-400 border-blue-500/30">
+                    {totalMatches} RC item{totalMatches !== 1 ? "s" : ""} to move
+                  </CustomBadge>
+                  {unmatchedCodes > 0 && (
+                    <CustomBadge className="bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/30">
+                      {unmatchedCodes} no match
+                    </CustomBadge>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-muted-foreground"
+                    onClick={reset}
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto scrollbar-thin">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">
+                        Rate Code
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Matched Item(s)
+                      </TableHead>
+                      <TableHead className="text-muted-foreground text-right">
+                        Last RC Price
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        RC Year
+                      </TableHead>
+                      <TableHead className="text-muted-foreground text-right">
+                        Status
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.slice(0, 100).map((p, i) => (
+                      <TableRow key={i} className="border-border">
+                        <TableCell className="font-mono text-foreground whitespace-nowrap">
+                          {p.rateCode}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {p.matches.length > 0 ? (
+                            <div className="flex flex-col gap-0.5">
+                              {p.matches.slice(0, 3).map((m) => (
+                                <span
+                                  key={m.id}
+                                  className="truncate max-w-[280px]"
+                                  title={m.description}
+                                >
+                                  {m.description}
+                                  {m.supplier ? ` · ${m.supplier}` : ""}
+                                </span>
+                              ))}
+                              {p.matches.length > 3 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  +{p.matches.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-amber-500 dark:text-amber-400 italic">
+                              No match
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-foreground text-right whitespace-nowrap">
+                          {p.matches.length > 0
+                            ? formatCurrency(p.matches[0].rcPrice)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {p.matches.length > 0 ? p.matches[0].rcYear : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {p.matches.length > 0 ? (
+                            <CustomBadge className="bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30">
+                              Will move
+                            </CustomBadge>
+                          ) : (
+                            <CustomBadge className="bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/30">
+                              Skipped
+                            </CustomBadge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {preview.length > 100 && (
+                  <p className="text-xs text-muted-foreground p-2 text-center">
+                    ... and {preview.length - 100} more rate codes
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!parsedCodes && (
+            <div className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+              Choose a CSV file with a single{" "}
+              <span className="font-mono text-foreground">Rate code</span>{" "}
+              column to preview the matched RC items here.
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              reset();
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!parsedCodes || uploading || totalMatches === 0}
+            className="gap-1.5"
+          >
+            {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {uploading
+              ? "Moving items..."
+              : `Move ${totalMatches || 0} Item${
+                  totalMatches !== 1 ? "s" : ""
+                } to Discontinued`}
           </Button>
         </DialogFooter>
       </DialogContent>
