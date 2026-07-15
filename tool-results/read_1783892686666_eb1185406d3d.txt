@@ -1,0 +1,1795 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useRef, useState } from "react";
+     4→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     5→import { PageHeader } from "@/components/erp/page-header";
+     6→import { StatCard } from "@/components/erp/stat-card";
+     7→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     8→import { CategoryBadge, CustomBadge } from "@/components/erp/badges";
+     9→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    10→import { Button } from "@/components/ui/button";
+    11→import { Input } from "@/components/ui/input";
+    12→import { Label } from "@/components/ui/label";
+    13→import {
+    14→  Dialog,
+    15→  DialogContent,
+    16→  DialogHeader,
+    17→  DialogTitle,
+    18→  DialogFooter,
+    19→  DialogDescription,
+    20→} from "@/components/ui/dialog";
+    21→import {
+    22→  Select,
+    23→  SelectContent,
+    24→  SelectItem,
+    25→  SelectTrigger,
+    26→  SelectValue,
+    27→} from "@/components/ui/select";
+    28→import {
+    29→  Table,
+    30→  TableHeader,
+    31→  TableBody,
+    32→  TableHead,
+    33→  TableRow,
+    34→  TableCell,
+    35→} from "@/components/ui/table";
+    36→import { Progress } from "@/components/ui/progress";
+    37→import {
+    38→  Warehouse,
+    39→  Plus,
+    40→  Search,
+    41→  Pencil,
+    42→  Eye,
+    43→  Download,
+    44→  Upload,
+    45→  AlertTriangle,
+    46→  Package,
+    47→  Boxes,
+    48→  ShoppingCart,
+    49→  ChevronLeft,
+    50→  ChevronRight,
+    51→  Loader2,
+    52→  FileSpreadsheet,
+    53→  TrendingUp,
+    54→  PackageCheck,
+    55→  ArrowUpDown,
+    56→  MapPin,
+    57→  X,
+    58→  ClipboardList,
+    59→  Layers,
+    60→} from "lucide-react";
+    61→import {
+    62→  formatCurrency,
+    63→  formatNumber,
+    64→  STORE_CATEGORIES,
+    65→  FILE_CATEGORIES,
+    66→  ZONES,
+    67→} from "@/lib/constants";
+    68→import { useToast } from "@/hooks/use-toast";
+    69→import { cn } from "@/lib/utils";
+    70→
+    71→// ────────────────────────────────────────────────────────────
+    72→// Types
+    73→// ────────────────────────────────────────────────────────────
+    74→interface StoreZone {
+    75→  id: string;
+    76→  name: string;
+    77→  type: string;
+    78→  totalValue: number;
+    79→  itemCount: number;
+    80→  lowStockCount: number;
+    81→  recentReceipts: number;
+    82→  pendingCollection: number;
+    83→  nonMovingCount: number;
+    84→}
+    85→
+    86→interface StoreItem {
+    87→  id: string;
+    88→  zoneName: string;
+    89→  description: string;
+    90→  category: string;
+    91→  unit: string;
+    92→  qty: number;
+    93→  unitCost: number;
+    94→  totalCost: number;
+    95→  location: string | null;
+    96→  minStock: number;
+    97→  maxStock: number;
+    98→  lastMovement: string | null;
+    99→  supplier: string | null;
+   100→  itemCode: string | null;
+   101→  ilmsCode: string | null;
+   102→  createdAt: string;
+   103→}
+   104→
+   105→type StockFilter = "all" | "in" | "low" | "out" | "over";
+   106→type SortKey = "description" | "qty" | "cost" | "category";
+   107→
+   108→const PAGE_SIZE = 25;
+   109→
+   110→// ────────────────────────────────────────────────────────────
+   111→// Main component
+   112→// ────────────────────────────────────────────────────────────
+   113→export function StoresModule() {
+   114→  const [tab, setTab] = useState<"zones" | "stores">("zones");
+   115→
+   116→  // Shared fetches
+   117→  const {
+   118→    data: zones,
+   119→    loading: zLoading,
+   120→    error: zError,
+   121→    refresh: refreshZones,
+   122→  } = useFetch<StoreZone[]>("/api/stores/zones");
+   123→  const {
+   124→    data: items,
+   125→    loading: iLoading,
+   126→    error: iError,
+   127→    refresh: refreshItems,
+   128→  } = useFetch<StoreItem[]>("/api/stores");
+   129→
+   130→  // Stores-tab filter state
+   131→  const [category, setCategory] = useState<string>("All");
+   132→  const [search, setSearch] = useState("");
+   133→  const [zoneFilter, setZoneFilter] = useState("all");
+   134→  const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+   135→  const [sortKey, setSortKey] = useState<SortKey>("description");
+   136→  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+   137→  const [page, setPage] = useState(1);
+   138→
+   139→  // Dialogs
+   140→  const [formOpen, setFormOpen] = useState(false);
+   141→  const [editing, setEditing] = useState<StoreItem | null>(null);
+   142→  const [bulkOpen, setBulkOpen] = useState(false);
+   143→  const [viewing, setViewing] = useState<StoreItem | null>(null);
+   144→
+   145→  const { toast } = useToast();
+   146→
+   147→  // Derived: filtered + sorted list
+   148→  const filtered = useMemo(() => {
+   149→    if (!items) return [];
+   150→    let list = items.slice();
+   151→    if (category !== "All") list = list.filter((i) => i.category === category);
+   152→    if (zoneFilter !== "all") list = list.filter((i) => i.zoneName === zoneFilter);
+   153→    const q = search.trim().toLowerCase();
+   154→    if (q) list = list.filter((i) => i.description.toLowerCase().includes(q));
+   155→    list = list.filter((i) => {
+   156→      if (stockFilter === "out") return i.qty <= 0;
+   157→      if (stockFilter === "low")
+   158→        return i.minStock > 0 && i.qty > 0 && i.qty <= i.minStock;
+   159→      if (stockFilter === "in") return i.minStock === 0 || i.qty > i.minStock;
+   160→      if (stockFilter === "over") return i.maxStock > 0 && i.qty >= i.maxStock;
+   161→      return true;
+   162→    });
+   163→    list.sort((a, b) => {
+   164→      let cmp = 0;
+   165→      if (sortKey === "description") cmp = a.description.localeCompare(b.description);
+   166→      else if (sortKey === "qty") cmp = a.qty - b.qty;
+   167→      else if (sortKey === "cost") cmp = a.totalCost - b.totalCost;
+   168→      else if (sortKey === "category") cmp = a.category.localeCompare(b.category);
+   169→      return sortDir === "asc" ? cmp : -cmp;
+   170→    });
+   171→    return list;
+   172→  }, [items, category, zoneFilter, search, stockFilter, sortKey, sortDir]);
+   173→
+   174→  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+   175→  const safePage = Math.min(page, totalPages);
+   176→  const pageItems = filtered.slice(
+   177→    (safePage - 1) * PAGE_SIZE,
+   178→    safePage * PAGE_SIZE
+   179→  );
+   180→
+   181→  // Stats reflect the currently filtered set
+   182→  const stats = useMemo(() => {
+   183→    const net = filtered.reduce((s, i) => s + i.totalCost, 0);
+   184→    const task = filtered.length;
+   185→    const avail = filtered.filter((i) => i.qty > 0).length;
+   186→    const team = filtered.filter((i) => i.minStock > 0 && i.qty <= i.minStock).length;
+   187→    return { net, task, avail, team };
+   188→  }, [filtered]);
+   189→
+   190→  // Wrap filter setters so any change also resets pagination to page 1
+   191→  const setCategoryR = (c: string) => {
+   192→    setCategory(c);
+   193→    setPage(1);
+   194→  };
+   195→  const setSearchR = (s: string) => {
+   196→    setSearch(s);
+   197→    setPage(1);
+   198→  };
+   199→  const setZoneFilterR = (z: string) => {
+   200→    setZoneFilter(z);
+   201→    setPage(1);
+   202→  };
+   203→  const setStockFilterR = (s: StockFilter) => {
+   204→    setStockFilter(s);
+   205→    setPage(1);
+   206→  };
+   207→  const setSortKeyR = (k: SortKey) => {
+   208→    setSortKey(k);
+   209→    setPage(1);
+   210→  };
+   211→  const setSortDirR = (d: "asc" | "desc") => {
+   212→    setSortDir(d);
+   213→    setPage(1);
+   214→  };
+   215→  const toggleSortR = (k: SortKey) => {
+   216→    if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   217→    else {
+   218→      setSortKey(k);
+   219→      setSortDir("asc");
+   220→    }
+   221→    setPage(1);
+   222→  };
+   223→
+   224→  // Handlers
+   225→  const handleZoneClick = (zoneName: string) => {
+   226→    setZoneFilter(zoneName);
+   227→    setCategory("All");
+   228→    setStockFilter("all");
+   229→    setSearch("");
+   230→    setPage(1);
+   231→    setTab("stores");
+   232→    toast({
+   233→      title: `Browsing ${zoneName}`,
+   234→      description: "Switched to Stores tab with zone filter applied.",
+   235→    });
+   236→  };
+   237→
+   238→  const openAdd = () => {
+   239→    setEditing(null);
+   240→    setFormOpen(true);
+   241→  };
+   242→
+   243→  const openEdit = (item: StoreItem) => {
+   244→    setEditing(item);
+   245→    setFormOpen(true);
+   246→  };
+   247→
+   248→  const handleSaved = () => {
+   249→    setFormOpen(false);
+   250→    setEditing(null);
+   251→    refreshItems();
+   252→    refreshZones();
+   253→    toast({
+   254→      title: editing ? "Item updated" : "Item added",
+   255→      description: editing
+   256→        ? "Store item has been updated successfully."
+   257→        : "New store item has been added to the store.",
+   258→    });
+   259→  };
+   260→
+   261→  const toggleSort = (k: SortKey) => {
+   262→    if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   263→    else {
+   264→      setSortKey(k);
+   265→      setSortDir("asc");
+   266→    }
+   267→  };
+   268→
+   269→  return (
+   270→    <div>
+   271→      <PageHeader
+   272→        title="Store Management"
+   273→        description="Zones, inventory & stock-level monitoring across the dockyard"
+   274→        icon={Warehouse}
+   275→        actions={
+   276→          <>
+   277→            <Button
+   278→              variant="outline"
+   279→              size="sm"
+   280→              onClick={() => setBulkOpen(true)}
+   281→              className="gap-1.5"
+   282→            >
+   283→              <Upload className="h-4 w-4" /> Bulk Upload
+   284→            </Button>
+   285→            <Button onClick={openAdd} size="sm" className="gap-1.5">
+   286→              <Plus className="h-4 w-4" /> Add Item
+   287→            </Button>
+   288→          </>
+   289→        }
+   290→      />
+   291→
+   292→      <Tabs
+   293→        value={tab}
+   294→        onValueChange={(v) => setTab(v as "zones" | "stores")}
+   295→        className="w-full"
+   296→      >
+   297→        <TabsList>
+   298→          <TabsTrigger value="zones" className="gap-1.5">
+   299→            <Boxes className="h-4 w-4" /> Zones
+   300→          </TabsTrigger>
+   301→          <TabsTrigger value="stores" className="gap-1.5">
+   302→            <Package className="h-4 w-4" /> Stores
+   303→          </TabsTrigger>
+   304→        </TabsList>
+   305→
+   306→        {/* ─── Zones tab ─── */}
+   307→        <TabsContent value="zones" className="mt-4">
+   308→          <ZonesTab
+   309→            zones={zones}
+   310→            loading={zLoading}
+   311→            error={zError}
+   312→            onZoneClick={handleZoneClick}
+   313→          />
+   314→        </TabsContent>
+   315→
+   316→        {/* ─── Stores tab ─── */}
+   317→        <TabsContent value="stores" className="mt-4">
+   318→          <StoresTab
+   319→            items={items}
+   320→            loading={iLoading}
+   321→            error={iError}
+   322→            zones={zones}
+   323→            stats={stats}
+   324→            category={category}
+   325→            setCategory={setCategoryR}
+   326→            search={search}
+   327→            setSearch={setSearchR}
+   328→            zoneFilter={zoneFilter}
+   329→            setZoneFilter={setZoneFilterR}
+   330→            stockFilter={stockFilter}
+   331→            setStockFilter={setStockFilterR}
+   332→            sortKey={sortKey}
+   333→            sortDir={sortDir}
+   334→            setSortKey={setSortKeyR}
+   335→            setSortDir={setSortDirR}
+   336→            toggleSort={toggleSortR}
+   337→            filtered={filtered}
+   338→            pageItems={pageItems}
+   339→            safePage={safePage}
+   340→            totalPages={totalPages}
+   341→            setPage={setPage}
+   342→            onEdit={openEdit}
+   343→            onView={(it) => setViewing(it)}
+   344→            onAdd={openAdd}
+   345→          />
+   346→        </TabsContent>
+   347→      </Tabs>
+   348→
+   349→      {/* Add / Edit form */}
+   350→      <ItemFormDialog
+   351→        key={editing ? `edit-${editing.id}` : "new"}
+   352→        open={formOpen}
+   353→        onOpenChange={(o) => {
+   354→          setFormOpen(o);
+   355→          if (!o) setEditing(null);
+   356→        }}
+   357→        editing={editing}
+   358→        zones={zones}
+   359→        onSaved={handleSaved}
+   360→      />
+   361→
+   362→      {/* Bulk upload */}
+   363→      <BulkUploadDialog
+   364→        open={bulkOpen}
+   365→        onOpenChange={setBulkOpen}
+   366→        zones={zones}
+   367→        onDone={() => {
+   368→          refreshItems();
+   369→          refreshZones();
+   370→        }}
+   371→      />
+   372→
+   373→      {/* View dialog */}
+   374→      <ViewItemDialog
+   375→        item={viewing}
+   376→        onOpenChange={(o) => !o && setViewing(null)}
+   377→        onEdit={(it) => {
+   378→          setViewing(null);
+   379→          openEdit(it);
+   380→        }}
+   381→      />
+   382→    </div>
+   383→  );
+   384→}
+   385→
+   386→// ────────────────────────────────────────────────────────────
+   387→// Zones tab — dashboard view with scaled tiles
+   388→// ────────────────────────────────────────────────────────────
+   389→interface ZonesTabProps {
+   390→  zones: StoreZone[] | null;
+   391→  loading: boolean;
+   392→  error: string | null;
+   393→  onZoneClick: (zoneName: string) => void;
+   394→}
+   395→
+   396→function ZonesTab({ zones, loading, error, onZoneClick }: ZonesTabProps) {
+   397→  if (loading) return <LoadingState label="Loading zones..." />;
+   398→  if (error) return <ErrorState message={error} />;
+   399→  if (!zones || zones.length === 0)
+   400→    return (
+   401→      <EmptyState
+   402→        icon={Boxes}
+   403→        title="No zones configured"
+   404→        description="Store zones will appear here as tiles once data is seeded."
+   405→      />
+   406→    );
+   407→
+   408→  const totalValue = zones.reduce((s, z) => s + z.totalValue, 0);
+   409→  const totalItems = zones.reduce((s, z) => s + z.itemCount, 0);
+   410→  const totalLow = zones.reduce((s, z) => s + z.lowStockCount, 0);
+   411→
+   412→  return (
+   413→    <div>
+   414→      {/* Mini summary strip */}
+   415→      <div className="grid grid-cols-3 gap-3 mb-5">
+   416→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   417→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   418→            Total Stock Value
+   419→          </p>
+   420→          <p className="text-base sm:text-xl font-semibold text-foreground mt-1">
+   421→            {formatCurrency(totalValue)}
+   422→          </p>
+   423→        </div>
+   424→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   425→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   426→            Total Items
+   427→          </p>
+   428→          <p className="text-base sm:text-xl font-semibold text-foreground mt-1">
+   429→            {formatNumber(totalItems)}
+   430→          </p>
+   431→        </div>
+   432→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   433→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   434→            Low Stock Items
+   435→          </p>
+   436→          <p
+   437→            className={cn(
+   438→              "text-base sm:text-xl font-semibold mt-1",
+   439→              totalLow > 0 ? "text-amber-400" : "text-emerald-400"
+   440→            )}
+   441→          >
+   442→            {formatNumber(totalLow)}
+   443→          </p>
+   444→        </div>
+   445→      </div>
+   446→
+   447→      {/* Tiles grid */}
+   448→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+   449→        {zones.map((z) => {
+   450→          const status =
+   451→            z.lowStockCount >= 3
+   452→              ? "critical"
+   453→              : z.lowStockCount > 0
+   454→                ? "attention"
+   455→                : "healthy";
+   456→          const statusClasses =
+   457→            status === "critical"
+   458→              ? "border-red-500/40 hover:border-red-500/70"
+   459→              : status === "attention"
+   460→                ? "border-amber-500/40 hover:border-amber-500/70"
+   461→                : "border-emerald-500/30 hover:border-emerald-500/60";
+   462→          const minHeight = 120 + Math.min(z.totalValue / 100000, 80);
+   463→
+   464→          return (
+   465→            <button
+   466→              key={z.id}
+   467→              onClick={() => onZoneClick(z.name)}
+   468→              style={{ minHeight }}
+   469→              className={cn(
+   470→                "group bg-card border rounded-xl p-4 sm:p-5 text-left transition-all flex flex-col justify-between",
+   471→                "hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5",
+   472→                statusClasses
+   473→              )}
+   474→            >
+   475→              {/* Header */}
+   476→              <div className="flex items-start justify-between gap-2 mb-3">
+   477→                <div className="min-w-0">
+   478→                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate text-sm sm:text-base">
+   479→                    {z.name}
+   480→                  </h3>
+   481→                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
+   482→                    {z.itemCount} items tracked
+   483→                  </p>
+   484→                </div>
+   485→                <CustomBadge
+   486→                  className={cn(
+   487→                    "border-0 shrink-0",
+   488→                    status === "critical" &&
+   489→                      "bg-red-500/15 text-red-400",
+   490→                    status === "attention" &&
+   491→                      "bg-amber-500/15 text-amber-400",
+   492→                    status === "healthy" &&
+   493→                      "bg-emerald-500/15 text-emerald-400"
+   494→                  )}
+   495→                >
+   496→                  {z.type}
+   497→                </CustomBadge>
+   498→              </div>
+   499→
+   500→              {/* Value */}
+   501→              <div className="mb-3">
+   502→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   503→                  Stock Value
+   504→                </p>
+   505→                <p className="text-lg sm:text-2xl font-bold text-foreground">
+   506→                  {formatCurrency(z.totalValue)}
+   507→                </p>
+   508→              </div>
+   509→
+   510→              {/* Status chips */}
+   511→              <div className="flex flex-wrap gap-1.5 mt-auto">
+   512→                <ZoneChip
+   513→                  label="Running out"
+   514→                  value={z.lowStockCount}
+   515→                  tone={z.lowStockCount > 0 ? "red" : "muted"}
+   516→                />
+   517→                <ZoneChip
+   518→                  label="Received"
+   519→                  value={z.recentReceipts}
+   520→                  tone={z.recentReceipts > 0 ? "green" : "muted"}
+   521→                />
+   522→                <ZoneChip
+   523→                  label="To collect"
+   524→                  value={z.pendingCollection}
+   525→                  tone={z.pendingCollection > 0 ? "blue" : "muted"}
+   526→                />
+   527→                <ZoneChip
+   528→                  label="Non-moving"
+   529→                  value={z.nonMovingCount}
+   530→                  tone={z.nonMovingCount > 0 ? "amber" : "muted"}
+   531→                />
+   532→              </div>
+   533→            </button>
+   534→          );
+   535→        })}
+   536→      </div>
+   537→
+   538→      <p className="text-xs text-muted-foreground mt-4 text-center">
+   539→        Click a zone tile to drill into its detailed inventory.
+   540→      </p>
+   541→    </div>
+   542→  );
+   543→}
+   544→
+   545→function ZoneChip({
+   546→  label,
+   547→  value,
+   548→  tone,
+   549→}: {
+   550→  label: string;
+   551→  value: number;
+   552→  tone: "red" | "amber" | "green" | "blue" | "muted";
+   553→}) {
+   554→  const toneClasses = {
+   555→    red: "bg-red-500/10 text-red-400 border-red-500/30",
+   556→    amber: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+   557→    green: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+   558→    blue: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+   559→    muted: "bg-secondary/60 text-muted-foreground border-border",
+   560→  };
+   561→  return (
+   562→    <span
+   563→      className={cn(
+   564→        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] sm:text-xs font-medium",
+   565→        toneClasses[tone]
+   566→      )}
+   567→    >
+   568→      <span className="opacity-80">{label}</span>
+   569→      <span className="font-semibold">{value}</span>
+   570→    </span>
+   571→  );
+   572→}
+   573→
+   574→// ────────────────────────────────────────────────────────────
+   575→// Stores tab — detailed inventory table
+   576→// ────────────────────────────────────────────────────────────
+   577→interface StoresTabProps {
+   578→  items: StoreItem[] | null;
+   579→  loading: boolean;
+   580→  error: string | null;
+   581→  zones: StoreZone[] | null;
+   582→  stats: { net: number; task: number; avail: number; team: number };
+   583→  category: string;
+   584→  setCategory: (c: string) => void;
+   585→  search: string;
+   586→  setSearch: (s: string) => void;
+   587→  zoneFilter: string;
+   588→  setZoneFilter: (z: string) => void;
+   589→  stockFilter: StockFilter;
+   590→  setStockFilter: (s: StockFilter) => void;
+   591→  sortKey: SortKey;
+   592→  sortDir: "asc" | "desc";
+   593→  setSortKey: (k: SortKey) => void;
+   594→  setSortDir: (d: "asc" | "desc") => void;
+   595→  toggleSort: (k: SortKey) => void;
+   596→  filtered: StoreItem[];
+   597→  pageItems: StoreItem[];
+   598→  safePage: number;
+   599→  totalPages: number;
+   600→  setPage: (p: number) => void;
+   601→  onEdit: (item: StoreItem) => void;
+   602→  onView: (item: StoreItem) => void;
+   603→  onAdd: () => void;
+   604→}
+   605→
+   606→function StoresTab(props: StoresTabProps) {
+   607→  const {
+   608→    items,
+   609→    loading,
+   610→    error,
+   611→    zones,
+   612→    stats,
+   613→    category,
+   614→    setCategory,
+   615→    search,
+   616→    setSearch,
+   617→    zoneFilter,
+   618→    setZoneFilter,
+   619→    stockFilter,
+   620→    setStockFilter,
+   621→    sortKey,
+   622→    sortDir,
+   623→    setSortKey,
+   624→    setSortDir,
+   625→    toggleSort,
+   626→    filtered,
+   627→    pageItems,
+   628→    safePage,
+   629→    totalPages,
+   630→    setPage,
+   631→    onEdit,
+   632→    onView,
+   633→    onAdd,
+   634→  } = props;
+   635→
+   636→  if (loading) return <LoadingState label="Loading store items..." />;
+   637→  if (error) return <ErrorState message={error} />;
+   638→
+   639→  return (
+   640→    <div className="space-y-4">
+   641→      {/* Top stats bar */}
+   642→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   643→        <StatCard
+   644→          label="Net Stock Value"
+   645→          value={formatCurrency(stats.net)}
+   646→          icon={TrendingUp}
+   647→          accent="blue"
+   648→          sub="Current inventory value"
+   649→        />
+   650→        <StatCard
+   651→          label="Total Items"
+   652→          value={stats.task}
+   653→          icon={Package}
+   654→          accent="amber"
+   655→          sub="Line items tracked"
+   656→        />
+   657→        <StatCard
+   658→          label="Available"
+   659→          value={stats.avail}
+   660→          icon={PackageCheck}
+   661→          accent="green"
+   662→          sub="Items in stock (qty > 0)"
+   663→        />
+   664→        <StatCard
+   665→          label="Low Stock"
+   666→          value={stats.team}
+   667→          icon={AlertTriangle}
+   668→          accent="red"
+   669→          sub="Need re-ordering"
+   670→        />
+   671→      </div>
+   672→
+   673→      {/* Category tabs */}
+   674→      <div className="bg-card border border-border rounded-xl p-3">
+   675→        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin pb-1">
+   676→          {STORE_CATEGORIES.map((c) => (
+   677→            <button
+   678→              key={c}
+   679→              onClick={() => setCategory(c)}
+   680→              className={cn(
+   681→                "px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium whitespace-nowrap transition-colors",
+   682→                category === c
+   683→                  ? "bg-primary text-primary-foreground"
+   684→                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+   685→              )}
+   686→            >
+   687→              {c}
+   688→            </button>
+   689→          ))}
+   690→        </div>
+   691→      </div>
+   692→
+   693→      {/* Filter bar */}
+   694→      <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   695→        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+   696→          {/* Search */}
+   697→          <div className="relative flex-1 min-w-0">
+   698→            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+   699→            <Input
+   700→              value={search}
+   701→              onChange={(e) => setSearch(e.target.value)}
+   702→              placeholder="Search by description..."
+   703→              className="pl-9 bg-background border-border"
+   704→            />
+   705→          </div>
+   706→
+   707→          {/* Zone filter */}
+   708→          <Select value={zoneFilter} onValueChange={setZoneFilter}>
+   709→            <SelectTrigger className="w-full sm:w-44 bg-background border-border">
+   710→              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+   711→              <SelectValue placeholder="All Zones" />
+   712→            </SelectTrigger>
+   713→            <SelectContent>
+   714→              <SelectItem value="all">All Zones</SelectItem>
+   715→              {(zones ?? []).map((z) => (
+   716→                <SelectItem key={z.id} value={z.name}>
+   717→                  {z.name}
+   718→                </SelectItem>
+   719→              ))}
+   720→            </SelectContent>
+   721→          </Select>
+   722→
+   723→          {/* Stock filter */}
+   724→          <Select
+   725→            value={stockFilter}
+   726→            onValueChange={(v) => setStockFilter(v as StockFilter)}
+   727→          >
+   728→            <SelectTrigger className="w-full sm:w-40 bg-background border-border">
+   729→              <SelectValue placeholder="Stock level" />
+   730→            </SelectTrigger>
+   731→            <SelectContent>
+   732→              <SelectItem value="all">All Stock</SelectItem>
+   733→              <SelectItem value="in">In Stock</SelectItem>
+   734→              <SelectItem value="low">Low Stock</SelectItem>
+   735→              <SelectItem value="out">Out of Stock</SelectItem>
+   736→              <SelectItem value="over">Overstock</SelectItem>
+   737→            </SelectContent>
+   738→          </Select>
+   739→
+   740→          {/* Sort */}
+   741→          <Select
+   742→            value={sortKey}
+   743→            onValueChange={(v) => setSortKey(v as SortKey)}
+   744→          >
+   745→            <SelectTrigger className="w-full sm:w-40 bg-background border-border">
+   746→              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+   747→              <SelectValue placeholder="Sort by" />
+   748→            </SelectTrigger>
+   749→            <SelectContent>
+   750→              <SelectItem value="description">Description</SelectItem>
+   751→              <SelectItem value="qty">Quantity</SelectItem>
+   752→              <SelectItem value="cost">Cost</SelectItem>
+   753→              <SelectItem value="category">Category</SelectItem>
+   754→            </SelectContent>
+   755→          </Select>
+   756→
+   757→          {/* Sort direction toggle */}
+   758→          <Button
+   759→            variant="outline"
+   760→            size="icon"
+   761→            className="h-9 w-9 shrink-0"
+   762→            onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+   763→            title={sortDir === "asc" ? "Ascending" : "Descending"}
+   764→          >
+   765→            <span className="text-xs font-mono">
+   766→              {sortDir === "asc" ? "↑" : "↓"}
+   767→            </span>
+   768→          </Button>
+   769→        </div>
+   770→      </div>
+   771→
+   772→      {/* Table */}
+   773→      <div className="bg-card border border-border rounded-xl">
+   774→        {!items || items.length === 0 ? (
+   775→          <EmptyState
+   776→            icon={Package}
+   777→            title="No store items yet"
+   778→            description="Add your first item to start tracking inventory."
+   779→            action={
+   780→              <Button onClick={onAdd} size="sm" className="gap-1.5">
+   781→                <Plus className="h-4 w-4" /> Add Item
+   782→              </Button>
+   783→            }
+   784→          />
+   785→        ) : filtered.length === 0 ? (
+   786→          <EmptyState
+   787→            icon={Search}
+   788→            title="No items match your filters"
+   789→            description="Try adjusting your search, category or stock-level filter."
+   790→          />
+   791→        ) : (
+   792→          <>
+   793→            <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+   794→              <Table>
+   795→                <TableHeader className="sticky top-0 z-10 bg-card">
+   796→                  <TableRow className="border-border hover:bg-transparent">
+   797→                    <TableHead
+   798→                      className="cursor-pointer select-none"
+   799→                      onClick={() => toggleSort("description")}
+   800→                    >
+   801→                      <span className="inline-flex items-center gap-1">
+   802→                        Description
+   803→                        {sortKey === "description" && (
+   804→                          <span className="text-primary">
+   805→                            {sortDir === "asc" ? "↑" : "↓"}
+   806→                          </span>
+   807→                        )}
+   808→                      </span>
+   809→                    </TableHead>
+   810→                    <TableHead
+   811→                      className="cursor-pointer select-none"
+   812→                      onClick={() => toggleSort("category")}
+   813→                    >
+   814→                      <span className="inline-flex items-center gap-1">
+   815→                        Category
+   816→                        {sortKey === "category" && (
+   817→                          <span className="text-primary">
+   818→                            {sortDir === "asc" ? "↑" : "↓"}
+   819→                          </span>
+   820→                        )}
+   821→                      </span>
+   822→                    </TableHead>
+   823→                    <TableHead>Unit</TableHead>
+   824→                    <TableHead
+   825→                      className="text-right cursor-pointer select-none"
+   826→                      onClick={() => toggleSort("qty")}
+   827→                    >
+   828→                      <span className="inline-flex items-center gap-1">
+   829→                        Qty
+   830→                        {sortKey === "qty" && (
+   831→                          <span className="text-primary">
+   832→                            {sortDir === "asc" ? "↑" : "↓"}
+   833→                          </span>
+   834→                        )}
+   835→                      </span>
+   836→                    </TableHead>
+   837→                    <TableHead
+   838→                      className="text-right cursor-pointer select-none"
+   839→                      onClick={() => toggleSort("cost")}
+   840→                    >
+   841→                      <span className="inline-flex items-center gap-1">
+   842→                        Cost
+   843→                        {sortKey === "cost" && (
+   844→                          <span className="text-primary">
+   845→                            {sortDir === "asc" ? "↑" : "↓"}
+   846→                          </span>
+   847→                        )}
+   848→                      </span>
+   849→                    </TableHead>
+   850→                    <TableHead>Location</TableHead>
+   851→                    <TableHead className="text-right">Actions</TableHead>
+   852→                  </TableRow>
+   853→                </TableHeader>
+   854→                <TableBody>
+   855→                  {pageItems.map((item) => {
+   856→                    const isLow =
+   857→                      item.minStock > 0 && item.qty <= item.minStock;
+   858→                    const isOut = item.qty <= 0;
+   859→                    return (
+   860→                      <TableRow
+   861→                        key={item.id}
+   862→                        className="border-border cursor-default"
+   863→                      >
+   864→                        <TableCell className="max-w-[260px]">
+   865→                          <div className="flex flex-col min-w-0">
+   866→                            <span className="text-foreground font-medium truncate">
+   867→                              {item.description}
+   868→                            </span>
+   869→                            {item.itemCode && (
+   870→                              <span className="text-[10px] text-muted-foreground font-mono">
+   871→                                {item.itemCode}
+   872→                              </span>
+   873→                            )}
+   874→                          </div>
+   875→                        </TableCell>
+   876→                        <TableCell>
+   877→                          <CategoryBadge category={item.category} />
+   878→                        </TableCell>
+   879→                        <TableCell className="text-muted-foreground">
+   880→                          {item.unit}
+   881→                        </TableCell>
+   882→                        <TableCell className="text-right">
+   883→                          <div className="inline-flex flex-col items-end">
+   884→                            <span
+   885→                              className={cn(
+   886→                                "font-medium tabular-nums",
+   887→                                isOut
+   888→                                  ? "text-red-400"
+   889→                                  : isLow
+   890→                                    ? "text-amber-400"
+   891→                                    : "text-foreground"
+   892→                              )}
+   893→                            >
+   894→                              {formatNumber(item.qty)}
+   895→                            </span>
+   896→                            {isLow && !isOut && (
+   897→                              <span className="text-[10px] text-red-400 flex items-center gap-0.5">
+   898→                                <AlertTriangle className="h-2.5 w-2.5" /> Low
+   899→                              </span>
+   900→                            )}
+   901→                            {isOut && (
+   902→                              <span className="text-[10px] text-red-400 flex items-center gap-0.5">
+   903→                                <AlertTriangle className="h-2.5 w-2.5" /> Out
+   904→                              </span>
+   905→                            )}
+   906→                          </div>
+   907→                        </TableCell>
+   908→                        <TableCell className="text-right">
+   909→                          <div className="font-semibold text-foreground tabular-nums">
+   910→                            {formatCurrency(item.totalCost)}
+   911→                          </div>
+   912→                          <div className="text-[10px] text-muted-foreground">
+   913→                            @{formatCurrency(item.unitCost)}
+   914→                          </div>
+   915→                        </TableCell>
+   916→                        <TableCell>
+   917→                          <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
+   918→                            <MapPin className="h-3 w-3 mr-1" />
+   919→                            {item.location || item.zoneName}
+   920→                          </CustomBadge>
+   921→                        </TableCell>
+   922→                        <TableCell className="text-right">
+   923→                          <div className="inline-flex items-center gap-1">
+   924→                            <Button
+   925→                              variant="ghost"
+   926→                              size="icon"
+   927→                              className="h-7 w-7"
+   928→                              onClick={() => onView(item)}
+   929→                              title="View"
+   930→                            >
+   931→                              <Eye className="h-3.5 w-3.5" />
+   932→                            </Button>
+   933→                            <Button
+   934→                              variant="ghost"
+   935→                              size="icon"
+   936→                              className="h-7 w-7"
+   937→                              onClick={() => onEdit(item)}
+   938→                              title="Edit"
+   939→                            >
+   940→                              <Pencil className="h-3.5 w-3.5" />
+   941→                            </Button>
+   942→                          </div>
+   943→                        </TableCell>
+   944→                      </TableRow>
+   945→                    );
+   946→                  })}
+   947→                </TableBody>
+   948→              </Table>
+   949→            </div>
+   950→
+   951→            {/* Pagination */}
+   952→            <div className="flex items-center justify-between gap-3 p-3 border-t border-border flex-wrap">
+   953→              <p className="text-xs text-muted-foreground">
+   954→                Showing{" "}
+   955→                <span className="text-foreground font-medium">
+   956→                  {(safePage - 1) * PAGE_SIZE + 1}–
+   957→                  {Math.min(safePage * PAGE_SIZE, filtered.length)}
+   958→                </span>{" "}
+   959→                of{" "}
+   960→                <span className="text-foreground font-medium">
+   961→                  {filtered.length}
+   962→                </span>{" "}
+   963→                items
+   964→              </p>
+   965→              <div className="flex items-center gap-1">
+   966→                <Button
+   967→                  variant="outline"
+   968→                  size="sm"
+   969→                  className="h-8 gap-1"
+   970→                  disabled={safePage <= 1}
+   971→                  onClick={() => setPage(safePage - 1)}
+   972→                >
+   973→                  <ChevronLeft className="h-4 w-4" /> Prev
+   974→                </Button>
+   975→                <span className="text-xs text-muted-foreground px-2 tabular-nums">
+   976→                  {safePage} / {totalPages}
+   977→                </span>
+   978→                <Button
+   979→                  variant="outline"
+   980→                  size="sm"
+   981→                  className="h-8 gap-1"
+   982→                  disabled={safePage >= totalPages}
+   983→                  onClick={() => setPage(safePage + 1)}
+   984→                >
+   985→                  Next <ChevronRight className="h-4 w-4" />
+   986→                </Button>
+   987→              </div>
+   988→            </div>
+   989→          </>
+   990→        )}
+   991→      </div>
+   992→    </div>
+   993→  );
+   994→}
+   995→
+   996→// ────────────────────────────────────────────────────────────
+   997→// Add / Edit item form dialog
+   998→// ────────────────────────────────────────────────────────────
+   999→interface ItemFormDialogProps {
+  1000→  open: boolean;
+  1001→  onOpenChange: (o: boolean) => void;
+  1002→  editing: StoreItem | null;
+  1003→  zones: StoreZone[] | null;
+  1004→  onSaved: () => void;
+  1005→}
+  1006→
+  1007→interface ItemForm {
+  1008→  description: string;
+  1009→  category: string;
+  1010→  unit: string;
+  1011→  qty: string;
+  1012→  unitCost: string;
+  1013→  location: string;
+  1014→  minStock: string;
+  1015→  maxStock: string;
+  1016→  supplier: string;
+  1017→  itemCode: string;
+  1018→  ilmsCode: string;
+  1019→  zoneName: string;
+  1020→}
+  1021→
+  1022→const DEFAULT_FORM: ItemForm = {
+  1023→  description: "",
+  1024→  category: "General",
+  1025→  unit: "NOS",
+  1026→  qty: "0",
+  1027→  unitCost: "0",
+  1028→  location: "",
+  1029→  minStock: "0",
+  1030→  maxStock: "0",
+  1031→  supplier: "",
+  1032→  itemCode: "",
+  1033→  ilmsCode: "",
+  1034→  zoneName: "Zone A",
+  1035→};
+  1036→
+  1037→function ItemFormDialog({
+  1038→  open,
+  1039→  onOpenChange,
+  1040→  editing,
+  1041→  zones,
+  1042→  onSaved,
+  1043→}: ItemFormDialogProps) {
+  1044→  // Initialise from `editing` — parent remounts this component via `key`
+  1045→  // whenever the editing target changes, so this initialiser runs fresh.
+  1046→  const [form, setForm] = useState<ItemForm>(() =>
+  1047→    editing
+  1048→      ? {
+  1049→          description: editing.description,
+  1050→          category: editing.category,
+  1051→          unit: editing.unit,
+  1052→          qty: String(editing.qty ?? 0),
+  1053→          unitCost: String(editing.unitCost ?? 0),
+  1054→          location: editing.location ?? "",
+  1055→          minStock: String(editing.minStock ?? 0),
+  1056→          maxStock: String(editing.maxStock ?? 0),
+  1057→          supplier: editing.supplier ?? "",
+  1058→          itemCode: editing.itemCode ?? "",
+  1059→          ilmsCode: editing.ilmsCode ?? "",
+  1060→          zoneName: editing.zoneName,
+  1061→        }
+  1062→      : DEFAULT_FORM
+  1063→  );
+  1064→  const [saving, setSaving] = useState(false);
+  1065→  const { toast } = useToast();
+  1066→
+  1067→  const qtyNum = Number(form.qty) || 0;
+  1068→  const unitCostNum = Number(form.unitCost) || 0;
+  1069→  const fileCost = qtyNum * unitCostNum;
+  1070→
+  1071→  const set = (k: keyof ItemForm, v: string) =>
+  1072→    setForm((prev) => ({ ...prev, [k]: v }));
+  1073→
+  1074→  const submit = async () => {
+  1075→    if (!form.description.trim()) {
+  1076→      toast({
+  1077→        title: "Description is required",
+  1078→        variant: "destructive",
+  1079→      });
+  1080→      return;
+  1081→    }
+  1082→    setSaving(true);
+  1083→    const payload = {
+  1084→      description: form.description.trim(),
+  1085→      category: form.category,
+  1086→      unit: form.unit || "NOS",
+  1087→      qty: qtyNum,
+  1088→      unitCost: unitCostNum,
+  1089→      location: form.location.trim() || form.zoneName,
+  1090→      minStock: Number(form.minStock) || 0,
+  1091→      maxStock: Number(form.maxStock) || 0,
+  1092→      supplier: form.supplier.trim() || null,
+  1093→      itemCode: form.itemCode.trim() || null,
+  1094→      ilmsCode: form.ilmsCode.trim() || null,
+  1095→      zoneName: form.zoneName,
+  1096→    };
+  1097→    const res = editing
+  1098→      ? await apiRequest(`/api/stores/${editing.id}`, "PUT", payload)
+  1099→      : await apiRequest("/api/stores", "POST", payload);
+  1100→    setSaving(false);
+  1101→    if (res.ok) {
+  1102→      onSaved();
+  1103→    } else {
+  1104→      toast({
+  1105→        title: editing ? "Failed to update item" : "Failed to add item",
+  1106→        description: res.error,
+  1107→        variant: "destructive",
+  1108→      });
+  1109→    }
+  1110→  };
+  1111→
+  1112→  const zoneOptions =
+  1113→    zones && zones.length > 0
+  1114→      ? zones.map((z) => z.name)
+  1115→      : ZONES;
+  1116→
+  1117→  return (
+  1118→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1119→      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1120→        <DialogHeader>
+  1121→          <DialogTitle className="text-foreground">
+  1122→            {editing ? "Edit Store Item" : "Add Store Item"}
+  1123→          </DialogTitle>
+  1124→          <DialogDescription>
+  1125→            {editing
+  1126→              ? "Update the details of this inventory item."
+  1127→              : "Fill in the details to add a new item to the store."}
+  1128→          </DialogDescription>
+  1129→        </DialogHeader>
+  1130→
+  1131→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+  1132→          <div className="sm:col-span-2 space-y-1.5">
+  1133→            <Label>
+  1134→              Description <span className="text-red-400">*</span>
+  1135→            </Label>
+  1136→            <Input
+  1137→              value={form.description}
+  1138→              onChange={(e) => set("description", e.target.value)}
+  1139→              placeholder="e.g. Stainless Steel Bolt M12"
+  1140→              className="bg-background border-border"
+  1141→            />
+  1142→          </div>
+  1143→
+  1144→          <div className="space-y-1.5">
+  1145→            <Label>Category</Label>
+  1146→            <Select
+  1147→              value={form.category}
+  1148→              onValueChange={(v) => set("category", v)}
+  1149→            >
+  1150→              <SelectTrigger className="bg-background border-border w-full">
+  1151→                <SelectValue />
+  1152→              </SelectTrigger>
+  1153→              <SelectContent>
+  1154→                {FILE_CATEGORIES.map((c) => (
+  1155→                  <SelectItem key={c} value={c}>
+  1156→                    {c}
+  1157→                  </SelectItem>
+  1158→                ))}
+  1159→              </SelectContent>
+  1160→            </Select>
+  1161→          </div>
+  1162→
+  1163→          <div className="space-y-1.5">
+  1164→            <Label>Unit (Deno)</Label>
+  1165→            <Input
+  1166→              value={form.unit}
+  1167→              onChange={(e) => set("unit", e.target.value)}
+  1168→              placeholder="NOS, KG, MTR, SET..."
+  1169→              className="bg-background border-border"
+  1170→            />
+  1171→          </div>
+  1172→
+  1173→          <div className="space-y-1.5">
+  1174→            <Label>Quantity</Label>
+  1175→            <Input
+  1176→              type="number"
+  1177→              inputMode="decimal"
+  1178→              value={form.qty}
+  1179→              onChange={(e) => set("qty", e.target.value)}
+  1180→              className="bg-background border-border"
+  1181→            />
+  1182→          </div>
+  1183→
+  1184→          <div className="space-y-1.5">
+  1185→            <Label>Unit Cost (Rs.)</Label>
+  1186→            <Input
+  1187→              type="number"
+  1188→              inputMode="decimal"
+  1189→              value={form.unitCost}
+  1190→              onChange={(e) => set("unitCost", e.target.value)}
+  1191→              className="bg-background border-border"
+  1192→            />
+  1193→          </div>
+  1194→
+  1195→          <div className="sm:col-span-2 space-y-1.5">
+  1196→            <Label>Total Cost (auto-calculated)</Label>
+  1197→            <div className="h-9 px-3 rounded-md border border-border bg-secondary/40 flex items-center text-sm font-semibold text-foreground tabular-nums">
+  1198→              {formatCurrency(fileCost)}
+  1199→            </div>
+  1200→          </div>
+  1201→
+  1202→          <div className="space-y-1.5">
+  1203→            <Label>Min Stock</Label>
+  1204→            <Input
+  1205→              type="number"
+  1206→              inputMode="decimal"
+  1207→              value={form.minStock}
+  1208→              onChange={(e) => set("minStock", e.target.value)}
+  1209→              className="bg-background border-border"
+  1210→            />
+  1211→          </div>
+  1212→
+  1213→          <div className="space-y-1.5">
+  1214→            <Label>Max Stock</Label>
+  1215→            <Input
+  1216→              type="number"
+  1217→              inputMode="decimal"
+  1218→              value={form.maxStock}
+  1219→              onChange={(e) => set("maxStock", e.target.value)}
+  1220→              className="bg-background border-border"
+  1221→            />
+  1222→          </div>
+  1223→
+  1224→          <div className="space-y-1.5">
+  1225→            <Label>Location</Label>
+  1226→            <Input
+  1227→              value={form.location}
+  1228→              onChange={(e) => set("location", e.target.value)}
+  1229→              placeholder="Aisle / Rack / Bin"
+  1230→              className="bg-background border-border"
+  1231→            />
+  1232→          </div>
+  1233→
+  1234→          <div className="space-y-1.5">
+  1235→            <Label>Zone</Label>
+  1236→            <Select
+  1237→              value={form.zoneName}
+  1238→              onValueChange={(v) => set("zoneName", v)}
+  1239→            >
+  1240→              <SelectTrigger className="bg-background border-border w-full">
+  1241→                <SelectValue />
+  1242→              </SelectTrigger>
+  1243→              <SelectContent>
+  1244→                {zoneOptions.map((z) => (
+  1245→                  <SelectItem key={z} value={z}>
+  1246→                    {z}
+  1247→                  </SelectItem>
+  1248→                ))}
+  1249→              </SelectContent>
+  1250→            </Select>
+  1251→          </div>
+  1252→
+  1253→          <div className="space-y-1.5">
+  1254→            <Label>Supplier</Label>
+  1255→            <Input
+  1256→              value={form.supplier}
+  1257→              onChange={(e) => set("supplier", e.target.value)}
+  1258→              placeholder="Supplier name"
+  1259→              className="bg-background border-border"
+  1260→            />
+  1261→          </div>
+  1262→
+  1263→          <div className="space-y-1.5">
+  1264→            <Label>Item Code</Label>
+  1265→            <Input
+  1266→              value={form.itemCode}
+  1267→              onChange={(e) => set("itemCode", e.target.value)}
+  1268→              placeholder="Internal code"
+  1269→              className="bg-background border-border"
+  1270→            />
+  1271→          </div>
+  1272→
+  1273→          <div className="sm:col-span-2 space-y-1.5">
+  1274→            <Label>ILMS Code</Label>
+  1275→            <Input
+  1276→              value={form.ilmsCode}
+  1277→              onChange={(e) => set("ilmsCode", e.target.value)}
+  1278→              placeholder="Logistics Management System code (optional)"
+  1279→              className="bg-background border-border"
+  1280→            />
+  1281→          </div>
+  1282→        </div>
+  1283→
+  1284→        <DialogFooter>
+  1285→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1286→            Cancel
+  1287→          </Button>
+  1288→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+  1289→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1290→            {editing ? "Save Changes" : "Add Item"}
+  1291→          </Button>
+  1292→        </DialogFooter>
+  1293→      </DialogContent>
+  1294→    </Dialog>
+  1295→  );
+  1296→}
+  1297→
+  1298→// ────────────────────────────────────────────────────────────
+  1299→// Bulk upload dialog with CSV template & progress
+  1300→// ────────────────────────────────────────────────────────────
+  1301→interface BulkUploadDialogProps {
+  1302→  open: boolean;
+  1303→  onOpenChange: (o: boolean) => void;
+  1304→  zones: StoreZone[] | null;
+  1305→  onDone: () => void;
+  1306→}
+  1307→
+  1308→const BULK_COLUMNS = [
+  1309→  "Description",
+  1310→  "Category",
+  1311→  "Unit",
+  1312→  "Qty",
+  1313→  "UnitCost",
+  1314→  "Location",
+  1315→  "MinStock",
+  1316→  "MaxStock",
+  1317→  "Supplier",
+  1318→  "ItemCode",
+  1319→] as const;
+  1320→
+  1321→function downloadCSVTemplate() {
+  1322→  const header = BULK_COLUMNS.join(",");
+  1323→  const sample = [
+  1324→    "Stainless Steel Bolt M12",
+  1325→    "Metal",
+  1326→    "NOS",
+  1327→    "250",
+  1328→    "45.50",
+  1329→    "A1-Rack-3",
+  1330→    "50",
+  1331→    "500",
+  1332→    "ABC Hardware",
+  1333→    "ITM-0001",
+  1334→  ].join(",");
+  1335→  const sample2 = [
+  1336→    "PVC Pipe 50mm",
+  1337→    "Plumbing",
+  1338→    "MTR",
+  1339→    "120",
+  1340→    "320",
+  1341→    "B2-Rack-1",
+  1342→    "30",
+  1343→    "300",
+  1344→    "PipeWorld Ltd",
+  1345→    "ITM-0002",
+  1346→  ].join(",");
+  1347→  const csv = `${header}\n${sample}\n${sample2}\n`;
+  1348→  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  1349→  const url = URL.createObjectURL(blob);
+  1350→  const a = document.createElement("a");
+  1351→  a.href = url;
+  1352→  a.download = "store-items-template.csv";
+  1353→  document.body.appendChild(a);
+  1354→  a.click();
+  1355→  document.body.removeChild(a);
+  1356→  URL.revokeObjectURL(url);
+  1357→}
+  1358→
+  1359→// Simple RFC-4180-aware CSV parser
+  1360→function parseCSV(text: string): string[][] {
+  1361→  const rows: string[][] = [];
+  1362→  let row: string[] = [];
+  1363→  let cell = "";
+  1364→  let inQuotes = false;
+  1365→  for (let i = 0; i < text.length; i++) {
+  1366→    const c = text[i];
+  1367→    if (inQuotes) {
+  1368→      if (c === '"') {
+  1369→        if (text[i + 1] === '"') {
+  1370→          cell += '"';
+  1371→          i++;
+  1372→        } else {
+  1373→          inQuotes = false;
+  1374→        }
+  1375→      } else {
+  1376→        cell += c;
+  1377→      }
+  1378→    } else {
+  1379→      if (c === '"') {
+  1380→        inQuotes = true;
+  1381→      } else if (c === ",") {
+  1382→        row.push(cell);
+  1383→        cell = "";
+  1384→      } else if (c === "\n") {
+  1385→        row.push(cell);
+  1386→        rows.push(row);
+  1387→        row = [];
+  1388→        cell = "";
+  1389→      } else if (c === "\r") {
+  1390→        // skip CR
+  1391→      } else {
+  1392→        cell += c;
+  1393→      }
+  1394→    }
+  1395→  }
+  1396→  if (cell !== "" || row.length > 0) {
+  1397→    row.push(cell);
+  1398→    rows.push(row);
+  1399→  }
+  1400→  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+  1401→}
+  1402→
+  1403→function BulkUploadDialog({
+  1404→  open,
+  1405→  onOpenChange,
+  1406→  zones,
+  1407→  onDone,
+  1408→}: BulkUploadDialogProps) {
+  1409→  const [importing, setImporting] = useState(false);
+  1410→  const [progress, setProgress] = useState<{
+  1411→    done: number;
+  1412→    total: number;
+  1413→    errors: string[];
+  1414→    successCount: number;
+  1415→  }>({ done: 0, total: 0, errors: [], successCount: 0 });
+  1416→  const fileRef = useRef<HTMLInputElement>(null);
+  1417→  const { toast } = useToast();
+  1418→
+  1419→  const reset = () => {
+  1420→    setImporting(false);
+  1421→    setProgress({ done: 0, total: 0, errors: [], successCount: 0 });
+  1422→    if (fileRef.current) fileRef.current.value = "";
+  1423→  };
+  1424→
+  1425→  const handleFile = async (file: File) => {
+  1426→    const text = await file.text();
+  1427→    const rows = parseCSV(text);
+  1428→    if (rows.length === 0) {
+  1429→      toast({ title: "CSV is empty", variant: "destructive" });
+  1430→      return;
+  1431→    }
+  1432→    // Detect header row
+  1433→    const first = rows[0].map((c) => c.trim().toLowerCase());
+  1434→    const hasHeader = first.includes("description");
+  1435→    const dataRows = hasHeader ? rows.slice(1) : rows;
+  1436→    if (dataRows.length === 0) {
+  1437→      toast({ title: "No data rows found in CSV", variant: "destructive" });
+  1438→      return;
+  1439→    }
+  1440→
+  1441→    const defaultZone =
+  1442→      zones && zones.length > 0 ? zones[0].name : "Zone A";
+  1443→
+  1444→    setImporting(true);
+  1445→    setProgress({
+  1446→      done: 0,
+  1447→      total: dataRows.length,
+  1448→      errors: [],
+  1449→      successCount: 0,
+  1450→    });
+  1451→
+  1452→    let successCount = 0;
+  1453→    const errors: string[] = [];
+  1454→
+  1455→    for (let i = 0; i < dataRows.length; i++) {
+  1456→      const r = dataRows[i];
+  1457→      const description = (r[0] ?? "").trim();
+  1458→      if (!description) {
+  1459→        errors.push(`Row ${i + (hasHeader ? 2 : 1)}: missing description`);
+  1460→        setProgress({
+  1461→          done: i + 1,
+  1462→          total: dataRows.length,
+  1463→          errors: [...errors],
+  1464→          successCount,
+  1465→        });
+  1466→        continue;
+  1467→      }
+  1468→      const payload = {
+  1469→        description,
+  1470→        category: (r[1] ?? "General").trim() || "General",
+  1471→        unit: (r[2] ?? "NOS").trim() || "NOS",
+  1472→        qty: Number(r[3]) || 0,
+  1473→        unitCost: Number(r[4]) || 0,
+  1474→        location: (r[5] ?? "").trim() || defaultZone,
+  1475→        minStock: Number(r[6]) || 0,
+  1476→        maxStock: Number(r[7]) || 0,
+  1477→        supplier: (r[8] ?? "").trim() || null,
+  1478→        itemCode: (r[9] ?? "").trim() || null,
+  1479→        zoneName: defaultZone,
+  1480→      };
+  1481→      const res = await apiRequest("/api/stores", "POST", payload);
+  1482→      if (res.ok) {
+  1483→        successCount++;
+  1484→      } else {
+  1485→        errors.push(
+  1486→          `Row ${i + (hasHeader ? 2 : 1)} (${description}): ${res.error || "failed"}`
+  1487→        );
+  1488→      }
+  1489→      setProgress({
+  1490→        done: i + 1,
+  1491→        total: dataRows.length,
+  1492→        errors: [...errors],
+  1493→        successCount,
+  1494→      });
+  1495→    }
+  1496→
+  1497→    setImporting(false);
+  1498→    if (successCount > 0) {
+  1499→      toast({
+  1500→        title: `Import complete — ${successCount} item${successCount === 1 ? "" : "s"} added`,
+  1501→        description:
+  1502→          errors.length > 0
+  1503→            ? `${errors.length} row(s) failed. See details below.`
+  1504→            : "All rows imported successfully.",
+  1505→      });
+  1506→      onDone();
+  1507→    } else {
+  1508→      toast({
+  1509→        title: "No items imported",
+  1510→        description: "All rows failed. Please review the CSV and try again.",
+  1511→        variant: "destructive",
+  1512→      });
+  1513→    }
+  1514→  };
+  1515→
+  1516→  const pct =
+  1517→    progress.total > 0
+  1518→      ? Math.round((progress.done / progress.total) * 100)
+  1519→      : 0;
+  1520→
+  1521→  return (
+  1522→    <Dialog
+  1523→      open={open}
+  1524→      onOpenChange={(o) => {
+  1525→        if (!importing) {
+  1526→          onOpenChange(o);
+  1527→          if (!o) setTimeout(reset, 200);
+  1528→        }
+  1529→      }}
+  1530→    >
+  1531→      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1532→        <DialogHeader>
+  1533→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1534→            <FileSpreadsheet className="h-5 w-5 text-primary" />
+  1535→            Bulk Upload Store Items
+  1536→          </DialogTitle>
+  1537→          <DialogDescription>
+  1538→            Import multiple items at once using a CSV file. Download the
+  1539→            template, fill in your data, and upload it back.
+  1540→          </DialogDescription>
+  1541→        </DialogHeader>
+  1542→
+  1543→        {/* Template section */}
+  1544→        <div className="space-y-3">
+  1545→          <div className="bg-secondary/40 border border-border rounded-lg p-3">
+  1546→            <p className="text-sm font-medium text-foreground mb-1">
+  1547→              CSV Format
+  1548→            </p>
+  1549→            <p className="text-xs text-muted-foreground mb-2">
+  1550→              Columns (in this exact order, header row optional):
+  1551→            </p>
+  1552→            <div className="flex flex-wrap gap-1">
+  1553→              {BULK_COLUMNS.map((col, i) => (
+  1554→                <span
+  1555→                  key={col}
+  1556→                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-mono"
+  1557→                >
+  1558→                  <span className="text-muted-foreground">{i + 1}.</span>
+  1559→                  {col}
+  1560→                </span>
+  1561→              ))}
+  1562→            </div>
+  1563→          </div>
+  1564→
+  1565→          <Button
+  1566→            variant="outline"
+  1567→            onClick={downloadCSVTemplate}
+  1568→            className="w-full gap-1.5"
+  1569→            disabled={importing}
+  1570→          >
+  1571→            <Download className="h-4 w-4" /> Download CSV Template
+  1572→          </Button>
+  1573→
+  1574→          {/* File input */}
+  1575→          <div className="space-y-1.5">
+  1576→            <Label>Upload your CSV file</Label>
+  1577→            <Input
+  1578→              ref={fileRef}
+  1579→              type="file"
+  1580→              accept=".csv,text/csv"
+  1581→              disabled={importing}
+  1582→              onChange={(e) => {
+  1583→                const f = e.target.files?.[0];
+  1584→                if (f) handleFile(f);
+  1585→              }}
+  1586→              className="bg-background border-border"
+  1587→            />
+  1588→          </div>
+  1589→        </div>
+  1590→
+  1591→        {/* Progress */}
+  1592→        {(importing || progress.done > 0) && (
+  1593→          <div className="space-y-2 bg-secondary/40 border border-border rounded-lg p-3">
+  1594→            <div className="flex items-center justify-between text-sm">
+  1595→              <span className="text-muted-foreground">
+  1596→                {importing ? "Importing..." : "Import complete"}
+  1597→              </span>
+  1598→              <span className="font-medium text-foreground tabular-nums">
+  1599→                {progress.done} / {progress.total} ({pct}%)
+  1600→              </span>
+  1601→            </div>
+  1602→            <Progress value={pct} />
+  1603→            <div className="flex items-center gap-4 text-xs">
+  1604→              <span className="text-emerald-400">
+  1605→                ✓ {progress.successCount} added
+  1606→              </span>
+  1607→              {progress.errors.length > 0 && (
+  1608→                <span className="text-red-400">
+  1609→                  ✗ {progress.errors.length} failed
+  1610→                </span>
+  1611→              )}
+  1612→            </div>
+  1613→            {progress.errors.length > 0 && (
+  1614→              <div className="max-h-32 overflow-y-auto scrollbar-thin bg-background/50 border border-border rounded-md p-2 mt-2">
+  1615→                <ul className="space-y-0.5">
+  1616→                  {progress.errors.map((err, i) => (
+  1617→                    <li
+  1618→                      key={i}
+  1619→                      className="text-[11px] text-red-400 font-mono leading-relaxed"
+  1620→                    >
+  1621→                      {err}
+  1622→                    </li>
+  1623→                  ))}
+  1624→                </ul>
+  1625→              </div>
+  1626→            )}
+  1627→          </div>
+  1628→        )}
+  1629→
+  1630→        <DialogFooter>
+  1631→          <Button
+  1632→            variant="outline"
+  1633→            onClick={() => {
+  1634→              onOpenChange(false);
+  1635→              setTimeout(reset, 200);
+  1636→            }}
+  1637→            disabled={importing}
+  1638→          >
+  1639→            Close
+  1640→          </Button>
+  1641→        </DialogFooter>
+  1642→      </DialogContent>
+  1643→    </Dialog>
+  1644→  );
+  1645→}
+  1646→
+  1647→// ────────────────────────────────────────────────────────────
+  1648→// View item dialog
+  1649→// ────────────────────────────────────────────────────────────
+  1650→interface ViewItemDialogProps {
+  1651→  item: StoreItem | null;
+  1652→  onOpenChange: (o: boolean) => void;
+  1653→  onEdit: (item: StoreItem) => void;
+  1654→}
+  1655→
+  1656→function ViewItemDialog({ item, onOpenChange, onEdit }: ViewItemDialogProps) {
+  1657→  const open = !!item;
+  1658→  return (
+  1659→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1660→      <DialogContent className="max-w-lg bg-card border-border">
+  1661→        <DialogHeader>
+  1662→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1663→            <ClipboardList className="h-5 w-5 text-primary" />
+  1664→            Item Details
+  1665→          </DialogTitle>
+  1666→          <DialogDescription>
+  1667→            Full inventory record for this store item.
+  1668→          </DialogDescription>
+  1669→        </DialogHeader>
+  1670→
+  1671→        {item && (
+  1672→          <div className="space-y-3 py-1">
+  1673→            <div>
+  1674→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1675→                Description
+  1676→              </p>
+  1677→              <p className="text-base font-semibold text-foreground">
+  1678→                {item.description}
+  1679→              </p>
+  1680→              {item.itemCode && (
+  1681→                <p className="text-xs text-muted-foreground font-mono mt-0.5">
+  1682→                  Item Code: {item.itemCode}
+  1683→                  {item.ilmsCode && ` · ILMS: ${item.ilmsCode}`}
+  1684→                </p>
+  1685→              )}
+  1686→            </div>
+  1687→
+  1688→            <div className="grid grid-cols-2 gap-3">
+  1689→              <DetailField label="Category" value={item.category} />
+  1690→              <DetailField label="Unit" value={item.unit} />
+  1691→              <DetailField
+  1692→                label="Quantity"
+  1693→                value={formatNumber(item.qty)}
+  1694→                tone={
+  1695→                  item.qty <= 0
+  1696→                    ? "red"
+  1697→                    : item.minStock > 0 && item.qty <= item.minStock
+  1698→                      ? "amber"
+  1699→                      : "default"
+  1700→                }
+  1701→              />
+  1702→              <DetailField
+  1703→                label="Unit Cost"
+  1704→                value={formatCurrency(item.unitCost)}
+  1705→              />
+  1706→              <DetailField
+  1707→                label="Total Cost"
+  1708→                value={formatCurrency(item.totalCost)}
+  1709→                tone="primary"
+  1710→              />
+  1711→              <DetailField label="Min Stock" value={formatNumber(item.minStock)} />
+  1712→              <DetailField label="Max Stock" value={formatNumber(item.maxStock)} />
+  1713→              <DetailField label="Zone" value={item.zoneName} />
+  1714→              <DetailField
+  1715→                label="Location"
+  1716→                value={item.location || "—"}
+  1717→              />
+  1718→              <DetailField
+  1719→                label="Supplier"
+  1720→                value={item.supplier || "—"}
+  1721→              />
+  1722→              <DetailField
+  1723→                label="Last Movement"
+  1724→                value={item.lastMovement || "—"}
+  1725→              />
+  1726→              <DetailField
+  1727→                label="Created"
+  1728→                value={new Date(item.createdAt).toLocaleDateString("en-GB")}
+  1729→              />
+  1730→            </div>
+  1731→
+  1732→            {/* Stock status banner */}
+  1733→            {item.minStock > 0 && item.qty <= item.minStock && (
+  1734→              <div
+  1735→                className={cn(
+  1736→                  "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+  1737→                  item.qty <= 0
+  1738→                    ? "bg-red-500/10 border-red-500/30 text-red-400"
+  1739→                    : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+  1740→                )}
+  1741→              >
+  1742→                <AlertTriangle className="h-4 w-4 shrink-0" />
+  1743→                <span>
+  1744→                  {item.qty <= 0
+  1745→                    ? "This item is OUT OF STOCK."
+  1746→                    : `Low stock — below minimum of ${formatNumber(item.minStock)} ${item.unit}.`}
+  1747→                </span>
+  1748→              </div>
+  1749→            )}
+  1750→          </div>
+  1751→        )}
+  1752→
+  1753→        <DialogFooter>
+  1754→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1755→            Close
+  1756→          </Button>
+  1757→          {item && (
+  1758→            <Button
+  1759→              onClick={() => onEdit(item)}
+  1760→              className="gap-1.5"
+  1761→            >
+  1762→              <Pencil className="h-4 w-4" /> Edit
+  1763→            </Button>
+  1764→          )}
+  1765→        </DialogFooter>
+  1766→      </DialogContent>
+  1767→    </Dialog>
+  1768→  );
+  1769→}
+  1770→
+  1771→function DetailField({
+  1772→  label,
+  1773→  value,
+  1774→  tone = "default",
+  1775→}: {
+  1776→  label: string;
+  1777→  value: string;
+  1778→  tone?: "default" | "primary" | "red" | "amber";
+  1779→}) {
+  1780→  const toneClass = {
+  1781→    default: "text-foreground",
+  1782→    primary: "text-primary font-semibold",
+  1783→    red: "text-red-400 font-semibold",
+  1784→    amber: "text-amber-400 font-semibold",
+  1785→  };
+  1786→  return (
+  1787→    <div>
+  1788→      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1789→        {label}
+  1790→      </p>
+  1791→      <p className={cn("text-sm mt-0.5", toneClass[tone])}>{value}</p>
+  1792→    </div>
+  1793→  );
+  1794→}
+  1795→

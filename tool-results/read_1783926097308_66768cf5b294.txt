@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useRef, useState } from "react";
+     4→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     5→import { PageHeader } from "@/components/erp/page-header";
+     6→import { StatCard } from "@/components/erp/stat-card";
+     7→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     8→import { CategoryBadge, CustomBadge } from "@/components/erp/badges";
+     9→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    10→import { Button } from "@/components/ui/button";
+    11→import { Input } from "@/components/ui/input";
+    12→import { Label } from "@/components/ui/label";
+    13→import { Textarea } from "@/components/ui/textarea";
+    14→import {
+    15→  Dialog,
+    16→  DialogContent,
+    17→  DialogHeader,
+    18→  DialogTitle,
+    19→  DialogFooter,
+    20→  DialogDescription,
+    21→} from "@/components/ui/dialog";
+    22→import {
+    23→  Select,
+    24→  SelectContent,
+    25→  SelectItem,
+    26→  SelectTrigger,
+    27→  SelectValue,
+    28→} from "@/components/ui/select";
+    29→import {
+    30→  Table,
+    31→  TableHeader,
+    32→  TableBody,
+    33→  TableHead,
+    34→  TableRow,
+    35→  TableCell,
+    36→} from "@/components/ui/table";
+    37→import { Progress } from "@/components/ui/progress";
+    38→import {
+    39→  Tooltip,
+    40→  TooltipTrigger,
+    41→  TooltipContent,
+    42→} from "@/components/ui/tooltip";
+    43→import {
+    44→  Warehouse,
+    45→  Plus,
+    46→  Search,
+    47→  Pencil,
+    48→  Eye,
+    49→  Download,
+    50→  Upload,
+    51→  AlertTriangle,
+    52→  Package,
+    53→  Boxes,
+    54→  ShoppingCart,
+    55→  ChevronLeft,
+    56→  ChevronRight,
+    57→  Loader2,
+    58→  FileSpreadsheet,
+    59→  TrendingUp,
+    60→  PackageCheck,
+    61→  ArrowUpDown,
+    62→  MapPin,
+    63→  X,
+    64→  ClipboardList,
+    65→  Layers,
+    66→  Bookmark,
+    67→  BookmarkPlus,
+    68→  List,
+    69→  ScanSearch,
+    70→  Trash2,
+    71→  Wand2,
+    72→  Check,
+    73→  RefreshCw,
+    74→  Database,
+    75→  GitMerge,
+    76→  Sparkles,
+    77→  Copy,
+    78→} from "lucide-react";
+    79→import {
+    80→  formatCurrency,
+    81→  formatNumber,
+    82→  STORE_CATEGORIES,
+    83→  FILE_CATEGORIES,
+    84→  ZONES,
+    85→  confidenceColor,
+    86→  itemMasterStatusColor,
+    87→  duplicateTypeColor,
+    88→} from "@/lib/constants";
+    89→import { Checkbox } from "@/components/ui/checkbox";
+    90→import { useToast } from "@/hooks/use-toast";
+    91→import { cn } from "@/lib/utils";
+    92→
+    93→// ────────────────────────────────────────────────────────────
+    94→// Types
+    95→// ────────────────────────────────────────────────────────────
+    96→interface StoreZone {
+    97→  id: string;
+    98→  name: string;
+    99→  type: string;
+   100→  totalValue: number;
+   101→  itemCount: number;
+   102→  lowStockCount: number;
+   103→  recentReceipts: number;
+   104→  pendingCollection: number;
+   105→  nonMovingCount: number;
+   106→}
+   107→
+   108→interface StoreItem {
+   109→  id: string;
+   110→  zoneName: string;
+   111→  description: string;
+   112→  category: string;
+   113→  unit: string;
+   114→  qty: number;
+   115→  unitCost: number;
+   116→  totalCost: number;
+   117→  location: string | null;
+   118→  minStock: number;
+   119→  maxStock: number;
+   120→  lastMovement: string | null;
+   121→  supplier: string | null;
+   122→  itemCode: string | null;
+   123→  ilmsCode: string | null;
+   124→  createdAt: string;
+   125→}
+   126→
+   127→interface EarmarkedItem {
+   128→  id: string;
+   129→  storeItemId: string | null;
+   130→  itemDescription: string;
+   131→  itemCode: string | null;
+   132→  projectId: string;
+   133→  projectName: string;
+   134→  qty: number;
+   135→  unit: string;
+   136→  authority: string | null;
+   137→  remarks: string | null;
+   138→  createdAt: string;
+   139→}
+   140→
+   141→interface ProjectOption {
+   142→  id: string;
+   143→  name: string;
+   144→  voteNumber: string | null;
+   145→}
+   146→
+   147→interface FindCodeCandidate {
+   148→  storeItemId: string | null;
+   149→  description: string;
+   150→  category: string;
+   151→  unit: string;
+   152→  cost: number;
+   153→}
+   154→
+   155→type Confidence = "high" | "medium" | "low" | "none";
+   156→
+   157→interface FindCodeResult {
+   158→  description: string;
+   159→  suggestedItemCode: string | null;
+   160→  isDuplicate: boolean;
+   161→  duplicateOf: string | null;
+   162→  existingCodes: string[];
+   163→  confidence: Confidence;
+   164→  recommendation: string;
+   165→}
+   166→
+   167→// ─── Item Code Master & Deduplication types ───
+   168→interface ItemMasterRecord {
+   169→  id: string;
+   170→  canonicalCode: string;
+   171→  description: string;
+   172→  category: string;
+   173→  unit: string;
+   174→  alternateCodes: string | null;
+   175→  alternateNames: string | null;
+   176→  status: string;
+   177→  mergedInto: string | null;
+   178→  createdAt: string;
+   179→  updatedAt: string;
+   180→}
+   181→
+   182→interface DuplicateGroupItem {
+   183→  id: string;
+   184→  canonicalCode: string;
+   185→  description: string;
+   186→  category: string;
+   187→  source: "item-master" | "store-item";
+   188→  storeItemId?: string;
+   189→  zoneName?: string;
+   190→}
+   191→
+   192→interface DuplicateGroup {
+   193→  type:
+   194→    | "same_name_diff_code"
+   195→    | "same_code_diff_name"
+   196→    | "multi_code_one_item"
+   197→    | "near_duplicate";
+   198→  description: string;
+   199→  canonicalCode: string | null;
+   200→  items: DuplicateGroupItem[];
+   201→  recommendation: string;
+   202→}
+   203→
+   204→interface AnalyzeResponse {
+   205→  totalScanned: number;
+   206→  duplicatesFound: number;
+   207→  groups: DuplicateGroup[];
+   208→}
+   209→
+   210→interface MergeResponse {
+   211→  ok: boolean;
+   212→  canonicalCode: string;
+   213→  mergedCount: number;
+   214→  alternateCodes: string | null;
+   215→  alternateNames: string | null;
+   216→}
+   217→
+   218→type StockFilter = "all" | "in" | "low" | "out" | "over";
+   219→type SortKey = "description" | "qty" | "cost" | "category";
+   220→
+   221→const PAGE_SIZE = 25;
+   222→
+   223→// ────────────────────────────────────────────────────────────
+   224→// Main component
+   225→// ────────────────────────────────────────────────────────────
+   226→export function StoresModule() {
+   227→  const [tab, setTab] = useState<"zones" | "stores">("zones");
+   228→
+   229→  // Shared fetches
+   230→  const {
+   231→    data: zones,
+   232→    loading: zLoading,
+   233→    error: zError,
+   234→    refresh: refreshZones,
+   235→  } = useFetch<StoreZone[]>("/api/stores/zones");
+   236→  const {
+   237→    data: items,
+   238→    loading: iLoading,
+   239→    error: iError,
+   240→    refresh: refreshItems,
+   241→  } = useFetch<StoreItem[]>("/api/stores");
+   242→
+   243→  // Stores-tab filter state
+   244→  const [category, setCategory] = useState<string>("All");
+   245→  const [search, setSearch] = useState("");
+   246→  const [zoneFilter, setZoneFilter] = useState("all");
+   247→  const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+   248→  const [sortKey, setSortKey] = useState<SortKey>("description");
+   249→  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+   250→  const [page, setPage] = useState(1);
+   251→
+   252→  // Dialogs
+   253→  const [formOpen, setFormOpen] = useState(false);
+   254→  const [editing, setEditing] = useState<StoreItem | null>(null);
+   255→  const [bulkOpen, setBulkOpen] = useState(false);
+   256→  const [viewing, setViewing] = useState<StoreItem | null>(null);
+   257→  const [earmarkOpen, setEarmarkOpen] = useState(false);
+   258→  const [earmarkListOpen, setEarmarkListOpen] = useState(false);
+   259→  const [findCodeOpen, setFindCodeOpen] = useState(false);
+   260→
+   261→  const { toast } = useToast();
+   262→
+   263→  // Derived: filtered + sorted list
+   264→  const filtered = useMemo(() => {
+   265→    if (!items) return [];
+   266→    let list = items.slice();
+   267→    if (category !== "All") list = list.filter((i) => i.category === category);
+   268→    if (zoneFilter !== "all") list = list.filter((i) => i.zoneName === zoneFilter);
+   269→    const q = search.trim().toLowerCase();
+   270→    if (q) list = list.filter((i) => i.description.toLowerCase().includes(q));
+   271→    list = list.filter((i) => {
+   272→      if (stockFilter === "out") return i.qty <= 0;
+   273→      if (stockFilter === "low")
+   274→        return i.minStock > 0 && i.qty > 0 && i.qty <= i.minStock;
+   275→      if (stockFilter === "in") return i.minStock === 0 || i.qty > i.minStock;
+   276→      if (stockFilter === "over") return i.maxStock > 0 && i.qty >= i.maxStock;
+   277→      return true;
+   278→    });
+   279→    list.sort((a, b) => {
+   280→      let cmp = 0;
+   281→      if (sortKey === "description") cmp = a.description.localeCompare(b.description);
+   282→      else if (sortKey === "qty") cmp = a.qty - b.qty;
+   283→      else if (sortKey === "cost") cmp = a.totalCost - b.totalCost;
+   284→      else if (sortKey === "category") cmp = a.category.localeCompare(b.category);
+   285→      return sortDir === "asc" ? cmp : -cmp;
+   286→    });
+   287→    return list;
+   288→  }, [items, category, zoneFilter, search, stockFilter, sortKey, sortDir]);
+   289→
+   290→  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+   291→  const safePage = Math.min(page, totalPages);
+   292→  const pageItems = filtered.slice(
+   293→    (safePage - 1) * PAGE_SIZE,
+   294→    safePage * PAGE_SIZE
+   295→  );
+   296→
+   297→  // Stats reflect the currently filtered set
+   298→  const stats = useMemo(() => {
+   299→    const net = filtered.reduce((s, i) => s + i.totalCost, 0);
+   300→    const task = filtered.length;
+   301→    const avail = filtered.filter((i) => i.qty > 0).length;
+   302→    const team = filtered.filter((i) => i.minStock > 0 && i.qty <= i.minStock).length;
+   303→    return { net, task, avail, team };
+   304→  }, [filtered]);
+   305→
+   306→  // Wrap filter setters so any change also resets pagination to page 1
+   307→  const setCategoryR = (c: string) => {
+   308→    setCategory(c);
+   309→    setPage(1);
+   310→  };
+   311→  const setSearchR = (s: string) => {
+   312→    setSearch(s);
+   313→    setPage(1);
+   314→  };
+   315→  const setZoneFilterR = (z: string) => {
+   316→    setZoneFilter(z);
+   317→    setPage(1);
+   318→  };
+   319→  const setStockFilterR = (s: StockFilter) => {
+   320→    setStockFilter(s);
+   321→    setPage(1);
+   322→  };
+   323→  const setSortKeyR = (k: SortKey) => {
+   324→    setSortKey(k);
+   325→    setPage(1);
+   326→  };
+   327→  const setSortDirR = (d: "asc" | "desc") => {
+   328→    setSortDir(d);
+   329→    setPage(1);
+   330→  };
+   331→  const toggleSortR = (k: SortKey) => {
+   332→    if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   333→    else {
+   334→      setSortKey(k);
+   335→      setSortDir("asc");
+   336→    }
+   337→    setPage(1);
+   338→  };
+   339→
+   340→  // Handlers
+   341→  const handleZoneClick = (zoneName: string) => {
+   342→    setZoneFilter(zoneName);
+   343→    setCategory("All");
+   344→    setStockFilter("all");
+   345→    setSearch("");
+   346→    setPage(1);
+   347→    setTab("stores");
+   348→    toast({
+   349→      title: `Browsing ${zoneName}`,
+   350→      description: "Switched to Stores tab with zone filter applied.",
+   351→    });
+   352→  };
+   353→
+   354→  const openAdd = () => {
+   355→    setEditing(null);
+   356→    setFormOpen(true);
+   357→  };
+   358→
+   359→  const openEdit = (item: StoreItem) => {
+   360→    setEditing(item);
+   361→    setFormOpen(true);
+   362→  };
+   363→
+   364→  const handleSaved = () => {
+   365→    setFormOpen(false);
+   366→    setEditing(null);
+   367→    refreshItems();
+   368→    refreshZones();
+   369→    toast({
+   370→      title: editing ? "Item updated" : "Item added",
+   371→      description: editing
+   372→        ? "Store item has been updated successfully."
+   373→        : "New store item has been added to the store.",
+   374→    });
+   375→  };
+   376→
+   377→  const toggleSort = (k: SortKey) => {
+   378→    if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   379→    else {
+   380→      setSortKey(k);
+   381→      setSortDir("asc");
+   382→    }
+   383→  };
+   384→
+   385→  return (
+   386→    <div>
+   387→      <PageHeader
+   388→        title="Store Management"
+   389→        description="Zones, inventory & stock-level monitoring across the dockyard"
+   390→        icon={Warehouse}
+   391→        actions={
+   392→          <div className="flex flex-wrap items-center gap-2 justify-end">
+   393→            <Button
+   394→              variant="outline"
+   395→              size="sm"
+   396→              onClick={() => setFindCodeOpen(true)}
+   397→              className="gap-1.5"
+   398→              title="Find item codes using AI"
+   399→            >
+   400→              <ScanSearch className="h-4 w-4" /> Find Item Codes (AI)
+   401→            </Button>
+   402→            <Button
+   403→              variant="outline"
+   404→              size="sm"
+   405→              onClick={() => setEarmarkListOpen(true)}
+   406→              className="gap-1.5"
+   407→              title="View all earmarked items"
+   408→            >
+   409→              <List className="h-4 w-4" /> View Earmarked
+   410→            </Button>
+   411→            <Button
+   412→              variant="outline"
+   413→              size="sm"
+   414→              onClick={() => setEarmarkOpen(true)}
+   415→              className="gap-1.5"
+   416→              title="Earmark an item for a project without a PR"
+   417→            >
+   418→              <BookmarkPlus className="h-4 w-4" /> Earmark Item
+   419→            </Button>
+   420→            <Button
+   421→              variant="outline"
+   422→              size="sm"
+   423→              onClick={() => setBulkOpen(true)}
+   424→              className="gap-1.5"
+   425→            >
+   426→              <Upload className="h-4 w-4" /> Bulk Upload
+   427→            </Button>
+   428→            <Button onClick={openAdd} size="sm" className="gap-1.5">
+   429→              <Plus className="h-4 w-4" /> Add Item
+   430→            </Button>
+   431→          </div>
+   432→        }
+   433→      />
+   434→
+   435→      <Tabs
+   436→        value={tab}
+   437→        onValueChange={(v) => setTab(v as "zones" | "stores")}
+   438→        className="w-full"
+   439→      >
+   440→        <TabsList>
+   441→          <TabsTrigger value="zones" className="gap-1.5">
+   442→            <Boxes className="h-4 w-4" /> Zones
+   443→          </TabsTrigger>
+   444→          <TabsTrigger value="stores" className="gap-1.5">
+   445→            <Package className="h-4 w-4" /> Stores
+   446→          </TabsTrigger>
+   447→        </TabsList>
+   448→
+   449→        {/* ─── Zones tab ─── */}
+   450→        <TabsContent value="zones" className="mt-4">
+   451→          <ZonesTab
+   452→            zones={zones}
+   453→            loading={zLoading}
+   454→            error={zError}
+   455→            onZoneClick={handleZoneClick}
+   456→          />
+   457→        </TabsContent>
+   458→
+   459→        {/* ─── Stores tab ─── */}
+   460→        <TabsContent value="stores" className="mt-4">
+   461→          <StoresTab
+   462→            items={items}
+   463→            loading={iLoading}
+   464→            error={iError}
+   465→            zones={zones}
+   466→            stats={stats}
+   467→            category={category}
+   468→            setCategory={setCategoryR}
+   469→            search={search}
+   470→            setSearch={setSearchR}
+   471→            zoneFilter={zoneFilter}
+   472→            setZoneFilter={setZoneFilterR}
+   473→            stockFilter={stockFilter}
+   474→            setStockFilter={setStockFilterR}
+   475→            sortKey={sortKey}
+   476→            sortDir={sortDir}
+   477→            setSortKey={setSortKeyR}
+   478→            setSortDir={setSortDirR}
+   479→            toggleSort={toggleSortR}
+   480→            filtered={filtered}
+   481→            pageItems={pageItems}
+   482→            safePage={safePage}
+   483→            totalPages={totalPages}
+   484→            setPage={setPage}
+   485→            onEdit={openEdit}
+   486→            onView={(it) => setViewing(it)}
+   487→            onAdd={openAdd}
+   488→          />
+   489→        </TabsContent>
+   490→      </Tabs>
+   491→
+   492→      {/* Add / Edit form */}
+   493→      <ItemFormDialog
+   494→        key={editing ? `edit-${editing.id}` : "new"}
+   495→        open={formOpen}
+   496→        onOpenChange={(o) => {
+   497→          setFormOpen(o);
+   498→          if (!o) setEditing(null);
+   499→        }}
+   500→        editing={editing}
+   501→        zones={zones}
+   502→        onSaved={handleSaved}
+   503→      />
+   504→
+   505→      {/* Bulk upload */}
+   506→      <BulkUploadDialog
+   507→        open={bulkOpen}
+   508→        onOpenChange={setBulkOpen}
+   509→        zones={zones}
+   510→        onDone={() => {
+   511→          refreshItems();
+   512→          refreshZones();
+   513→        }}
+   514→      />
+   515→
+   516→      {/* View dialog */}
+   517→      <ViewItemDialog
+   518→        item={viewing}
+   519→        onOpenChange={(o) => !o && setViewing(null)}
+   520→        onEdit={(it) => {
+   521→          setViewing(null);
+   522→          openEdit(it);
+   523→        }}
+   524→      />
+   525→
+   526→      {/* Earmark item dialog */}
+   527→      <EarmarkItemDialog
+   528→        open={earmarkOpen}
+   529→        onOpenChange={setEarmarkOpen}
+   530→        storeItems={items}
+   531→      />
+   532→
+   533→      {/* Earmarked items list dialog */}
+   534→      <EarmarkedItemsDialog
+   535→        open={earmarkListOpen}
+   536→        onOpenChange={setEarmarkListOpen}
+   537→      />
+   538→
+   539→      {/* Item Code Master & Deduplication full-window */}
+   540→      <ItemCodeMasterWindow
+   541→        open={findCodeOpen}
+   542→        onOpenChange={setFindCodeOpen}
+   543→      />
+   544→    </div>
+   545→  );
+   546→}
+   547→
+   548→// ────────────────────────────────────────────────────────────
+   549→// Zones tab — dashboard view with scaled tiles
+   550→// ────────────────────────────────────────────────────────────
+   551→interface ZonesTabProps {
+   552→  zones: StoreZone[] | null;
+   553→  loading: boolean;
+   554→  error: string | null;
+   555→  onZoneClick: (zoneName: string) => void;
+   556→}
+   557→
+   558→function ZonesTab({ zones, loading, error, onZoneClick }: ZonesTabProps) {
+   559→  if (loading) return <LoadingState label="Loading zones..." />;
+   560→  if (error) return <ErrorState message={error} />;
+   561→  if (!zones || zones.length === 0)
+   562→    return (
+   563→      <EmptyState
+   564→        icon={Boxes}
+   565→        title="No zones configured"
+   566→        description="Store zones will appear here as tiles once data is seeded."
+   567→      />
+   568→    );
+   569→
+   570→  const totalValue = zones.reduce((s, z) => s + z.totalValue, 0);
+   571→  const totalItems = zones.reduce((s, z) => s + z.itemCount, 0);
+   572→  const totalLow = zones.reduce((s, z) => s + z.lowStockCount, 0);
+   573→
+   574→  return (
+   575→    <div>
+   576→      {/* Mini summary strip */}
+   577→      <div className="grid grid-cols-3 gap-3 mb-5">
+   578→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   579→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   580→            Total Stock Value
+   581→          </p>
+   582→          <p className="text-base sm:text-xl font-semibold text-foreground mt-1">
+   583→            {formatCurrency(totalValue)}
+   584→          </p>
+   585→        </div>
+   586→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   587→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   588→            Total Items
+   589→          </p>
+   590→          <p className="text-base sm:text-xl font-semibold text-foreground mt-1">
+   591→            {formatNumber(totalItems)}
+   592→          </p>
+   593→        </div>
+   594→        <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   595→          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-muted-foreground">
+   596→            Low Stock Items
+   597→          </p>
+   598→          <p
+   599→            className={cn(
+   600→              "text-base sm:text-xl font-semibold mt-1",
+   601→              totalLow > 0 ? "text-amber-400" : "text-emerald-400"
+   602→            )}
+   603→          >
+   604→            {formatNumber(totalLow)}
+   605→          </p>
+   606→        </div>
+   607→      </div>
+   608→
+   609→      {/* Tiles grid */}
+   610→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+   611→        {zones.map((z) => {
+   612→          const status =
+   613→            z.lowStockCount >= 3
+   614→              ? "critical"
+   615→              : z.lowStockCount > 0
+   616→                ? "attention"
+   617→                : "healthy";
+   618→          const statusClasses =
+   619→            status === "critical"
+   620→              ? "border-red-500/40 hover:border-red-500/70"
+   621→              : status === "attention"
+   622→                ? "border-amber-500/40 hover:border-amber-500/70"
+   623→                : "border-emerald-500/30 hover:border-emerald-500/60";
+   624→          const minHeight = 120 + Math.min(z.totalValue / 100000, 80);
+   625→
+   626→          return (
+   627→            <button
+   628→              key={z.id}
+   629→              onClick={() => onZoneClick(z.name)}
+   630→              style={{ minHeight }}
+   631→              className={cn(
+   632→                "group bg-card border rounded-xl p-4 sm:p-5 text-left transition-all flex flex-col justify-between",
+   633→                "hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5",
+   634→                statusClasses
+   635→              )}
+   636→            >
+   637→              {/* Header */}
+   638→              <div className="flex items-start justify-between gap-2 mb-3">
+   639→                <div className="min-w-0">
+   640→                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate text-sm sm:text-base">
+   641→                    {z.name}
+   642→                  </h3>
+   643→                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
+   644→                    {z.itemCount} items tracked
+   645→                  </p>
+   646→                </div>
+   647→                <CustomBadge
+   648→                  className={cn(
+   649→                    "border-0 shrink-0",
+   650→                    status === "critical" &&
+   651→                      "bg-red-500/15 text-red-400",
+   652→                    status === "attention" &&
+   653→                      "bg-amber-500/15 text-amber-400",
+   654→                    status === "healthy" &&
+   655→                      "bg-emerald-500/15 text-emerald-400"
+   656→                  )}
+   657→                >
+   658→                  {z.type}
+   659→                </CustomBadge>
+   660→              </div>
+   661→
+   662→              {/* Value */}
+   663→              <div className="mb-3">
+   664→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   665→                  Stock Value
+   666→                </p>
+   667→                <p className="text-lg sm:text-2xl font-bold text-foreground">
+   668→                  {formatCurrency(z.totalValue)}
+   669→                </p>
+   670→              </div>
+   671→
+   672→              {/* Status chips */}
+   673→              <div className="flex flex-wrap gap-1.5 mt-auto">
+   674→                <ZoneChip
+   675→                  label="Running out"
+   676→                  value={z.lowStockCount}
+   677→                  tone={z.lowStockCount > 0 ? "red" : "muted"}
+   678→                />
+   679→                <ZoneChip
+   680→                  label="Received"
+   681→                  value={z.recentReceipts}
+   682→                  tone={z.recentReceipts > 0 ? "green" : "muted"}
+   683→                />
+   684→                <ZoneChip
+   685→                  label="To collect"
+   686→                  value={z.pendingCollection}
+   687→                  tone={z.pendingCollection > 0 ? "blue" : "muted"}
+   688→                />
+   689→                <ZoneChip
+   690→                  label="Non-moving"
+   691→                  value={z.nonMovingCount}
+   692→                  tone={z.nonMovingCount > 0 ? "amber" : "muted"}
+   693→                />
+   694→              </div>
+   695→            </button>
+   696→          );
+   697→        })}
+   698→      </div>
+   699→
+   700→      <p className="text-xs text-muted-foreground mt-4 text-center">
+   701→        Click a zone tile to drill into its detailed inventory.
+   702→      </p>
+   703→    </div>
+   704→  );
+   705→}
+   706→
+   707→function ZoneChip({
+   708→  label,
+   709→  value,
+   710→  tone,
+   711→}: {
+   712→  label: string;
+   713→  value: number;
+   714→  tone: "red" | "amber" | "green" | "blue" | "muted";
+   715→}) {
+   716→  const toneClasses = {
+   717→    red: "bg-red-500/10 text-red-400 border-red-500/30",
+   718→    amber: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+   719→    green: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+   720→    blue: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+   721→    muted: "bg-secondary/60 text-muted-foreground border-border",
+   722→  };
+   723→  return (
+   724→    <span
+   725→      className={cn(
+   726→        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] sm:text-xs font-medium",
+   727→        toneClasses[tone]
+   728→      )}
+   729→    >
+   730→      <span className="opacity-80">{label}</span>
+   731→      <span className="font-semibold">{value}</span>
+   732→    </span>
+   733→  );
+   734→}
+   735→
+   736→// ────────────────────────────────────────────────────────────
+   737→// Stores tab — detailed inventory table
+   738→// ────────────────────────────────────────────────────────────
+   739→interface StoresTabProps {
+   740→  items: StoreItem[] | null;
+   741→  loading: boolean;
+   742→  error: string | null;
+   743→  zones: StoreZone[] | null;
+   744→  stats: { net: number; task: number; avail: number; team: number };
+   745→  category: string;
+   746→  setCategory: (c: string) => void;
+   747→  search: string;
+   748→  setSearch: (s: string) => void;
+   749→  zoneFilter: string;
+   750→  setZoneFilter: (z: string) => void;
+   751→  stockFilter: StockFilter;
+   752→  setStockFilter: (s: StockFilter) => void;
+   753→  sortKey: SortKey;
+   754→  sortDir: "asc" | "desc";
+   755→  setSortKey: (k: SortKey) => void;
+   756→  setSortDir: (d: "asc" | "desc") => void;
+   757→  toggleSort: (k: SortKey) => void;
+   758→  filtered: StoreItem[];
+   759→  pageItems: StoreItem[];
+   760→  safePage: number;
+   761→  totalPages: number;
+   762→  setPage: (p: number) => void;
+   763→  onEdit: (item: StoreItem) => void;
+   764→  onView: (item: StoreItem) => void;
+   765→  onAdd: () => void;
+   766→}
+   767→
+   768→function StoresTab(props: StoresTabProps) {
+   769→  const {
+   770→    items,
+   771→    loading,
+   772→    error,
+   773→    zones,
+   774→    stats,
+   775→    category,
+   776→    setCategory,
+   777→    search,
+   778→    setSearch,
+   779→    zoneFilter,
+   780→    setZoneFilter,
+   781→    stockFilter,
+   782→    setStockFilter,
+   783→    sortKey,
+   784→    sortDir,
+   785→    setSortKey,
+   786→    setSortDir,
+   787→    toggleSort,
+   788→    filtered,
+   789→    pageItems,
+   790→    safePage,
+   791→    totalPages,
+   792→    setPage,
+   793→    onEdit,
+   794→    onView,
+   795→    onAdd,
+   796→  } = props;
+   797→
+   798→  if (loading) return <LoadingState label="Loading store items..." />;
+   799→  if (error) return <ErrorState message={error} />;
+   800→
+   801→  return (
+   802→    <div className="space-y-4">
+   803→      {/* Top stats bar */}
+   804→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   805→        <StatCard
+   806→          label="Net Stock Value"
+   807→          value={formatCurrency(stats.net)}
+   808→          icon={TrendingUp}
+   809→          accent="blue"
+   810→          sub="Current inventory value"
+   811→        />
+   812→        <StatCard
+   813→          label="Total Items"
+   814→          value={stats.task}
+   815→          icon={Package}
+   816→          accent="amber"
+   817→          sub="Line items tracked"
+   818→        />
+   819→        <StatCard
+   820→          label="Available"
+   821→          value={stats.avail}
+   822→          icon={PackageCheck}
+   823→          accent="green"
+   824→          sub="Items in stock (qty > 0)"
+   825→        />
+   826→        <StatCard
+   827→          label="Low Stock"
+   828→          value={stats.team}
+   829→          icon={AlertTriangle}
+   830→          accent="red"
+   831→          sub="Need re-ordering"
+   832→        />
+   833→      </div>
+   834→
+   835→      {/* Category tabs */}
+   836→      <div className="bg-card border border-border rounded-xl p-3">
+   837→        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin pb-1">
+   838→          {STORE_CATEGORIES.map((c) => (
+   839→            <button
+   840→              key={c}
+   841→              onClick={() => setCategory(c)}
+   842→              className={cn(
+   843→                "px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium whitespace-nowrap transition-colors",
+   844→                category === c
+   845→                  ? "bg-primary text-primary-foreground"
+   846→                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+   847→              )}
+   848→            >
+   849→              {c}
+   850→            </button>
+   851→          ))}
+   852→        </div>
+   853→      </div>
+   854→
+   855→      {/* Filter bar */}
+   856→      <div className="bg-card border border-border rounded-xl p-3 sm:p-4">
+   857→        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+   858→          {/* Search */}
+   859→          <div className="relative flex-1 min-w-0">
+   860→            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+   861→            <Input
+   862→              value={search}
+   863→              onChange={(e) => setSearch(e.target.value)}
+   864→              placeholder="Search by description..."
+   865→              className="pl-9 bg-background border-border"
+   866→            />
+   867→          </div>
+   868→
+   869→          {/* Zone filter */}
+   870→          <Select value={zoneFilter} onValueChange={setZoneFilter}>
+   871→            <SelectTrigger className="w-full sm:w-44 bg-background border-border">
+   872→              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+   873→              <SelectValue placeholder="All Zones" />
+   874→            </SelectTrigger>
+   875→            <SelectContent>
+   876→              <SelectItem value="all">All Zones</SelectItem>
+   877→              {(zones ?? []).map((z) => (
+   878→                <SelectItem key={z.id} value={z.name}>
+   879→                  {z.name}
+   880→                </SelectItem>
+   881→              ))}
+   882→            </SelectContent>
+   883→          </Select>
+   884→
+   885→          {/* Stock filter */}
+   886→          <Select
+   887→            value={stockFilter}
+   888→            onValueChange={(v) => setStockFilter(v as StockFilter)}
+   889→          >
+   890→            <SelectTrigger className="w-full sm:w-40 bg-background border-border">
+   891→              <SelectValue placeholder="Stock level" />
+   892→            </SelectTrigger>
+   893→            <SelectContent>
+   894→              <SelectItem value="all">All Stock</SelectItem>
+   895→              <SelectItem value="in">In Stock</SelectItem>
+   896→              <SelectItem value="low">Low Stock</SelectItem>
+   897→              <SelectItem value="out">Out of Stock</SelectItem>
+   898→              <SelectItem value="over">Overstock</SelectItem>
+   899→            </SelectContent>
+   900→          </Select>
+   901→
+   902→          {/* Sort */}
+   903→          <Select
+   904→            value={sortKey}
+   905→            onValueChange={(v) => setSortKey(v as SortKey)}
+   906→          >
+   907→            <SelectTrigger className="w-full sm:w-40 bg-background border-border">
+   908→              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+   909→              <SelectValue placeholder="Sort by" />
+   910→            </SelectTrigger>
+   911→            <SelectContent>
+   912→              <SelectItem value="description">Description</SelectItem>
+   913→              <SelectItem value="qty">Quantity</SelectItem>
+   914→              <SelectItem value="cost">Cost</SelectItem>
+   915→              <SelectItem value="category">Category</SelectItem>
+   916→            </SelectContent>
+   917→          </Select>
+   918→
+   919→          {/* Sort direction toggle */}
+   920→          <Button
+   921→            variant="outline"
+   922→            size="icon"
+   923→            className="h-9 w-9 shrink-0"
+   924→            onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+   925→            title={sortDir === "asc" ? "Ascending" : "Descending"}
+   926→          >
+   927→            <span className="text-xs font-mono">
+   928→              {sortDir === "asc" ? "↑" : "↓"}
+   929→            </span>
+   930→          </Button>
+   931→        </div>
+   932→      </div>
+   933→
+   934→      {/* Table */}
+   935→      <div className="bg-card border border-border rounded-xl">
+   936→        {!items || items.length === 0 ? (
+   937→          <EmptyState
+   938→            icon={Package}
+   939→            title="No store items yet"
+   940→            description="Add your first item to start tracking inventory."
+   941→            action={
+   942→              <Button onClick={onAdd} size="sm" className="gap-1.5">
+   943→                <Plus className="h-4 w-4" /> Add Item
+   944→              </Button>
+   945→            }
+   946→          />
+   947→        ) : filtered.length === 0 ? (
+   948→          <EmptyState
+   949→            icon={Search}
+   950→            title="No items match your filters"
+   951→            description="Try adjusting your search, category or stock-level filter."
+   952→          />
+   953→        ) : (
+   954→          <>
+   955→            <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+   956→              <Table>
+   957→                <TableHeader className="sticky top-0 z-10 bg-card">
+   958→                  <TableRow className="border-border hover:bg-transparent">
+   959→                    <TableHead
+   960→                      className="cursor-pointer select-none"
+   961→                      onClick={() => toggleSort("description")}
+   962→                    >
+   963→                      <span className="inline-flex items-center gap-1">
+   964→                        Description
+   965→                        {sortKey === "description" && (
+   966→                          <span className="text-primary">
+   967→                            {sortDir === "asc" ? "↑" : "↓"}
+   968→                          </span>
+   969→                        )}
+   970→                      </span>
+   971→                    </TableHead>
+   972→                    <TableHead
+   973→                      className="cursor-pointer select-none"
+   974→                      onClick={() => toggleSort("category")}
+   975→                    >
+   976→                      <span className="inline-flex items-center gap-1">
+   977→                        Category
+   978→                        {sortKey === "category" && (
+   979→                          <span className="text-primary">
+   980→                            {sortDir === "asc" ? "↑" : "↓"}
+   981→                          </span>
+   982→                        )}
+   983→                      </span>
+   984→                    </TableHead>
+   985→                    <TableHead>Unit</TableHead>
+   986→                    <TableHead
+   987→                      className="text-right cursor-pointer select-none"
+   988→                      onClick={() => toggleSort("qty")}
+   989→                    >
+   990→                      <span className="inline-flex items-center gap-1">
+   991→                        Qty
+   992→                        {sortKey === "qty" && (
+   993→                          <span className="text-primary">
+   994→                            {sortDir === "asc" ? "↑" : "↓"}
+   995→                          </span>
+   996→                        )}
+   997→                      </span>
+   998→                    </TableHead>
+   999→                    <TableHead
+  1000→                      className="text-right cursor-pointer select-none"
+  1001→                      onClick={() => toggleSort("cost")}
+  1002→                    >
+  1003→                      <span className="inline-flex items-center gap-1">
+  1004→                        Cost
+  1005→                        {sortKey === "cost" && (
+  1006→                          <span className="text-primary">
+  1007→                            {sortDir === "asc" ? "↑" : "↓"}
+  1008→                          </span>
+  1009→                        )}
+  1010→                      </span>
+  1011→                    </TableHead>
+  1012→                    <TableHead>Location</TableHead>
+  1013→                    <TableHead className="text-right">Actions</TableHead>
+  1014→                  </TableRow>
+  1015→                </TableHeader>
+  1016→                <TableBody>
+  1017→                  {pageItems.map((item) => {
+  1018→                    const isLow =
+  1019→                      item.minStock > 0 && item.qty <= item.minStock;
+  1020→                    const isOut = item.qty <= 0;
+  1021→                    return (
+  1022→                      <TableRow
+  1023→                        key={item.id}
+  1024→                        className="border-border cursor-default"
+  1025→                      >
+  1026→                        <TableCell className="max-w-[260px]">
+  1027→                          <div className="flex flex-col min-w-0">
+  1028→                            <span className="text-foreground font-medium truncate">
+  1029→                              {item.description}
+  1030→                            </span>
+  1031→                            {item.itemCode && (
+  1032→                              <span className="text-[10px] text-muted-foreground font-mono">
+  1033→                                {item.itemCode}
+  1034→                              </span>
+  1035→                            )}
+  1036→                          </div>
+  1037→                        </TableCell>
+  1038→                        <TableCell>
+  1039→                          <CategoryBadge category={item.category} />
+  1040→                        </TableCell>
+  1041→                        <TableCell className="text-muted-foreground">
+  1042→                          {item.unit}
+  1043→                        </TableCell>
+  1044→                        <TableCell className="text-right">
+  1045→                          <div className="inline-flex flex-col items-end">
+  1046→                            <span
+  1047→                              className={cn(
+  1048→                                "font-medium tabular-nums",
+  1049→                                isOut
+  1050→                                  ? "text-red-400"
+  1051→                                  : isLow
+  1052→                                    ? "text-amber-400"
+  1053→                                    : "text-foreground"
+  1054→                              )}
+  1055→                            >
+  1056→                              {formatNumber(item.qty)}
+  1057→                            </span>
+  1058→                            {isLow && !isOut && (
+  1059→                              <span className="text-[10px] text-red-400 flex items-center gap-0.5">
+  1060→                                <AlertTriangle className="h-2.5 w-2.5" /> Low
+  1061→                              </span>
+  1062→                            )}
+  1063→                            {isOut && (
+  1064→                              <span className="text-[10px] text-red-400 flex items-center gap-0.5">
+  1065→                                <AlertTriangle className="h-2.5 w-2.5" /> Out
+  1066→                              </span>
+  1067→                            )}
+  1068→                          </div>
+  1069→                        </TableCell>
+  1070→                        <TableCell className="text-right">
+  1071→                          <div className="font-semibold text-foreground tabular-nums">
+  1072→                            {formatCurrency(item.totalCost)}
+  1073→                          </div>
+  1074→                          <div className="text-[10px] text-muted-foreground">
+  1075→                            @{formatCurrency(item.unitCost)}
+  1076→                          </div>
+  1077→                        </TableCell>
+  1078→                        <TableCell>
+  1079→                          <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
+  1080→                            <MapPin className="h-3 w-3 mr-1" />
+  1081→                            {item.location || item.zoneName}
+  1082→                          </CustomBadge>
+  1083→                        </TableCell>
+  1084→                        <TableCell className="text-right">
+  1085→                          <div className="inline-flex items-center gap-1">
+  1086→                            <Button
+  1087→                              variant="ghost"
+  1088→                              size="icon"
+  1089→                              className="h-7 w-7"
+  1090→                              onClick={() => onView(item)}
+  1091→                              title="View"
+  1092→                            >
+  1093→                              <Eye className="h-3.5 w-3.5" />
+  1094→                            </Button>
+  1095→                            <Button
+  1096→                              variant="ghost"
+  1097→                              size="icon"
+  1098→                              className="h-7 w-7"
+  1099→                              onClick={() => onEdit(item)}
+  1100→                              title="Edit"
+  1101→                            >
+  1102→                              <Pencil className="h-3.5 w-3.5" />
+  1103→                            </Button>
+  1104→                          </div>
+  1105→                        </TableCell>
+  1106→                      </TableRow>
+  1107→                    );
+  1108→                  })}
+  1109→                </TableBody>
+  1110→              </Table>
+  1111→            </div>
+  1112→
+  1113→            {/* Pagination */}
+  1114→            <div className="flex items-center justify-between gap-3 p-3 border-t border-border flex-wrap">
+  1115→              <p className="text-xs text-muted-foreground">
+  1116→                Showing{" "}
+  1117→                <span className="text-foreground font-medium">
+  1118→                  {(safePage - 1) * PAGE_SIZE + 1}–
+  1119→                  {Math.min(safePage * PAGE_SIZE, filtered.length)}
+  1120→                </span>{" "}
+  1121→                of{" "}
+  1122→                <span className="text-foreground font-medium">
+  1123→                  {filtered.length}
+  1124→                </span>{" "}
+  1125→                items
+  1126→              </p>
+  1127→              <div className="flex items-center gap-1">
+  1128→                <Button
+  1129→                  variant="outline"
+  1130→                  size="sm"
+  1131→                  className="h-8 gap-1"
+  1132→                  disabled={safePage <= 1}
+  1133→                  onClick={() => setPage(safePage - 1)}
+  1134→                >
+  1135→                  <ChevronLeft className="h-4 w-4" /> Prev
+  1136→                </Button>
+  1137→                <span className="text-xs text-muted-foreground px-2 tabular-nums">
+  1138→                  {safePage} / {totalPages}
+  1139→                </span>
+  1140→                <Button
+  1141→                  variant="outline"
+  1142→                  size="sm"
+  1143→                  className="h-8 gap-1"
+  1144→                  disabled={safePage >= totalPages}
+  1145→                  onClick={() => setPage(safePage + 1)}
+  1146→                >
+  1147→                  Next <ChevronRight className="h-4 w-4" />
+  1148→                </Button>
+  1149→              </div>
+  1150→            </div>
+  1151→          </>
+  1152→        )}
+  1153→      </div>
+  1154→    </div>
+  1155→  );
+  1156→}
+  1157→
+  1158→// ────────────────────────────────────────────────────────────
+  1159→// Add / Edit item form dialog
+  1160→// ────────────────────────────────────────────────────────────
+  1161→interface ItemFormDialogProps {
+  1162→  open: boolean;
+  1163→  onOpenChange: (o: boolean) => void;
+  1164→  editing: StoreItem | null;
+  1165→  zones: StoreZone[] | null;
+  1166→  onSaved: () => void;
+  1167→}
+  1168→
+  1169→interface ItemForm {
+  1170→  description: string;
+  1171→  category: string;
+  1172→  unit: string;
+  1173→  qty: string;
+  1174→  unitCost: string;
+  1175→  location: string;
+  1176→  minStock: string;
+  1177→  maxStock: string;
+  1178→  supplier: string;
+  1179→  itemCode: string;
+  1180→  ilmsCode: string;
+  1181→  zoneName: string;
+  1182→}
+  1183→
+  1184→const DEFAULT_FORM: ItemForm = {
+  1185→  description: "",
+  1186→  category: "General",
+  1187→  unit: "NOS",
+  1188→  qty: "0",
+  1189→  unitCost: "0",
+  1190→  location: "",
+  1191→  minStock: "0",
+  1192→  maxStock: "0",
+  1193→  supplier: "",
+  1194→  itemCode: "",
+  1195→  ilmsCode: "",
+  1196→  zoneName: "Zone A",
+  1197→};
+  1198→
+  1199→function ItemFormDialog({
+  1200→  open,
+  1201→  onOpenChange,
+  1202→  editing,
+  1203→  zones,
+  1204→  onSaved,
+  1205→}: ItemFormDialogProps) {
+  1206→  // Initialise from `editing` — parent remounts this component via `key`
+  1207→  // whenever the editing target changes, so this initialiser runs fresh.
+  1208→  const [form, setForm] = useState<ItemForm>(() =>
+  1209→    editing
+  1210→      ? {
+  1211→          description: editing.description,
+  1212→          category: editing.category,
+  1213→          unit: editing.unit,
+  1214→          qty: String(editing.qty ?? 0),
+  1215→          unitCost: String(editing.unitCost ?? 0),
+  1216→          location: editing.location ?? "",
+  1217→          minStock: String(editing.minStock ?? 0),
+  1218→          maxStock: String(editing.maxStock ?? 0),
+  1219→          supplier: editing.supplier ?? "",
+  1220→          itemCode: editing.itemCode ?? "",
+  1221→          ilmsCode: editing.ilmsCode ?? "",
+  1222→          zoneName: editing.zoneName,
+  1223→        }
+  1224→      : DEFAULT_FORM
+  1225→  );
+  1226→  const [saving, setSaving] = useState(false);
+  1227→  const { toast } = useToast();
+  1228→
+  1229→  const qtyNum = Number(form.qty) || 0;
+  1230→  const unitCostNum = Number(form.unitCost) || 0;
+  1231→  const fileCost = qtyNum * unitCostNum;
+  1232→
+  1233→  const set = (k: keyof ItemForm, v: string) =>
+  1234→    setForm((prev) => ({ ...prev, [k]: v }));
+  1235→
+  1236→  const submit = async () => {
+  1237→    if (!form.description.trim()) {
+  1238→      toast({
+  1239→        title: "Description is required",
+  1240→        variant: "destructive",
+  1241→      });
+  1242→      return;
+  1243→    }
+  1244→    setSaving(true);
+  1245→    const payload = {
+  1246→      description: form.description.trim(),
+  1247→      category: form.category,
+  1248→      unit: form.unit || "NOS",
+  1249→      qty: qtyNum,
+  1250→      unitCost: unitCostNum,
+  1251→      location: form.location.trim() || form.zoneName,
+  1252→      minStock: Number(form.minStock) || 0,
+  1253→      maxStock: Number(form.maxStock) || 0,
+  1254→      supplier: form.supplier.trim() || null,
+  1255→      itemCode: form.itemCode.trim() || null,
+  1256→      ilmsCode: form.ilmsCode.trim() || null,
+  1257→      zoneName: form.zoneName,
+  1258→    };
+  1259→    const res = editing
+  1260→      ? await apiRequest(`/api/stores/${editing.id}`, "PUT", payload)
+  1261→      : await apiRequest("/api/stores", "POST", payload);
+  1262→    setSaving(false);
+  1263→    if (res.ok) {
+  1264→      onSaved();
+  1265→    } else {
+  1266→      toast({
+  1267→        title: editing ? "Failed to update item" : "Failed to add item",
+  1268→        description: res.error,
+  1269→        variant: "destructive",
+  1270→      });
+  1271→    }
+  1272→  };
+  1273→
+  1274→  const zoneOptions =
+  1275→    zones && zones.length > 0
+  1276→      ? zones.map((z) => z.name)
+  1277→      : ZONES;
+  1278→
+  1279→  return (
+  1280→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1281→      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1282→        <DialogHeader>
+  1283→          <DialogTitle className="text-foreground">
+  1284→            {editing ? "Edit Store Item" : "Add Store Item"}
+  1285→          </DialogTitle>
+  1286→          <DialogDescription>
+  1287→            {editing
+  1288→              ? "Update the details of this inventory item."
+  1289→              : "Fill in the details to add a new item to the store."}
+  1290→          </DialogDescription>
+  1291→        </DialogHeader>
+  1292→
+  1293→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+  1294→          <div className="sm:col-span-2 space-y-1.5">
+  1295→            <Label>
+  1296→              Description <span className="text-red-400">*</span>
+  1297→            </Label>
+  1298→            <Input
+  1299→              value={form.description}
+  1300→              onChange={(e) => set("description", e.target.value)}
+  1301→              placeholder="e.g. Stainless Steel Bolt M12"
+  1302→              className="bg-background border-border"
+  1303→            />
+  1304→          </div>
+  1305→
+  1306→          <div className="space-y-1.5">
+  1307→            <Label>Category</Label>
+  1308→            <Select
+  1309→              value={form.category}
+  1310→              onValueChange={(v) => set("category", v)}
+  1311→            >
+  1312→              <SelectTrigger className="bg-background border-border w-full">
+  1313→                <SelectValue />
+  1314→              </SelectTrigger>
+  1315→              <SelectContent>
+  1316→                {FILE_CATEGORIES.map((c) => (
+  1317→                  <SelectItem key={c} value={c}>
+  1318→                    {c}
+  1319→                  </SelectItem>
+  1320→                ))}
+  1321→              </SelectContent>
+  1322→            </Select>
+  1323→          </div>
+  1324→
+  1325→          <div className="space-y-1.5">
+  1326→            <Label>Unit (Deno)</Label>
+  1327→            <Input
+  1328→              value={form.unit}
+  1329→              onChange={(e) => set("unit", e.target.value)}
+  1330→              placeholder="NOS, KG, MTR, SET..."
+  1331→              className="bg-background border-border"
+  1332→            />
+  1333→          </div>
+  1334→
+  1335→          <div className="space-y-1.5">
+  1336→            <Label>Quantity</Label>
+  1337→            <Input
+  1338→              type="number"
+  1339→              inputMode="decimal"
+  1340→              value={form.qty}
+  1341→              onChange={(e) => set("qty", e.target.value)}
+  1342→              className="bg-background border-border"
+  1343→            />
+  1344→          </div>
+  1345→
+  1346→          <div className="space-y-1.5">
+  1347→            <Label>Unit Cost (Rs.)</Label>
+  1348→            <Input
+  1349→              type="number"
+  1350→              inputMode="decimal"
+  1351→              value={form.unitCost}
+  1352→              onChange={(e) => set("unitCost", e.target.value)}
+  1353→              className="bg-background border-border"
+  1354→            />
+  1355→          </div>
+  1356→
+  1357→          <div className="sm:col-span-2 space-y-1.5">
+  1358→            <Label>Total Cost (auto-calculated)</Label>
+  1359→            <div className="h-9 px-3 rounded-md border border-border bg-secondary/40 flex items-center text-sm font-semibold text-foreground tabular-nums">
+  1360→              {formatCurrency(fileCost)}
+  1361→            </div>
+  1362→          </div>
+  1363→
+  1364→          <div className="space-y-1.5">
+  1365→            <Label>Min Stock</Label>
+  1366→            <Input
+  1367→              type="number"
+  1368→              inputMode="decimal"
+  1369→              value={form.minStock}
+  1370→              onChange={(e) => set("minStock", e.target.value)}
+  1371→              className="bg-background border-border"
+  1372→            />
+  1373→          </div>
+  1374→
+  1375→          <div className="space-y-1.5">
+  1376→            <Label>Max Stock</Label>
+  1377→            <Input
+  1378→              type="number"
+  1379→              inputMode="decimal"
+  1380→              value={form.maxStock}
+  1381→              onChange={(e) => set("maxStock", e.target.value)}
+  1382→              className="bg-background border-border"
+  1383→            />
+  1384→          </div>
+  1385→
+  1386→          <div className="space-y-1.5">
+  1387→            <Label>Location</Label>
+  1388→            <Input
+  1389→              value={form.location}
+  1390→              onChange={(e) => set("location", e.target.value)}
+  1391→              placeholder="Aisle / Rack / Bin"
+  1392→              className="bg-background border-border"
+  1393→            />
+  1394→          </div>
+  1395→
+  1396→          <div className="space-y-1.5">
+  1397→            <Label>Zone</Label>
+  1398→            <Select
+  1399→              value={form.zoneName}
+  1400→              onValueChange={(v) => set("zoneName", v)}
+  1401→            >
+  1402→              <SelectTrigger className="bg-background border-border w-full">
+  1403→                <SelectValue />
+  1404→              </SelectTrigger>
+  1405→              <SelectContent>
+  1406→                {zoneOptions.map((z) => (
+  1407→                  <SelectItem key={z} value={z}>
+  1408→                    {z}
+  1409→                  </SelectItem>
+  1410→                ))}
+  1411→              </SelectContent>
+  1412→            </Select>
+  1413→          </div>
+  1414→
+  1415→          <div className="space-y-1.5">
+  1416→            <Label>Supplier</Label>
+  1417→            <Input
+  1418→              value={form.supplier}
+  1419→              onChange={(e) => set("supplier", e.target.value)}
+  1420→              placeholder="Supplier name"
+  1421→              className="bg-background border-border"
+  1422→            />
+  1423→          </div>
+  1424→
+  1425→          <div className="space-y-1.5">
+  1426→            <Label>Item Code</Label>
+  1427→            <Input
+  1428→              value={form.itemCode}
+  1429→              onChange={(e) => set("itemCode", e.target.value)}
+  1430→              placeholder="Internal code"
+  1431→              className="bg-background border-border"
+  1432→            />
+  1433→          </div>
+  1434→
+  1435→          <div className="sm:col-span-2 space-y-1.5">
+  1436→            <Label>ILMS Code</Label>
+  1437→            <Input
+  1438→              value={form.ilmsCode}
+  1439→              onChange={(e) => set("ilmsCode", e.target.value)}
+  1440→              placeholder="Logistics Management System code (optional)"
+  1441→              className="bg-background border-border"
+  1442→            />
+  1443→          </div>
+  1444→        </div>
+  1445→
+  1446→        <DialogFooter>
+  1447→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1448→            Cancel
+  1449→          </Button>
+  1450→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+  1451→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1452→            {editing ? "Save Changes" : "Add Item"}
+  1453→          </Button>
+  1454→        </DialogFooter>
+  1455→      </DialogContent>
+  1456→    </Dialog>
+  1457→  );
+  1458→}
+  1459→
+  1460→// ────────────────────────────────────────────────────────────
+  1461→// Bulk upload dialog with CSV template & progress
+  1462→// ────────────────────────────────────────────────────────────
+  1463→interface BulkUploadDialogProps {
+  1464→  open: boolean;
+  1465→  onOpenChange: (o: boolean) => void;
+  1466→  zones: StoreZone[] | null;
+  1467→  onDone: () => void;
+  1468→}
+  1469→
+  1470→const BULK_COLUMNS = [
+  1471→  "Description",
+  1472→  "Category",
+  1473→  "Unit",
+  1474→  "Qty",
+  1475→  "UnitCost",
+  1476→  "Location",
+  1477→  "MinStock",
+  1478→  "MaxStock",
+  1479→  "Supplier",
+  1480→  "ItemCode",
+  1481→] as const;
+  1482→
+  1483→function downloadCSVTemplate() {
+  1484→  const header = BULK_COLUMNS.join(",");
+  1485→  const sample = [
+  1486→    "Stainless Steel Bolt M12",
+  1487→    "Metal",
+  1488→    "NOS",
+  1489→    "250",
+  1490→    "45.50",
+  1491→    "A1-Rack-3",
+  1492→    "50",
+  1493→    "500",
+  1494→    "ABC Hardware",
+  1495→    "ITM-0001",
+  1496→  ].join(",");
+  1497→  const sample2 = [
+  1498→    "PVC Pipe 50mm",
+  1499→    "Plumbing",
+  1500→    "MTR",
+  1501→    "120",
+  1502→    "320",
+  1503→    "B2-Rack-1",
+  1504→    "30",
+  1505→    "300",
+  1506→    "PipeWorld Ltd",
+  1507→    "ITM-0002",
+  1508→  ].join(",");
+  1509→  const csv = `${header}\n${sample}\n${sample2}\n`;
+  1510→  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  1511→  const url = URL.createObjectURL(blob);
+  1512→  const a = document.createElement("a");
+  1513→  a.href = url;
+  1514→  a.download = "store-items-template.csv";
+  1515→  document.body.appendChild(a);
+  1516→  a.click();
+  1517→  document.body.removeChild(a);
+  1518→  URL.revokeObjectURL(url);
+  1519→}
+  1520→
+  1521→// Simple RFC-4180-aware CSV parser
+  1522→function parseCSV(text: string): string[][] {
+  1523→  const rows: string[][] = [];
+  1524→  let row: string[] = [];
+  1525→  let cell = "";
+  1526→  let inQuotes = false;
+  1527→  for (let i = 0; i < text.length; i++) {
+  1528→    const c = text[i];
+  1529→    if (inQuotes) {
+  1530→      if (c === '"') {
+  1531→        if (text[i + 1] === '"') {
+  1532→          cell += '"';
+  1533→          i++;
+  1534→        } else {
+  1535→          inQuotes = false;
+  1536→        }
+  1537→      } else {
+  1538→        cell += c;
+  1539→      }
+  1540→    } else {
+  1541→      if (c === '"') {
+  1542→        inQuotes = true;
+  1543→      } else if (c === ",") {
+  1544→        row.push(cell);
+  1545→        cell = "";
+  1546→      } else if (c === "\n") {
+  1547→        row.push(cell);
+  1548→        rows.push(row);
+  1549→        row = [];
+  1550→        cell = "";
+  1551→      } else if (c === "\r") {
+  1552→        // skip CR
+  1553→      } else {
+  1554→        cell += c;
+  1555→      }
+  1556→    }
+  1557→  }
+  1558→  if (cell !== "" || row.length > 0) {
+  1559→    row.push(cell);
+  1560→    rows.push(row);
+  1561→  }
+  1562→  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+  1563→}
+  1564→
+  1565→function BulkUploadDialog({
+  1566→  open,
+  1567→  onOpenChange,
+  1568→  zones,
+  1569→  onDone,
+  1570→}: BulkUploadDialogProps) {
+  1571→  const [importing, setImporting] = useState(false);
+  1572→  const [progress, setProgress] = useState<{
+  1573→    done: number;
+  1574→    total: number;
+  1575→    errors: string[];
+  1576→    successCount: number;
+  1577→  }>({ done: 0, total: 0, errors: [], successCount: 0 });
+  1578→  const fileRef = useRef<HTMLInputElement>(null);
+  1579→  const { toast } = useToast();
+  1580→
+  1581→  const reset = () => {
+  1582→    setImporting(false);
+  1583→    setProgress({ done: 0, total: 0, errors: [], successCount: 0 });
+  1584→    if (fileRef.current) fileRef.current.value = "";
+  1585→  };
+  1586→
+  1587→  const handleFile = async (file: File) => {
+  1588→    const text = await file.text();
+  1589→    const rows = parseCSV(text);
+  1590→    if (rows.length === 0) {
+  1591→      toast({ title: "CSV is empty", variant: "destructive" });
+  1592→      return;
+  1593→    }
+  1594→    // Detect header row
+  1595→    const first = rows[0].map((c) => c.trim().toLowerCase());
+  1596→    const hasHeader = first.includes("description");
+  1597→    const dataRows = hasHeader ? rows.slice(1) : rows;
+  1598→    if (dataRows.length === 0) {
+  1599→      toast({ title: "No data rows found in CSV", variant: "destructive" });
+  1600→      return;
+  1601→    }
+  1602→
+  1603→    const defaultZone =
+  1604→      zones && zones.length > 0 ? zones[0].name : "Zone A";
+  1605→
+  1606→    setImporting(true);
+  1607→    setProgress({
+  1608→      done: 0,
+  1609→      total: dataRows.length,
+  1610→      errors: [],
+  1611→      successCount: 0,
+  1612→    });
+  1613→
+  1614→    let successCount = 0;
+  1615→    const errors: string[] = [];
+  1616→
+  1617→    for (let i = 0; i < dataRows.length; i++) {
+  1618→      const r = dataRows[i];
+  1619→      const description = (r[0] ?? "").trim();
+  1620→      if (!description) {
+  1621→        errors.push(`Row ${i + (hasHeader ? 2 : 1)}: missing description`);
+  1622→        setProgress({
+  1623→          done: i + 1,
+  1624→          total: dataRows.length,
+  1625→          errors: [...errors],
+  1626→          successCount,
+  1627→        });
+  1628→        continue;
+  1629→      }
+  1630→      const payload = {
+  1631→        description,
+  1632→        category: (r[1] ?? "General").trim() || "General",
+  1633→        unit: (r[2] ?? "NOS").trim() || "NOS",
+  1634→        qty: Number(r[3]) || 0,
+  1635→        unitCost: Number(r[4]) || 0,
+  1636→        location: (r[5] ?? "").trim() || defaultZone,
+  1637→        minStock: Number(r[6]) || 0,
+  1638→        maxStock: Number(r[7]) || 0,
+  1639→        supplier: (r[8] ?? "").trim() || null,
+  1640→        itemCode: (r[9] ?? "").trim() || null,
+  1641→        zoneName: defaultZone,
+  1642→      };
+  1643→      const res = await apiRequest("/api/stores", "POST", payload);
+  1644→      if (res.ok) {
+  1645→        successCount++;
+  1646→      } else {
+  1647→        errors.push(
+  1648→          `Row ${i + (hasHeader ? 2 : 1)} (${description}): ${res.error || "failed"}`
+  1649→        );
+  1650→      }
+  1651→      setProgress({
+  1652→        done: i + 1,
+  1653→        total: dataRows.length,
+  1654→        errors: [...errors],
+  1655→        successCount,
+  1656→      });
+  1657→    }
+  1658→
+  1659→    setImporting(false);
+  1660→    if (successCount > 0) {
+  1661→      toast({
+  1662→        title: `Import complete — ${successCount} item${successCount === 1 ? "" : "s"} added`,
+  1663→        description:
+  1664→          errors.length > 0
+  1665→            ? `${errors.length} row(s) failed. See details below.`
+  1666→            : "All rows imported successfully.",
+  1667→      });
+  1668→      onDone();
+  1669→    } else {
+  1670→      toast({
+  1671→        title: "No items imported",
+  1672→        description: "All rows failed. Please review the CSV and try again.",
+  1673→        variant: "destructive",
+  1674→      });
+  1675→    }
+  1676→  };
+  1677→
+  1678→  const pct =
+  1679→    progress.total > 0
+  1680→      ? Math.round((progress.done / progress.total) * 100)
+  1681→      : 0;
+  1682→
+  1683→  return (
+  1684→    <Dialog
+  1685→      open={open}
+  1686→      onOpenChange={(o) => {
+  1687→        if (!importing) {
+  1688→          onOpenChange(o);
+  1689→          if (!o) setTimeout(reset, 200);
+  1690→        }
+  1691→      }}
+  1692→    >
+  1693→      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1694→        <DialogHeader>
+  1695→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1696→            <FileSpreadsheet className="h-5 w-5 text-primary" />
+  1697→            Bulk Upload Store Items
+  1698→          </DialogTitle>
+  1699→          <DialogDescription>
+  1700→            Import multiple items at once using a CSV file. Download the
+  1701→            template, fill in your data, and upload it back.
+  1702→          </DialogDescription>
+  1703→        </DialogHeader>
+  1704→
+  1705→        {/* Template section */}
+  1706→        <div className="space-y-3">
+  1707→          <div className="bg-secondary/40 border border-border rounded-lg p-3">
+  1708→            <p className="text-sm font-medium text-foreground mb-1">
+  1709→              CSV Format
+  1710→            </p>
+  1711→            <p className="text-xs text-muted-foreground mb-2">
+  1712→              Columns (in this exact order, header row optional):
+  1713→            </p>
+  1714→            <div className="flex flex-wrap gap-1">
+  1715→              {BULK_COLUMNS.map((col, i) => (
+  1716→                <span
+  1717→                  key={col}
+  1718→                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-mono"
+  1719→                >
+  1720→                  <span className="text-muted-foreground">{i + 1}.</span>
+  1721→                  {col}
+  1722→                </span>
+  1723→              ))}
+  1724→            </div>
+  1725→          </div>
+  1726→
+  1727→          <Button
+  1728→            variant="outline"
+  1729→            onClick={downloadCSVTemplate}
+  1730→            className="w-full gap-1.5"
+  1731→            disabled={importing}
+  1732→          >
+  1733→            <Download className="h-4 w-4" /> Download CSV Template
+  1734→          </Button>
+  1735→
+  1736→          {/* File input */}
+  1737→          <div className="space-y-1.5">
+  1738→            <Label>Upload your CSV file</Label>
+  1739→            <Input
+  1740→              ref={fileRef}
+  1741→              type="file"
+  1742→              accept=".csv,text/csv"
+  1743→              disabled={importing}
+  1744→              onChange={(e) => {
+  1745→                const f = e.target.files?.[0];
+  1746→                if (f) handleFile(f);
+  1747→              }}
+  1748→              className="bg-background border-border"
+  1749→            />
+  1750→          </div>
+  1751→        </div>
+  1752→
+  1753→        {/* Progress */}
+  1754→        {(importing || progress.done > 0) && (
+  1755→          <div className="space-y-2 bg-secondary/40 border border-border rounded-lg p-3">
+  1756→            <div className="flex items-center justify-between text-sm">
+  1757→              <span className="text-muted-foreground">
+  1758→                {importing ? "Importing..." : "Import complete"}
+  1759→              </span>
+  1760→              <span className="font-medium text-foreground tabular-nums">
+  1761→                {progress.done} / {progress.total} ({pct}%)
+  1762→              </span>
+  1763→            </div>
+  1764→            <Progress value={pct} />
+  1765→            <div className="flex items-center gap-4 text-xs">
+  1766→              <span className="text-emerald-400">
+  1767→                ✓ {progress.successCount} added
+  1768→              </span>
+  1769→              {progress.errors.length > 0 && (
+  1770→                <span className="text-red-400">
+  1771→                  ✗ {progress.errors.length} failed
+  1772→                </span>
+  1773→              )}
+  1774→            </div>
+  1775→            {progress.errors.length > 0 && (
+  1776→              <div className="max-h-32 overflow-y-auto scrollbar-thin bg-background/50 border border-border rounded-md p-2 mt-2">
+  1777→                <ul className="space-y-0.5">
+  1778→                  {progress.errors.map((err, i) => (
+  1779→                    <li
+  1780→                      key={i}
+  1781→                      className="text-[11px] text-red-400 font-mono leading-relaxed"
+  1782→                    >
+  1783→                      {err}
+  1784→                    </li>
+  1785→                  ))}
+  1786→                </ul>
+  1787→              </div>
+  1788→            )}
+  1789→          </div>
+  1790→        )}
+  1791→
+  1792→        <DialogFooter>
+  1793→          <Button
+  1794→            variant="outline"
+  1795→            onClick={() => {
+  1796→              onOpenChange(false);
+  1797→              setTimeout(reset, 200);
+  1798→            }}
+  1799→            disabled={importing}
+  1800→          >
+  1801→            Close
+  1802→          </Button>
+  1803→        </DialogFooter>
+  1804→      </DialogContent>
+  1805→    </Dialog>
+  1806→  );
+  1807→}
+  1808→
+  1809→// ────────────────────────────────────────────────────────────
+  1810→// View item dialog
+  1811→// ────────────────────────────────────────────────────────────
+  1812→interface ViewItemDialogProps {
+  1813→  item: StoreItem | null;
+  1814→  onOpenChange: (o: boolean) => void;
+  1815→  onEdit: (item: StoreItem) => void;
+  1816→}
+  1817→
+  1818→function ViewItemDialog({ item, onOpenChange, onEdit }: ViewItemDialogProps) {
+  1819→  const open = !!item;
+  1820→  return (
+  1821→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1822→      <DialogContent className="max-w-lg bg-card border-border">
+  1823→        <DialogHeader>
+  1824→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1825→            <ClipboardList className="h-5 w-5 text-primary" />
+  1826→            Item Details
+  1827→          </DialogTitle>
+  1828→          <DialogDescription>
+  1829→            Full inventory record for this store item.
+  1830→          </DialogDescription>
+  1831→        </DialogHeader>
+  1832→
+  1833→        {item && (
+  1834→          <div className="space-y-3 py-1">
+  1835→            <div>
+  1836→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1837→                Description
+  1838→              </p>
+  1839→              <p className="text-base font-semibold text-foreground">
+  1840→                {item.description}
+  1841→              </p>
+  1842→              {item.itemCode && (
+  1843→                <p className="text-xs text-muted-foreground font-mono mt-0.5">
+  1844→                  Item Code: {item.itemCode}
+  1845→                  {item.ilmsCode && ` · ILMS: ${item.ilmsCode}`}
+  1846→                </p>
+  1847→              )}
+  1848→            </div>
+  1849→
+  1850→            <div className="grid grid-cols-2 gap-3">
+  1851→              <DetailField label="Category" value={item.category} />
+  1852→              <DetailField label="Unit" value={item.unit} />
+  1853→              <DetailField
+  1854→                label="Quantity"
+  1855→                value={formatNumber(item.qty)}
+  1856→                tone={
+  1857→                  item.qty <= 0
+  1858→                    ? "red"
+  1859→                    : item.minStock > 0 && item.qty <= item.minStock
+  1860→                      ? "amber"
+  1861→                      : "default"
+  1862→                }
+  1863→              />
+  1864→              <DetailField
+  1865→                label="Unit Cost"
+  1866→                value={formatCurrency(item.unitCost)}
+  1867→              />
+  1868→              <DetailField
+  1869→                label="Total Cost"
+  1870→                value={formatCurrency(item.totalCost)}
+  1871→                tone="primary"
+  1872→              />
+  1873→              <DetailField label="Min Stock" value={formatNumber(item.minStock)} />
+  1874→              <DetailField label="Max Stock" value={formatNumber(item.maxStock)} />
+  1875→              <DetailField label="Zone" value={item.zoneName} />
+  1876→              <DetailField
+  1877→                label="Location"
+  1878→                value={item.location || "—"}
+  1879→              />
+  1880→              <DetailField
+  1881→                label="Supplier"
+  1882→                value={item.supplier || "—"}
+  1883→              />
+  1884→              <DetailField
+  1885→                label="Last Movement"
+  1886→                value={item.lastMovement || "—"}
+  1887→              />
+  1888→              <DetailField
+  1889→                label="Created"
+  1890→                value={new Date(item.createdAt).toLocaleDateString("en-GB")}
+  1891→              />
+  1892→            </div>
+  1893→
+  1894→            {/* Stock status banner */}
+  1895→            {item.minStock > 0 && item.qty <= item.minStock && (
+  1896→              <div
+  1897→                className={cn(
+  1898→                  "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+  1899→                  item.qty <= 0
+  1900→                    ? "bg-red-500/10 border-red-500/30 text-red-400"
+  1901→                    : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+  1902→                )}
+  1903→              >
+  1904→                <AlertTriangle className="h-4 w-4 shrink-0" />
+  1905→                <span>
+  1906→                  {item.qty <= 0
+  1907→                    ? "This item is OUT OF STOCK."
+  1908→                    : `Low stock — below minimum of ${formatNumber(item.minStock)} ${item.unit}.`}
+  1909→                </span>
+  1910→              </div>
+  1911→            )}
+  1912→          </div>
+  1913→        )}
+  1914→
+  1915→        <DialogFooter>
+  1916→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1917→            Close
+  1918→          </Button>
+  1919→          {item && (
+  1920→            <Button
+  1921→              onClick={() => onEdit(item)}
+  1922→              className="gap-1.5"
+  1923→            >
+  1924→              <Pencil className="h-4 w-4" /> Edit
+  1925→            </Button>
+  1926→          )}
+  1927→        </DialogFooter>
+  1928→      </DialogContent>
+  1929→    </Dialog>
+  1930→  );
+  1931→}
+  1932→
+  1933→function DetailField({
+  1934→  label,
+  1935→  value,
+  1936→  tone = "default",
+  1937→}: {
+  1938→  label: string;
+  1939→  value: string;
+  1940→  tone?: "default" | "primary" | "red" | "amber";
+  1941→}) {
+  1942→  const toneClass = {
+  1943→    default: "text-foreground",
+  1944→    primary: "text-primary font-semibold",
+  1945→    red: "text-red-400 font-semibold",
+  1946→    amber: "text-amber-400 font-semibold",
+  1947→  };
+  1948→  return (
+  1949→    <div>
+  1950→      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1951→        {label}
+  1952→      </p>
+  1953→      <p className={cn("text-sm mt-0.5", toneClass[tone])}>{value}</p>
+  1954→    </div>
+  1955→  );
+  1956→}
+  1957→
+  1958→// ────────────────────────────────────────────────────────────
+  1959→// Earmark Item dialog — reserve materials for a project without a PR
+  1960→// ────────────────────────────────────────────────────────────
+  1961→interface EarmarkItemDialogProps {
+  1962→  open: boolean;
+  1963→  onOpenChange: (o: boolean) => void;
+  1964→  storeItems: StoreItem[] | null;
+  1965→}
+  1966→
+  1967→const MANUAL_ENTRY = "__manual__";
+  1968→
+  1969→function EarmarkItemDialog({
+  1970→  open,
+  1971→  onOpenChange,
+  1972→  storeItems,
+  1973→}: EarmarkItemDialogProps) {
+  1974→  const { data: projects, loading: pLoading } = useFetch<ProjectOption[]>(
+  1975→    open ? "/api/projects" : null
+  1976→  );
+  1977→  const [storeItemId, setStoreItemId] = useState<string>("");
+  1978→  const [itemDescription, setItemDescription] = useState("");
+  1979→  const [itemCode, setItemCode] = useState("");
+  1980→  const [projectId, setProjectId] = useState("");
+  1981→  const [projectName, setProjectName] = useState("");
+  1982→  const [qty, setQty] = useState("");
+  1983→  const [unit, setUnit] = useState("NOS");
+  1984→  const [authority, setAuthority] = useState("");
+  1985→  const [remarks, setRemarks] = useState("");
+  1986→  const [saving, setSaving] = useState(false);
+  1987→  const { toast } = useToast();
+  1988→
+  1989→  const reset = () => {
+  1990→    setStoreItemId("");
+  1991→    setItemDescription("");
+  1992→    setItemCode("");
+  1993→    setProjectId("");
+  1994→    setProjectName("");
+  1995→    setQty("");
+  1996→    setUnit("NOS");
+  1997→    setAuthority("");
+  1998→    setRemarks("");
+  1999→  };
+  2000→
+
+[showing lines 1-2000 of 3887; use offset=2001 with limit to continue reading]

@@ -1,0 +1,265 @@
+     1→# CE Logistic Panel — Work Log
+     2→
+     3→This file tracks work across all agents building the CE Logistic Panel ERP system.
+     4→
+     5→## Project Overview
+     6→A dockyard ERP admin panel built with Next.js 16 + TypeScript + Tailwind CSS 4 + shadcn/ui + Prisma (SQLite).
+     7→Single-page app with state-based module switching (only `/` route is allowed).
+     8→
+     9→## Tech & Conventions
+    10→- Dark theme (bg `#0f1420`, card `#1a1f2e`, border `#2d3548`, primary `#3b82f6`)
+    11→- shadcn/ui components in `src/components/ui/`
+    12→- ERP common components in `src/components/erp/` (StatCard, badges, PageHeader, states)
+    13→- Custom hook `useFetch` + `apiRequest` in `src/lib/use-fetch.ts`
+    14→- Constants & helpers in `src/lib/constants.ts` (PRESENT_POSITIONS, FILE_CATEGORIES, formatCurrency, positionColor, etc.)
+    15→- All components use `"use client"` where interactive
+    16→- Toast via `useToast` from `@/hooks/use-toast`
+    17→
+    18→## Available Shared Components
+    19→- `@/components/erp/stat-card` → `StatCard` (label, value, icon, accent, sub)
+    20→- `@/components/erp/badges` → `PositionBadge`, `CategoryBadge`, `CustomBadge`
+    21→- `@/components/erp/page-header` → `PageHeader` (title, description, icon, actions)
+    22→- `@/components/erp/states` → `EmptyState`, `LoadingState`, `ErrorState`
+    23→- `@/components/erp/app-shell` → `AppShell` (sidebar + topbar wrapper)
+    24→- `@/lib/use-fetch` → `useFetch<T>(url)` returns `{data, loading, error, refresh}`; `apiRequest(url, method, body)` returns `{ok, data, error}`
+    25→
+    26→## API Endpoints (all under /api)
+    27→- `/api/stats` GET — dashboard stats
+    28→- `/api/seed` POST — seed sample data
+    29→- Projects: `/api/projects` (GET,POST), `/api/projects/[id]` (GET,PUT,DELETE), `/api/projects/[id]/files` (GET,POST), `/api/projects/[id]/files/[fileId]` (PUT,DELETE), `/api/projects/[id]/allocations` (GET,POST)
+    30→- Procurement: `/api/procurement` (GET,POST; query params: supplier,position,category,project), `/api/procurement/[id]` (PUT,DELETE), `/api/procurement/[id]/logs` (GET,POST)
+    31→- Stores: `/api/stores` (GET,POST; query: zone,category,stock,search), `/api/stores/[id]` (PUT,DELETE), `/api/stores/zones` (GET)
+    32→- Rate Finder: `/api/rate-finder/rc` (GET,POST; query: category,year,search; POST supports array bulk), `/api/rate-finder/rc/[id]` (DELETE), `/api/rate-finder/discontinued` (GET,POST), `/api/rate-finder/discontinued/[id]` (DELETE)
+    33→- Collection: `/api/collection/items` (GET,POST), `/api/collection/part-supply` (GET,POST), `/api/collection/part-supply/[id]` (GET,PUT,DELETE), `/api/collection/part-supply/[id]/entries` (POST), `/api/collection/daily` (GET,POST; query: date,from,to)
+    34→
+    35→## Completed Work
+    36→- Foundation: Prisma schema, dark theme globals.css, layout.tsx, constants, use-fetch hook
+    37→- All API routes created and working
+    38→- Database seeded with sample data
+    39→- App Shell (sidebar + topbar) created
+    40→- Dashboard module created
+    41→- Projects module created (dashboard, present position window, file register, file log timeline, allocations)
+    42→- Procurement module — PENDING
+    43→- Stores module — PENDING
+    44→- Rate Finder module — PENDING
+    45→- Collection module — PENDING
+    46→
+    47→---
+    48→Task ID: 5
+    49→Agent: Procurement Module Builder
+    50→Task: Build the Procurement Files module
+    51→
+    52→Work Log:
+    53→- Read worklog.md to understand shared components, API endpoints, and design conventions
+    54→- Inspected existing Projects module (page-header, file-log, present-position, add-project) for design patterns (timeline, file form, sortable table)
+    55→- Inspected API routes for /api/procurement (GET/POST), /api/procurement/[id] (PUT/DELETE) and /api/projects (GET) to confirm field shapes
+    56→- Confirmed shared ERP components: StatCard, PositionBadge/CategoryBadge, PageHeader, LoadingState/ErrorState/EmptyState, useFetch/apiRequest, constants (PRESENT_POSITIONS, FILE_CATEGORIES, formatCurrency)
+    57→- Created /home/z/my-project/src/components/erp/modules/procurement.tsx (named export ProcurementModule) implementing:
+    58→  * PageHeader with FileText icon + "Add File" action button
+    59→  * 4 StatCards: Total Files, Pending Collection (Order Placed/Items Dispatched/In Transit/Part Supply), Items Received, Total File Cost
+    60→  * Specialized filters bar: search input, Supplier/Project/Position/Category dropdowns, date range with quick presets (Today/This Week/This Month), Clear Filters button
+    61→  * Files Table with 12 columns (PR Number, Project, Item Code, Item Name, Unit, Qty, Unit Price, File Cost, Supplier, Position badge, Category badge, Actions) wrapped in horizontally scrollable container
+    62→  * Sortable headers (File Cost + PR Number) with chevron indicators
+    63→  * Pagination: 15 rows per page with prev/next buttons + "Page X of Y"
+    64→  * Row click opens File Log dialog
+    65→  * Per-row actions: Update Position (small dialog with Select + comment + changedBy → PUT /api/procurement/[id]), View Log (file log dialog), Export CSV (single-row CSV download)
+    66→  * Add File dialog: Project Select (auto-fills vote number read-only), PR Number, Item Code, Item Name, Unit, Qty, Unit Price, File Cost (auto if empty), Supplier, Present Position, File Category → POST /api/procurement
+    67→  * File Log dialog: details grid (15 fields) + vertical timeline of logs (colored dots, position badges, changedBy, comment, timestamp)
+    68→  * EmptyState + filtered-empty state with "Clear Filters" action
+    69→- Used conditional rendering for Update Position dialog (mounted on demand) so form state initializes cleanly from file prop without setState-in-effect lint violations
+    70→- Responsive grid (2 cols mobile → 4 cols desktop for stats; 1→2→3→5 cols for filters); scrollbar-thin class on horizontal table container
+    71→- Ran `bun run lint` — 0 errors in procurement.tsx (4 remaining pre-existing errors in app-shell.tsx and use-fetch.ts, not related to this task)
+    72→
+    73→Stage Summary:
+    74→- ProcurementModule complete and lint-clean
+    75→- Reuses all shared ERP components (StatCard, badges, PageHeader, states) and constants
+    76→- Full CRUD coverage: list (with client-side filter/sort/paginate), create (Add File dialog), update (Update Position dialog), export (CSV per row)
+    77→- File Log timeline matches the pattern established by Projects module's FileLogDialog for visual consistency
+    78→- Ready to be consumed by `<ProcurementModule />` in src/app/page.tsx (already wired)
+    79→
+    80→---
+    81→Task ID: 7
+    82→Agent: Rate Finder Module Builder
+    83→Task: Build the Rate Finder module
+    84→
+    85→Work Log:
+    86→- Read worklog.md, constants, use-fetch, stat-card, badges, page-header, states, dialog/select/tabs/table components and Prisma schema for RateContract & DiscontinuedItem models.
+    87→- Inspected existing projects.tsx and add-project.tsx for component/dialog conventions.
+    88→- Created src/components/erp/modules/rate-finder.tsx with named export RateFinderModule ("use client").
+    89→- Built two shadcn Tabs: RC | Discontinued, plus two StatCards (Total RC Items, Total Discontinued) at top.
+    90→- Implemented a custom CSV parser (quoted fields, "" escape, CRLF, trailing newline) without any extra packages.
+    91→- RC tab: debounced search (item name/code), Category (RATE_CATEGORIES) / Year / Supplier filters (all derived from data), Clear-filters button, sticky-header horizontal-scroll table, CategoryBadge column, per-row Compare button when an itemCode spans multiple years (grouped via useMemo).
+    92→- CompareDialog: summary tiles (years / price range / change %), recharts BarChart with CartesianGrid + Tooltip, plus a year-by-year detail table.
+    93→- AddRCDialog: single-entry form posting to /api/rate-finder/rc.
+    94→- UploadRCDialog: hidden file input → CSV parse → preview table → downloadable CSV template button → bulk POST array.
+    95→- Discontinued tab: Year selector derived from lastRCYear (with "All Years" option), Add & Upload buttons, table with formatted lastRCPrice, lastRCYear, discontinuedDate, reason, alternatives as clickable emerald CustomBadge chips (split on , or ;), per-row delete.
+    96→- AddDiscontinuedDialog and UploadDiscontinuedDialog follow the same pattern as their RC counterparts.
+    97→- All async actions wired to useToast (success + destructive error variants); Loader2 spinners for delete/save/upload states.
+    98→- Sticky-footer, responsive layout, dark theme tokens (bg-card / border-border / text-foreground) consistent with the rest of the ERP.
+    99→- Verified: `npx eslint src/components/erp/modules/rate-finder.tsx` passes with 0 errors. The remaining 4 lint errors are pre-existing in app-shell.tsx and use-fetch.ts (other agents' files).
+   100→
+   101→Stage Summary:
+   102→- RateFinderModule complete and production-ready in src/components/erp/modules/rate-finder.tsx.
+   103→- Full CRUD wired for both RC and Discontinued: GET list, POST single, POST bulk array, DELETE by id.
+   104→- CSV bulk upload (with downloadable template + preview) and year-over-year price comparison chart (recharts BarChart) both implemented.
+   105→- No TODOs, no placeholders, no extra dependencies installed.
+   106→
+   107→---
+   108→Task ID: 8
+   109→Agent: Collection Module Builder
+   110→Task: Build the Collection module
+   111→
+   112→Work Log:
+   113→- Read project context (worklog.md, use-fetch.ts, constants.ts, shared erp components) and existing collection API routes (items, part-supply, part-supply/[id]/entries, daily) plus prisma schema to confirm data shapes.
+   114→- Inspected dashboard.tsx and projects.tsx for design conventions (dark theme tokens, StatCard / PageHeader usage, recharts styling).
+   115→- Built `/home/z/my-project/src/components/erp/modules/collection.tsx` — single named export `CollectionModule` with shadcn `Tabs` (Dashboard | Part Supply | Daily Collection).
+   116→  - DashboardTab: 3 StatCards (Items to be Received — blue PackageX, qty expected sub; Part Supply Items — amber Layers, active orders count; Collected Items — green PackageCheck, today's count sub). recharts LineChart (qty over last 7 days derived from daily data) + PieChart (collection items by status, colored using COLLECTION_STATUSES order). Recent activity feed (last 5 daily collections showing itemName/qty/receivedFrom/date).
+   117→  - PartSupplyTab: Add Part Supply Order dialog (POST /api/collection/part-supply). Expandable cards via local `expandedId` state. Header shows Item/Ordered/Received/Balance + % Complete progress bar (green >90%, amber >=50%, red <50%) + status badge. Expanded body has summary bar, delivery entries Table (Sr/Date/Vehicle/Qty/QC By/Sailors/Driver name+license+phone/Cum. Bal.), Add Entry dialog (POST /api/collection/part-supply/[id]/entries — API auto-calculates srNo & cumulativeBalance & updates order receivedQty/balance/status), Print Receipt dialog with embedded `@media print` style block (showCloseButton=false, no-print on header/footer). Completed orders greyed (opacity-70) but still expandable.
+   118→  - DailyCollectionTab: Filter buttons (All/Today/Yesterday/Custom/Range) that build `?date=` / `?from=&to=` query. View-mode toggle (By Date | By Period | By Supplier) with ISO-week grouping for period. Record Collection dialog (single) + Bulk Record dialog (multi-select pending items from /api/collection/items where status !== Collected, with shared date+qty+recordedBy → POST array to /api/collection/daily). CSV export of current filtered data via Blob download. Summary badges + grouped list with max-h-96 scroll and custom webkit-scrollbar styling.
+   119→- Used shared helpers (`useFetch`, `apiRequest`, `useToast`, `formatNumber`, `COLLECTION_STATUSES`, `PART_SUPPLY_STATUSES`), shadcn primitives (Tabs, Dialog, Button, Input, Label, Checkbox, Table, etc.), lucide-react icons, recharts (LineChart/PieChart/Cell/Tooltip/etc.), and `cn`. Dark theme tokens (#0f1420 / #1a1f2e / #2d3548 / #3b82f6) honored throughout.
+   120→- Ran `bun run lint` — zero issues attributable to this file. (4 pre-existing errors live in app-shell.tsx and use-fetch.ts, untouched.)
+   121→- Verified dev server log — no compile/runtime errors referencing the collection module.
+   122→
+   123→Stage Summary:
+   124→- File created: `/home/z/my-project/src/components/erp/modules/collection.tsx` (~1100 lines, single named export `CollectionModule`).
+   125→- Three sub-tabs implemented end-to-end: stat cards, line + pie charts, recent feed; expandable part-supply cards with entries table, add-entry dialog, and printable receipt; daily collection with date/period/supplier grouping, filters, bulk record, and CSV export.
+   126→- All mutations call `refresh()` and surface toasts via `useToast`.
+   127→- Component is already wired into `src/app/page.tsx` (`active === "collection" && <CollectionModule />`).
+   128→
+   129→---
+   130→Task ID: 6
+   131→Agent: Stores Module Builder
+   132→Task: Build the Store Management module
+   133→
+   134→Work Log:
+   135→- Read worklog.md, constants.ts, use-fetch.ts, shared ERP components (StatCard, badges, PageHeader, states) and the existing stores API routes (/api/stores, /api/stores/[id], /api/stores/zones) to align with project conventions.
+   136→- Studied existing modules (dashboard.tsx, projects.tsx, add-project.tsx) and shadcn/ui primitives (Tabs, Dialog, Select, Table, Progress) for styling and prop conventions.
+   137→- Created /src/components/erp/modules/stores.tsx with a named `StoresModule` export and `"use client"` directive.
+   138→- Built Zones tab (dashboard view): fetches /api/stores/zones, renders a responsive grid of zone tiles whose minHeight scales with totalValue (120 + min(value/100000, 80)), colour-coded by lowStockCount (green=healthy, amber=attention, red=critical), each tile showing stock value, item count and 4 stat chips (running out / received / to collect / non-moving). Clicking a tile switches to Stores tab and applies that zone as a filter.
+   139→- Built Stores tab (detailed inventory): top stat cards (NET/TASK/AVAIL/TEAM using StatCard), category tabs (STORE_CATEGORIES), search-by-description input, zone filter dropdown (from /api/stores/zones), stock-level filter (All/In/Low/Out/Overstock), sort dropdown (Description/Qty/Cost/Category) plus asc/desc toggle, sticky-header table inside a max-h-[60vh] overflow-auto container with columns Description, Category, Unit, Qty (with ⚠ Low / Out warnings), Cost (with @unit price), Location, Actions (View 👁 / Edit ✏), and pagination at 25 per page.
+   140→- Built Add/Edit Item dialog (ItemFormDialog) with all required fields (Description*, Category from FILE_CATEGORIES, Unit, Qty, Unit Cost, Location, Min/Max Stock, Supplier, Item Code, ILMS Code, Zone from zones). Auto-calculates total cost = qty × unitCost. POSTs to /api/stores or PUTs to /api/stores/[id]. Uses a `key` prop + useState initialiser pattern (no setState-in-effect) so the form resets cleanly when the editing target changes.
+   141→- Built Bulk Upload dialog (BulkUploadDialog) with CSV template download (in-browser Blob with the 10 required columns + 2 sample rows), a file input, an RFC-4180-aware CSV parser, sequential POST to /api/stores per row, live Progress bar, success/failure counters and an error list. Calls refresh on completion.
+   142→- Built View Item dialog (ViewItemDialog) showing the full record with a low/out-of-stock warning banner and an Edit shortcut.
+   143→- Used `useFetch` for GETs and `apiRequest` for mutations; calls refresh() on items + zones after every mutation.
+   144→- Wrapped all filter setters so any filter change also resets pagination to page 1 (no useEffect / no ref-during-render — passes `react-hooks/refs` and `react-hooks/set-state-in-effect` rules).
+   145→- Verified with `bun run lint`: stores.tsx produces zero lint errors (the 4 remaining errors are pre-existing in app-shell.tsx and use-fetch.ts).
+   146→- Verified via curl that /api/stores and /api/stores/zones return data shaped exactly as the component expects; dev.log shows both endpoints responding 200 OK.
+   147→
+   148→Stage Summary:
+   149→- StoresModule component delivered at /home/z/my-project/src/components/erp/modules/stores.tsx (~1.8k lines, single file, no TODOs).
+   150→- Two sub-tabs: Zones (dashboard with scaled, colour-coded tiles) and Stores (filterable, sortable, paginated inventory table).
+   151→- Full CRUD: Add, Edit, View, plus Bulk CSV upload with template + progress.
+   152→- Fully typed (TypeScript), dark-theme styled, responsive (mobile-first), uses only shared ERP components and shadcn/ui primitives.
+   153→- Lint-clean for the new file; integrates cleanly with the existing AppShell (StoresModule is already wired into src/app/page.tsx).
+   154→
+   155→---
+   156→Task ID: 1-enhance
+   157→Agent: Main (Foundation + AI)
+   158→Task: Schema/API/AI foundation for enhancements
+   159→
+   160→Work Log:
+   161→- Added new Prisma models: Estimate, EstimateItem, EarmarkedItem, QCInspection
+   162→- Added Project fields: benefactor, reference (EDC reuses endDate field)
+   163→- Created AI lib (src/lib/ai.ts): processEstimateWithAI() + findItemCodesWithAI() using z-ai-web-dev-sdk with deterministic fallbacks
+   164→- Created API routes: /api/estimates (GET,POST), /api/estimates/[id] (GET,DELETE), /api/estimates/[id]/process (POST - AI), /api/estimates/[id]/items/[itemId] (POST - Initiate File), /api/earmarked (GET,POST), /api/earmarked/[id] (DELETE), /api/qc (GET,POST), /api/qc/[id] (PUT,DELETE), /api/stores/find-code (POST - AI)
+   165→- Updated /api/projects POST/PUT to accept benefactor + reference
+   166→- Updated /api/stats to return topProjects (most active/valued), estimates count, earmarks, qc counts
+   167→- Updated /api/seed with sample estimate, earmarked items, QC inspections, project benefactor/reference
+   168→- Added constants: REFERENCE_TYPES, QC_LEVELS, qcLevelColor, estimateStatusColor, confidenceColor
+   169→- Re-seeded database successfully
+   170→
+   171→Stage Summary:
+   172→- All backend foundation ready. AI endpoints use z-ai-web-dev-sdk server-side.
+   173→- Frontend modules need updating: Dashboard (top projects + toggle), Projects (full-window + wizard + estimates), Stores (earmarked + find-code), Collection (filters + QC section)
+   174→- Shared helpers available: useFetch, apiRequest, StatCard, badges, PageHeader, states, constants
+   175→
+   176→---
+   177→Task ID: 4
+   178→Agent: Stores Enhancement
+   179→Task: Add Earmarked Items + AI Item Code Finder to Stores module
+   180→
+   181→Work Log:
+   182→- Read worklog.md and the existing /src/components/erp/modules/stores.tsx (~1.8k lines) in full to understand existing structure (Zones/Stores tabs, ItemFormDialog, BulkUploadDialog, ViewItemDialog) and preserve it.
+   183→- Confirmed Task 1-enhance deliverables: /api/earmarked (GET/POST/DELETE), /api/stores/find-code (POST AI), confidenceColor helper in @/lib/constants, plus /api/projects (GET) shape.
+   184→- Verified backend route signatures by reading route.ts files: earmarked POST accepts {storeItemId?, itemDescription, itemCode?, projectId, projectName, qty, unit, authority, remarks}; find-code returns [{description, suggestedItemCode, isDuplicate, duplicateOf, existingCodes, confidence, recommendation}]; stores PUT /[id] preserves unspecified fields via `?? existing.X` so applying just {itemCode} is safe.
+   185→- Added new imports to stores.tsx: Textarea, Tooltip/TooltipTrigger/TooltipContent, lucide icons (Bookmark, BookmarkPlus, List, ScanSearch, Trash2, Wand2, Check, RefreshCw), and confidenceColor from constants.
+   186→- Added new types: EarmarkedItem, ProjectOption, FindCodeCandidate, Confidence, FindCodeResult.
+   187→- Added 3 new dialog state hooks in StoresModule: earmarkOpen, earmarkListOpen, findCodeOpen.
+   188→- Extended PageHeader actions with 3 new buttons (wrapped in a flex-wrap div for responsive layout): "Find Item Codes (AI)" (ScanSearch), "View Earmarked" (List), "Earmark Item" (BookmarkPlus) — placed before the existing Bulk Upload + Add Item buttons. All existing functionality untouched.
+   189→- Rendered 3 new dialogs at the bottom of StoresModule, wired to refresh items+zones where needed.
+   190→- Implemented EarmarkItemDialog: Select of existing store items (or "Manual entry") that auto-fills description+itemCode+unit; required Item Description, Project Select (fetches /api/projects only when dialog opens), Qty, Authority; optional Item Code, Unit, Remarks textarea; POSTs to /api/earmarked with the exact body shape; resets form on close (skips reset while saving). Toast "Item earmarked" on success.
+   191→- Implemented EarmarkedItemsDialog: fetches /api/earmarked only when open; renders a sticky-header Table (Item Description, Item Code, Project, Qty+Unit, Authority, Remarks, Actions) inside a max-h-[60vh] scroll container; per-row Delete button (Trash2) → DELETE /api/earmarked/[id] with Loader2 spinner on the deleting row; Refresh button; EmptyState + LoadingState + ErrorState handling.
+   192→- Implemented FindItemCodeDialog (AI Item Code Finder): editable candidate table (Description*, Category, Unit, Cost, remove-row) with "Load from current store items" (Boxes icon, maps store items keeping their storeItemId) and "Add Row" buttons; "Run AI Matching" button POSTs to /api/stores/find-code with Loader2 spinner; results table with columns Description (with "Manual entry" tag for rows lacking storeItemId), Suggested Code (highlighted primary badge), Is Duplicate (Yes=red/No=green CustomBadge), Duplicate Of, Existing Codes (comma list), Confidence (confidenceColor badge), Recommendation, Action. Duplicate rows get border-l-4 border-l-red-500/60 + bg-red-500/[0.04]. Apply button: if suggestedItemCode exists and storeItemId present → PUT /api/stores/[id] with {itemCode} and shows "Applied" with Check icon (disables further clicks); if no suggestedItemCode → "No code"; if manual entry (no storeItemId) → disabled Apply button wrapped in a Tooltip "Manual entry — create item first". Toast per Apply + onApplied callback refreshes parent store list.
+   193→- Ran `npx eslint src/components/erp/modules/stores.tsx` → 0 errors. `bun run lint` shows only pre-existing 1 error + 5 warnings in collection.tsx (other agent's file, untouched).
+   194→- Verified dev.log: file compiled successfully (multiple "✓ Compiled" entries after edits, no errors).
+   195→- Verified API shapes via curl: GET /api/earmarked returns [{id, storeItemId, itemDescription, itemCode, projectId, projectName, qty, unit, authority, remarks, createdAt}, ...] — matches EarmarkedItem type. POST /api/stores/find-code returns [{description, suggestedItemCode, isDuplicate, duplicateOf, existingCodes, confidence, recommendation}] — matches FindCodeResult type.
+   196→
+   197→Stage Summary:
+   198→- StoresModule enhanced in-place at /src/components/erp/modules/stores.tsx (now ~2.8k lines). Component still named `StoresModule` with `"use client"` directive.
+   199→- Feature A "Earmarked Item" delivered: toolbar button + dialog form (manual entry or pick from store items) + View Earmarked dialog with table + delete. POST/GET/DELETE wired to /api/earmarked.
+   200→- Feature B "Item Code Finder (AI)" delivered: toolbar button + dialog with editable candidate table, "Load from current store items" + "Add Row", "Run AI Matching" → POST /api/stores/find-code, results table with suggested code, duplicate flag (red left border + badge), duplicateOf, existingCodes, confidence badge (confidenceColor), recommendation, and per-row Apply (PUT /api/stores/[id]) with manual-entry tooltip disable.
+   201→- All existing functionality (Zones tab, Stores tab with filters/sort/pagination, Add/Edit/Bulk Upload/View) preserved untouched.
+   202→- Lint-clean for stores.tsx; responsive (mobile-first, flex-wrap toolbar, max-h scroll containers with scrollbar-thin); dark theme tokens honored; uses only shared ERP components + shadcn/ui primitives + lucide-react icons.
+   203→
+   204→---
+   205→Task ID: 5
+   206→Agent: Collection Enhancement
+   207→Task: Add filters + QC Inspection section to Collection module
+   208→
+   209→Work Log:
+   210→- Read worklog.md (foundation Task 1-enhance context), the existing collection.tsx (~2k lines, 3 tabs: Dashboard / Part Supply / Daily Collection), constants.ts (QC_LEVELS, qcLevelColor, FILE_CATEGORIES, formatCurrency), use-fetch.ts, QC API routes (/api/qc GET/POST, /api/qc/[id] PUT/DELETE), QCInspection prisma schema, and confirmed shapes of /api/projects, /api/stores, /api/collection/* via curl.
+   211→- Enhancement A — Dashboard filter bar + view toggle:
+   212→  * Added 4-column filter bar at the top of DashboardTab: By Project (Select from /api/projects), By Vote (Select from unique voteNumbers), By Type (Select from FILE_CATEGORIES minus GEN), and a By Numbers / By Value toggle.
+   213→  * Added module-level pure helpers (so the React Compiler preserves manual memoization): `looselyMatches`, `applyProjVoteFilter`, `applyTypeFilter`, `unitCostFor`, `valueFor`. Each takes the needed lookup Maps as explicit parameters.
+   214→  * Built `storeByName` map (description → StoreItem), `projectById`, `projectByVote`, and `votes` lookups via useFetch + useMemo.
+   215→  * Project/vote filter: loosely matches the row's supplier/receivedFrom against the selected project name; falls back to showing all if no rows match (per spec).
+   216→  * Type filter: looks up item name in stores; only includes rows whose store category matches the selected type (excludes items not in stores when a type is set).
+   217→  * View toggle: By Numbers shows counts via formatNumber; By Value computes value = qty × unitCost (unitCost looked up from stores by item name; 0 if not found) and displays via formatCurrency.
+   218→  * Filters apply to: 3 stat cards (counts ↔ values), trend line chart (qty ↔ value with formatted YAxis + Tooltip), status pie chart (count ↔ value), and the recent activity feed.
+   219→  * Added "Clear" button when any filter is active; EmptyState copy adapts to whether filters are active.
+   220→- Enhancement B — QC Inspection tab (NEW):
+   221→  * Added a 4th tab "QC Inspection" to the CollectionModule Tabs (grid-cols-4, max-w-2xl) with ShieldCheck icon.
+   222→  * QCInspectionTab: 4 top stat cards (Total Inspections, Passed = Satisfactory+Good+Excellent, Failed, Pass Rate %).
+   223→  * "New QC Inspection" button opens QCInspectionDialog (keyed by editing id or "new" so form state resets cleanly on open).
+   224→  * QCInspectionDialog (Create + Edit):
+   225→    - Reference Type Select (Daily Collection / Part Supply Entry / Collection Item) from QC_REF_TYPES; disabled in edit mode.
+   226→    - Reference Select fetches the appropriate endpoint (/api/collection/daily, /api/collection/part-supply, /api/collection/items) based on refType (only in create mode via conditional useFetch URL). Options are flattened/labelled per spec (e.g. `${itemName} — ${qty} ${date} (${receivedFrom})`).
+   227→    - Selecting a reference auto-fills itemName, supplier, qty (all still editable in create mode; read-only in edit mode since PUT only updates qcLevel/officer/remarks).
+   228→    - When refType changes (create mode), the dependent fields are reset in the onValueChange handler (NOT in a useEffect) to satisfy the react-hooks/set-state-in-effect rule.
+   229→    - QC Level Select from QC_LEVELS constant.
+   230→    - QCI Officer Name (required) + QCI Officer Details (optional, e.g. "QC Bay 2").
+   231→    - Remarks Textarea — mandatory when QC Level is "Fail"; shows a red "Remarks required when Fail" hint, red asterisk, and red border when Fail + empty. Submit is blocked client-side with a destructive toast if Fail + empty remarks (also enforced server-side as a 400).
+   232→    - Submit: POST /api/qc (create) or PUT /api/qc/[id] (edit, only sends qcLevel/qcOfficer/qcOfficerDetails/remarks).
+   233→  * Inspections table: Inspected At (formatted date), Item (with refType caption), Supplier, Qty, QC Level badge (uses qcLevelColor from constants), QCI Officer (with details sub-line), Remarks (line-clamp-2), Actions (Edit pencil, Delete trash).
+   234→  * Delete uses an AlertDialog confirmation (red destructive action button) with Loader2 spinner while deleting.
+   235→  * Supplier Rating Summary card: aggregates inspections by supplier, maps levels to numeric (Fail=1, Below Average=2, Satisfactory=3, Good=4, Excellent=5), shows each supplier's average score (e.g. 4.20 / 5.00), count of inspections, color-coded rating badge (supplierRatingColor) + label (supplierRatingLabel), and a Progress bar. Sorted by avg descending.
+   236→- Preserved all existing functionality (Part Supply tab, Daily Collection tab, all dialogs) unchanged.
+   237→- Imports expanded: added Select/SelectContent/SelectItem/SelectTrigger/SelectValue, Textarea, Progress, AlertDialog family, formatCurrency, FILE_CATEGORIES, QC_LEVELS, qcLevelColor, and icons (ShieldCheck, ClipboardCheck, Pencil, Trash2, Loader2, Filter, AlertCircle, Star, X).
+   238→- Ran `bun run lint` — 0 errors, 0 warnings in collection.tsx (and the wider project). Verified /api/qc POST 201 + 400 validation + DELETE 200 via curl. Dev log shows clean compiles with no runtime errors.
+   239→
+   240→Stage Summary:
+   241→- Collection module enhanced in place at /home/z/my-project/src/components/erp/modules/collection.tsx (~3.3k lines).
+   242→- Two new capabilities shipped: (A) Dashboard filter bar with 3 Selects + By Numbers/By Value toggle that re-derives stat cards, trend chart, pie chart, and recent feed; (B) QC Inspection tab with full CRUD (create/edit dialog, delete confirm), 4 stat cards, color-coded QC level badges, and a supplier rating summary that evaluates suppliers on a 1–5 scale.
+   243→- All shared helpers, shadcn primitives, recharts, and the dark theme are reused; no new files created; no new dependencies.
+   244→- Lint-clean and runtime-clean.
+   245→
+   246→---
+   247→Task ID: 1-stakeholders
+   248→Agent: Main (Stakeholders + Item Master foundation)
+   249→Task: Schema/API/AI for Stakeholders, Suppliers, Item Master
+   250→
+   251→Work Log:
+   252→- Added Prisma models: Stakeholder, Supplier, SupplierContact, SupplierNomination, SupplierRating, ItemMaster
+   253→- Created API routes: /api/stakeholders (GET,POST) + [id] (PUT,DELETE); /api/suppliers (GET,POST) + [id] (GET,PUT,DELETE) + nested contacts/nominations/ratings; /api/item-master (GET,POST bulk) + [id] (PUT,DELETE) + [id]/merge (POST consolidate) + /analyze (POST AI dedup)
+   254→- Item Master analyze endpoint uses z-ai-web-dev-sdk for near-duplicate clustering with deterministic fallback (same-name-diff-code, same-code-diff-name)
+   255→- Merge endpoint consolidates duplicates into one canonical code, marks merged records, repoints StoreItems
+   256→- Added constants: CSLOG_APPOINTMENTS, CE_APPOINTMENTS, STAKEHOLDER_DEPARTMENTS/ROLES, AVAILABILITY_STATUSES, availabilityColor, departmentColor, ratingColor, ratingLabel, itemMasterStatusColor, duplicateTypeColor
+   257→- Seeded 9 stakeholders (5 CSLOG, 4 CE), 4 suppliers with contacts/nominations/ratings, 15 item-master entries (with deliberate duplicates: BMS-220/BMS-220A, MT-045/MT-045-PL, PL-118/PL-118-A)
+   258→- Added "Stakeholders" to sidebar nav (Users icon)
+   259→- Database re-seeded successfully
+   260→
+   261→Stage Summary:
+   262→- All backend ready. Frontend needed: Item Code Finder full window (Stores), Stakeholders module (Officers/Sailors + Suppliers dashboard with pop-up)
+   263→- Shared helpers: useFetch, apiRequest, StatCard, badges, PageHeader, states, all new constants
+
+[showing lines 1-263 of 264; use offset=264 with limit to continue reading]

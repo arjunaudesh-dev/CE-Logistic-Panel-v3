@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useCallback, useEffect, useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge, PositionBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  AlertDialog,
+    19→  AlertDialogContent,
+    20→  AlertDialogHeader,
+    21→  AlertDialogFooter,
+    22→  AlertDialogTitle,
+    23→  AlertDialogDescription,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→} from "@/components/ui/alert-dialog";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Input } from "@/components/ui/input";
+    29→import { Label } from "@/components/ui/label";
+    30→import { Textarea } from "@/components/ui/textarea";
+    31→import { Checkbox } from "@/components/ui/checkbox";
+    32→import { Progress } from "@/components/ui/progress";
+    33→import {
+    34→  Select,
+    35→  SelectContent,
+    36→  SelectItem,
+    37→  SelectTrigger,
+    38→  SelectValue,
+    39→} from "@/components/ui/select";
+    40→import {
+    41→  Table,
+    42→  TableHeader,
+    43→  TableBody,
+    44→  TableHead,
+    45→  TableRow,
+    46→  TableCell,
+    47→} from "@/components/ui/table";
+    48→import { useToast } from "@/hooks/use-toast";
+    49→import {
+    50→  formatNumber,
+    51→  formatCurrency,
+    52→  COLLECTION_STATUSES,
+    53→  PART_SUPPLY_STATUSES,
+    54→  FILE_CATEGORIES,
+    55→  FILE_COLLECTION_STATUSES,
+    56→  fileCollectionStatusColor,
+    57→  QC_LEVELS,
+    58→  qcLevelColor,
+    59→  AREA_STORES,
+    60→  AREA_STORE_CATEGORIES,
+    61→  NAV_REFERENCES,
+    62→  navRefColor,
+    63→  DIMENSION_UNITS,
+    64→} from "@/lib/constants";
+    65→import { cn } from "@/lib/utils";
+    66→import {
+    67→  PackageCheck,
+    68→  PackageX,
+    69→  Layers,
+    70→  Plus,
+    71→  Calendar,
+    72→  Download,
+    73→  Truck,
+    74→  Printer,
+    75→  ChevronDown,
+    76→  ChevronRight,
+    77→  ClipboardList,
+    78→  CalendarDays,
+    79→  CalendarRange,
+    80→  Boxes,
+    81→  BarChart3,
+    82→  User,
+    83→  ShieldCheck,
+    84→  ClipboardCheck,
+    85→  Pencil,
+    86→  Trash2,
+    87→  Loader2,
+    88→  Filter,
+    89→  AlertCircle,
+    90→  Star,
+    91→  X,
+    92→  Send,
+    93→  Store,
+    94→  MapPin,
+    95→  FileText,
+    96→  ShoppingCart,
+    97→  Calculator,
+    98→  Ruler,
+    99→  Anchor,
+   100→  RefreshCw,
+   101→  ArrowRight,
+   102→  Workflow,
+   103→  Link2,
+   104→} from "lucide-react";
+   105→import {
+   106→  LineChart,
+   107→  Line,
+   108→  XAxis,
+   109→  YAxis,
+   110→  Tooltip,
+   111→  ResponsiveContainer,
+   112→  PieChart,
+   113→  Pie,
+   114→  Cell,
+   115→  Legend,
+   116→  CartesianGrid,
+   117→} from "recharts";
+   118→
+   119→// ─────────────────────────────────────────────────────────
+   120→// Types
+   121→// ─────────────────────────────────────────────────────────
+   122→interface CollectionItem {
+   123→  id: string;
+   124→  name: string;
+   125→  expectedQty: number;
+   126→  status: string;
+   127→  dueDate: string | null;
+   128→  supplier: string | null;
+   129→  createdAt: string;
+   130→}
+   131→
+   132→interface PartSupplyEntry {
+   133→  id: string;
+   134→  srNo: number;
+   135→  date: string;
+   136→  vehicleNumber: string | null;
+   137→  qty: number;
+   138→  qcCheckedBy: string | null;
+   139→  sailorCount: number;
+   140→  driverName: string | null;
+   141→  driverLicense: string | null;
+   142→  driverPhone: string | null;
+   143→  cumulativeBalance: number;
+   144→}
+   145→
+   146→interface PartSupplyOrder {
+   147→  id: string;
+   148→  itemName: string;
+   149→  orderedQty: number;
+   150→  receivedQty: number;
+   151→  balance: number;
+   152→  startDate: string | null;
+   153→  expectedEndDate: string | null;
+   154→  status: string;
+   155→  supplier: string | null;
+   156→  createdAt: string;
+   157→  entries: PartSupplyEntry[];
+   158→  /**
+   159→   * Optional list of PO numbers linked to this part-supply order (split
+   160→   * orders). Encoded into the `supplier` field on the server because the
+   161→   * PartSupplyOrder model has no dedicated column — see
+   162→   * `formatSupplierWithPos` / `parseSupplierWithPos`.
+   163→   */
+   164→  linkedPoNumbers?: string[];
+   165→}
+   166→
+   167→interface DailyCollection {
+   168→  id: string;
+   169→  date: string;
+   170→  itemName: string;
+   171→  qty: number;
+   172→  receivedFrom: string | null;
+   173→  recordedBy: string | null;
+   174→  recordedAt: string;
+   175→}
+   176→
+   177→interface Project {
+   178→  id: string;
+   179→  name: string;
+   180→  voteNumber: string;
+   181→  voteAllocation?: number;
+   182→  status?: string;
+   183→}
+   184→
+   185→interface StoreItem {
+   186→  id: string;
+   187→  description: string;
+   188→  category: string;
+   189→  unit?: string;
+   190→  qty: number;
+   191→  unitCost: number;
+   192→  totalCost?: number;
+   193→  supplier?: string | null;
+   194→  itemCode?: string | null;
+   195→}
+   196→
+   197→interface AreaStoreRecord {
+   198→  id: string;
+   199→  storeName: string;
+   200→  itemCode: string | null;
+   201→  itemName: string;
+   202→  category: string;
+   203→  unit: string;
+   204→  qty: number;
+   205→  unitCost: number;
+   206→  totalCost: number;
+   207→  recordType: string; // "Oncharge" | "OffCharge"
+   208→  navReference: string | null;
+   209→  qcInspectionId: string | null;
+   210→  fileNumber: string | null;
+   211→  location: string | null;
+   212→  date: string | null;
+   213→  remarks: string | null;
+   214→  createdAt: string;
+   215→}
+   216→
+   217→interface QCInspection {
+   218→  id: string;
+   219→  refType: string;
+   220→  refId: string;
+   221→  itemName: string;
+   222→  supplier: string | null;
+   223→  qty: number;
+   224→  qcLevel: string;
+   225→  qcOfficer: string | null;
+   226→  qcOfficerDetails: string | null;
+   227→  remarks: string | null;
+   228→  inspectedAt: string;
+   229→}
+   230→
+   231→interface ProcurementFile {
+   232→  id: string;
+   233→  projectId: string | null;
+   234→  projectName: string | null;
+   235→  voteNumber: string | null;
+   236→  prNumber: string;
+   237→  itemCode: string;
+   238→  itemName: string;
+   239→  unit: string;
+   240→  qty: number;
+   241→  unitPrice: number;
+   242→  fileCost: number;
+   243→  supplier: string | null;
+   244→  presentPosition: string;
+   245→  fileCategory: string;
+   246→  createdBy: string | null;
+   247→  authorizedBy: string | null;
+   248→  createdAt: string;
+   249→  updatedAt: string;
+   250→  logs?: unknown[];
+   251→}
+   252→
+   253→/**
+   254→ * A ProjectFile (row from the ProjectFile table) — includes the new
+   255→ * collection-workflow fields: `purchaseOrderNumber`, `collectionStatus`,
+   256→ * `collectionSyncedAt`. Returned by GET /api/projects/[id]/files.
+   257→ */
+   258→interface ProjectFile {
+   259→  id: string;
+   260→  projectId: string;
+   261→  prNumber: string;
+   262→  itemCode: string;
+   263→  itemName: string;
+   264→  unit: string;
+   265→  qty: number;
+   266→  unitPrice: number;
+   267→  fileCost: number;
+   268→  supplier: string | null;
+   269→  presentPosition: string;
+   270→  fileCategory: string;
+   271→  fileNumber: string | null;
+   272→  fileGroupKey: string | null;
+   273→  fileGroupSeq: number;
+   274→  purchaseOrderNumber: string | null;
+   275→  collectionStatus: string;
+   276→  collectionSyncedAt: string | null;
+   277→  createdBy: string | null;
+   278→  authorizedBy: string | null;
+   279→  responsiblePerson: string | null;
+   280→  isArchived: boolean;
+   281→  createdAt: string;
+   282→  updatedAt: string;
+   283→  logs?: unknown[];
+   284→  approvals?: unknown[];
+   285→}
+   286→
+   287→interface Stakeholder {
+   288→  id: string;
+   289→  name: string;
+   290→  rankOrRate: string | null;
+   291→  svcNumber: string | null;
+   292→  appointment: string | null;
+   293→  department: string;
+   294→  category: string;
+   295→  seniority: number | null;
+   296→  areaStoreLocation: string | null;
+   297→  subjectClerk: string | null;
+   298→  ilmsCced: string | null;
+   299→  officeNumber: string | null;
+   300→  telephone: string | null;
+   301→  whatsapp: string | null;
+   302→  email: string | null;
+   303→  availability: string;
+   304→  role: string;
+   305→  createdAt: string;
+   306→  updatedAt: string;
+   307→}
+   308→
+   309→interface Stats {
+   310→  collection: {
+   311→    partSupplyActive: number;
+   312→    dailyToday: number;
+   313→    dailyTotal: number;
+   314→  };
+   315→}
+   316→
+   317→// Procurement present-positions where a PO is processed and items are on
+   318→// their way for collection. Files at these stages show up in the
+   319→// "Files to be Collected" dashboard card and the PO-item dropdowns.
+   320→const PO_PROCESSED_POSITIONS = [
+   321→  "PO Placed",
+   322→  "Order Placed",
+   323→  "Items Dispatched",
+   324→  "In Transit",
+   325→] as const;
+   326→
+   327→function isPoProcessed(position: string): boolean {
+   328→  return (PO_PROCESSED_POSITIONS as readonly string[]).includes(position);
+   329→}
+   330→
+   331→/** Format a stakeholder's name + rank for display in dropdowns. */
+   332→function formatStakeholder(s: Stakeholder): string {
+   333→  const rank = (s.rankOrRate || "").trim();
+   334→  const appt = (s.appointment || "").trim();
+   335→  const parts = [s.name];
+   336→  if (rank) parts.push(`(${rank})`);
+   337→  if (appt) parts.push(`· ${appt}`);
+   338→  return parts.join(" ");
+   339→}
+   340→
+   341→// ─────────────────────────────────────────────────────────
+   342→// Helpers
+   343→// ─────────────────────────────────────────────────────────
+   344→const PIE_STATUS_COLORS: Record<string, string> = COLLECTION_STATUSES.reduce(
+   345→  (acc, status, i) => {
+   346→    acc[status] = ["#f59e0b", "#3b82f6", "#22c55e"][i] ?? "#64748b";
+   347→    return acc;
+   348→  },
+   349→  {} as Record<string, string>
+   350→);
+   351→const DEFAULT_PIE_COLOR = "#64748b";
+   352→
+   353→function todayISO(): string {
+   354→  return new Date().toISOString().slice(0, 10);
+   355→}
+   356→function yesterdayISO(): string {
+   357→  return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+   358→}
+   359→function getLast7Days(): string[] {
+   360→  const days: string[] = [];
+   361→  const t = new Date();
+   362→  for (let i = 6; i >= 0; i--) {
+   363→    const d = new Date(t);
+   364→    d.setDate(d.getDate() - i);
+   365→    days.push(d.toISOString().slice(0, 10));
+   366→  }
+   367→  return days;
+   368→}
+   369→function formatDateLabel(dateStr: string): string {
+   370→  const d = new Date(dateStr + "T00:00:00");
+   371→  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+   372→}
+   373→function formatFullDate(dateStr?: string | null): string {
+   374→  if (!dateStr) return "—";
+   375→  const d = new Date(dateStr + "T00:00:00");
+   376→  if (isNaN(d.getTime())) return dateStr;
+   377→  return d.toLocaleDateString("en-IN", {
+   378→    day: "2-digit",
+   379→    month: "short",
+   380→    year: "numeric",
+   381→  });
+   382→}
+   383→function formatDateTime(iso: string): string {
+   384→  const d = new Date(iso);
+   385→  if (isNaN(d.getTime())) return iso;
+   386→  return d.toLocaleString("en-IN", {
+   387→    day: "2-digit",
+   388→    month: "short",
+   389→    year: "numeric",
+   390→    hour: "2-digit",
+   391→    minute: "2-digit",
+   392→  });
+   393→}
+   394→function progressColor(pct: number): string {
+   395→  if (pct > 90) return "bg-emerald-500";
+   396→  if (pct >= 50) return "bg-amber-500";
+   397→  return "bg-red-500";
+   398→}
+   399→function statusColor(status: string): string {
+   400→  if (
+   401→    status === "Collected" ||
+   402→    (PART_SUPPLY_STATUSES as readonly string[]).includes(status) &&
+   403→      status === "Completed"
+   404→  ) {
+   405→    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   406→  }
+   407→  if (status === "In Progress" || status === "Active") {
+   408→    return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   409→  }
+   410→  if (status === "Pending") {
+   411→    return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   412→  }
+   413→  return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+   414→}
+   415→
+   416→// Loose case-insensitive partial match between a row's supplier/receivedFrom
+   417→// and a project name. Used for project / vote filters on the dashboard.
+   418→function looselyMatches(supplier: string | null | undefined, name: string): boolean {
+   419→  if (!supplier || !name) return false;
+   420→  const a = supplier.toLowerCase().trim();
+   421→  const b = name.toLowerCase().trim();
+   422→  if (!a || !b) return false;
+   423→  return a.includes(b) || b.includes(a);
+   424→}
+   425→
+   426→// Maps a QC level to a numeric score for supplier aggregation.
+   427→function qcLevelToScore(level: string): number {
+   428→  switch (level) {
+   429→    case "Fail":
+   430→      return 1;
+   431→    case "Below Average":
+   432→      return 2;
+   433→    case "Satisfactory":
+   434→      return 3;
+   435→    case "Good":
+   436→      return 4;
+   437→    case "Excellent":
+   438→      return 5;
+   439→    default:
+   440→      return 0;
+   441→  }
+   442→}
+   443→
+   444→function supplierRatingColor(avg: number): string {
+   445→  if (avg >= 4.5)
+   446→    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   447→  if (avg >= 3.5) return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   448→  if (avg >= 2.5) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   449→  if (avg >= 1.5)
+   450→    return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+   451→  return "bg-red-500/15 text-red-400 border-red-500/30";
+   452→}
+   453→
+   454→function supplierRatingLabel(avg: number): string {
+   455→  if (avg >= 4.5) return "Excellent";
+   456→  if (avg >= 3.5) return "Good";
+   457→  if (avg >= 2.5) return "Satisfactory";
+   458→  if (avg >= 1.5) return "Below Average";
+   459→  return "Fail";
+   460→}
+   461→
+   462→/**
+   463→ * Suggest an area store based on the item's store category.
+   464→ * Falls back to "General" when no mapping matches.
+   465→ *   BMS / Plumbing      → BMS
+   466→ *   Metal / Aluminium   → Metal
+   467→ *   Paint               → Paint
+   468→ *   Lubricant Oil       → Oil & Lubricant
+   469→ *   Tools               → General
+   470→ *   (default)           → General
+   471→ */
+   472→function suggestStoreForCategory(category: string | null | undefined): string {
+   473→  if (!category) return "General";
+   474→  const cat = category.trim();
+   475→  for (const [store, cats] of Object.entries(AREA_STORE_CATEGORIES)) {
+   476→    if (cats.includes(cat)) return store;
+   477→  }
+   478→  return "General";
+   479→}
+   480→
+   481→/** Whether a QC level is considered "passing" (eligible for transfer to a store). */
+   482→function isPassingQc(level: string): boolean {
+   483→  return level === "Satisfactory" || level === "Good" || level === "Excellent";
+   484→}
+   485→
+   486→// Reference Type options for QC Inspection dialog
+   487→const QC_REF_TYPES = [
+   488→  "Daily Collection",
+   489→  "Part Supply Entry",
+   490→  "Collection Item",
+   491→] as const;
+   492→type QCRefType = (typeof QC_REF_TYPES)[number];
+   493→
+   494→// Generic project/vote filter applied to any row that has a supplier-like field.
+   495→// Pure helper (module-level) so the React Compiler can preserve manual memoization.
+   496→function applyProjVoteFilter<
+   497→  T extends { receivedFrom?: string | null; supplier?: string | null }
+   498→>(
+   499→  rows: T[],
+   500→  refField: "receivedFrom" | "supplier",
+   501→  projFilter: string,
+   502→  voteFilt: string,
+   503→  projectById: Map<string, Project>,
+   504→  projectByVote: Map<string, Project>
+   505→): T[] {
+   506→  let out = rows;
+   507→  if (projFilter !== "all") {
+   508→    const p = projectById.get(projFilter);
+   509→    if (p) {
+   510→      const matches = out.filter((r) =>
+   511→        looselyMatches(r[refField] ?? null, p.name)
+   512→      );
+   513→      if (matches.length > 0) out = matches;
+   514→    }
+   515→  }
+   516→  if (voteFilt !== "all") {
+   517→    const p = projectByVote.get(voteFilt);
+   518→    if (p) {
+   519→      const matches = out.filter((r) =>
+   520→        looselyMatches(r[refField] ?? null, p.name)
+   521→      );
+   522→      if (matches.length > 0) out = matches;
+   523→    }
+   524→  }
+   525→  return out;
+   526→}
+   527→
+   528→// Type filter — looks up the item in stores by name; only includes rows whose
+   529→// store category matches. Items not in stores are excluded when a type is set.
+   530→function applyTypeFilter<
+   531→  T extends { itemName?: string; name?: string }
+   532→>(
+   533→  rows: T[],
+   534→  nameField: "itemName" | "name",
+   535→  tFilter: string,
+   536→  storeByName: Map<string, StoreItem>
+   537→): T[] {
+   538→  if (tFilter === "all") return rows;
+   539→  return rows.filter((r) => {
+   540→    const name = r[nameField];
+   541→    const s = storeByName.get((name || "").toLowerCase().trim());
+   542→    return s?.category === tFilter;
+   543→  });
+   544→}
+   545→
+   546→function unitCostFor(
+   547→  itemName: string,
+   548→  storeByName: Map<string, StoreItem>
+   549→): number {
+   550→  const s = storeByName.get((itemName || "").toLowerCase().trim());
+   551→  return s?.unitCost ?? 0;
+   552→}
+   553→
+   554→function valueFor(
+   555→  qty: number,
+   556→  itemName: string,
+   557→  storeByName: Map<string, StoreItem>
+   558→): number {
+   559→  return (qty || 0) * unitCostFor(itemName, storeByName);
+   560→}
+   561→
+   562→// ─────────────────────────────────────────────────────────
+   563→// Split-Order helpers — encode / decode Linked PO numbers in the
+   564→// PartSupplyOrder.supplier field (since the model has no dedicated column).
+   565→// Format: `<supplier> [PO: PO-001, PO-002]`
+   566→// ─────────────────────────────────────────────────────────
+   567→const SPLIT_PO_PREFIX = " [PO: ";
+   568→const SPLIT_PO_SUFFIX = "]";
+   569→
+   570→function formatSupplierWithPos(supplier: string, pos: string[]): string {
+   571→  const trimmedSupplier = supplier.trim();
+   572→  const cleanPos = pos.map((p) => p.trim()).filter(Boolean);
+   573→  if (cleanPos.length === 0) return trimmedSupplier;
+   574→  return `${trimmedSupplier}${SPLIT_PO_PREFIX}${cleanPos.join(", ")}${SPLIT_PO_SUFFIX}`;
+   575→}
+   576→
+   577→function parseSupplierWithPos(
+   578→  raw: string | null | undefined
+   579→): { supplier: string; pos: string[] } {
+   580→  if (!raw) return { supplier: "", pos: [] };
+   581→  const text = raw;
+   582→  const startIdx = text.lastIndexOf(SPLIT_PO_PREFIX);
+   583→  if (startIdx === -1 || !text.endsWith(SPLIT_PO_SUFFIX)) {
+   584→    return { supplier: text, pos: [] };
+   585→  }
+   586→  const endIdx = text.length - SPLIT_PO_SUFFIX.length;
+   587→  const poStr = text.slice(startIdx + SPLIT_PO_PREFIX.length, endIdx);
+   588→  const pos = poStr
+   589→    .split(",")
+   590→    .map((p) => p.trim())
+   591→    .filter(Boolean);
+   592→  const supplier = text.slice(0, startIdx).trim();
+   593→  return { supplier, pos };
+   594→}
+   595→
+   596→// ─────────────────────────────────────────────────────────
+   597→// useAllProjectFiles — fetch all project files across every project.
+   598→// Used by the Collection Pipeline (Dashboard), the QCI tab (to find the
+   599→// matching file when a QCI is recorded) and the Send-to-Area-Store dialog
+   600→// (to update the file's collectionStatus).
+   601→// ─────────────────────────────────────────────────────────
+   602→function useAllProjectFiles(enabled: boolean = true): {
+   603→  data: ProjectFile[];
+   604→  loading: boolean;
+   605→  error: string | null;
+   606→  refresh: () => void;
+   607→} {
+   608→  const { data: projects, loading: pLoading, error: pError } =
+   609→    useFetch<Project[]>(enabled ? "/api/projects" : null);
+   610→  const projectIds = useMemo(
+   611→    () => (projects ?? []).map((p) => p.id),
+   612→    [projects]
+   613→  );
+   614→  const [files, setFiles] = useState<ProjectFile[]>([]);
+   615→  const [fetching, setFetching] = useState<boolean>(false);
+   616→  const [fetchError, setFetchError] = useState<string | null>(null);
+   617→  const [nonce, setNonce] = useState(0);
+   618→
+   619→  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+   620→
+   621→  useEffect(() => {
+   622→    if (!enabled) return;
+   623→    if (pLoading || pError) return;
+   624→    if (projectIds.length === 0) return;
+   625→    let cancelled = false;
+   626→    (async () => {
+   627→      // Defer the loading-state setter so it isn't a synchronous setState
+   628→      // in the effect body (mirrors the `useFetch` pattern).
+   629→      await Promise.resolve();
+   630→      if (cancelled) return;
+   631→      setFetching(true);
+   632→      setFetchError(null);
+   633→      try {
+   634→        const results = await Promise.all(
+   635→          projectIds.map(async (pid) => {
+   636→            try {
+   637→              const res = await fetch(
+   638→                `/api/projects/${pid}/files?includeArchived=false`
+   639→              );
+   640→              if (!res.ok) return [] as ProjectFile[];
+   641→              const json = (await res.json()) as ProjectFile[];
+   642→              return Array.isArray(json) ? json : [];
+   643→            } catch {
+   644→              return [] as ProjectFile[];
+   645→            }
+   646→          })
+   647→        );
+   648→        if (cancelled) return;
+   649→        setFiles(results.flat());
+   650→        setFetching(false);
+   651→      } catch (e) {
+   652→        if (cancelled) return;
+   653→        setFetchError((e as Error).message || "Failed to load files");
+   654→        setFetching(false);
+   655→      }
+   656→    })();
+   657→    return () => {
+   658→      cancelled = true;
+   659→    };
+   660→  }, [projectIds, pLoading, pError, nonce, enabled]);
+   661→
+   662→  // Derive the final hook state without synchronous setState in the effect.
+   663→  if (!enabled) return { data: [], loading: false, error: null, refresh };
+   664→  if (pError) return { data: [], loading: false, error: pError, refresh };
+   665→  if (pLoading) return { data: [], loading: true, error: null, refresh };
+   666→  if (projectIds.length === 0)
+   667→    return { data: [], loading: false, error: null, refresh };
+   668→  return { data: files, loading: fetching, error: fetchError, refresh };
+   669→}
+   670→
+   671→/** Update a project file's collection status via the workflow PUT endpoint. */
+   672→async function updateFileCollectionStatus(
+   673→  file: { id: string; projectId: string },
+   674→  collectionStatus: string,
+   675→  extras?: {
+   676→    areaStoreName?: string;
+   677→    navReference?: string;
+   678→    navNumber?: string;
+   679→    changedBy?: string;
+   680→  }
+   681→): Promise<{ ok: boolean; error?: string }> {
+   682→  const res = await apiRequest(
+   683→    `/api/projects/${file.projectId}/files/${file.id}/collection-status`,
+   684→    "PUT",
+   685→    {
+   686→      collectionStatus,
+   687→      ...extras,
+   688→    }
+   689→  );
+   690→  if (!res.ok) return { ok: false, error: res.error };
+   691→  return { ok: true };
+   692→}
+   693→
+   694→// ─────────────────────────────────────────────────────────
+   695→// Main Component
+   696→// ─────────────────────────────────────────────────────────
+   697→export function CollectionModule() {
+   698→  return (
+   699→    <div>
+   700→      <PageHeader
+   701→        title="Collection"
+   702→        description="Track part-supply orders, daily collections & delivery receipts"
+   703→        icon={PackageCheck}
+   704→      />
+   705→      <Tabs defaultValue="dashboard" className="space-y-4">
+   706→        <TabsList className="grid w-full grid-cols-4 max-w-2xl">
+   707→          <TabsTrigger value="dashboard" className="gap-1.5">
+   708→            <BarChart3 className="h-4 w-4" /> Dashboard
+   709→          </TabsTrigger>
+   710→          <TabsTrigger value="part-supply" className="gap-1.5">
+   711→            <Layers className="h-4 w-4" /> Part Supply
+   712→          </TabsTrigger>
+   713→          <TabsTrigger value="daily" className="gap-1.5">
+   714→            <CalendarDays className="h-4 w-4" /> Daily Collection
+   715→          </TabsTrigger>
+   716→          <TabsTrigger value="qc" className="gap-1.5">
+   717→            <ShieldCheck className="h-4 w-4" /> QC Inspection
+   718→          </TabsTrigger>
+   719→        </TabsList>
+   720→        <TabsContent value="dashboard">
+   721→          <DashboardTab />
+   722→        </TabsContent>
+   723→        <TabsContent value="part-supply">
+   724→          <PartSupplyTab />
+   725→        </TabsContent>
+   726→        <TabsContent value="daily">
+   727→          <DailyCollectionTab />
+   728→        </TabsContent>
+   729→        <TabsContent value="qc">
+   730→          <QCInspectionTab />
+   731→        </TabsContent>
+   732→      </Tabs>
+   733→    </div>
+   734→  );
+   735→}
+   736→
+   737→// ─────────────────────────────────────────────────────────
+   738→// Dashboard Tab
+   739→// ─────────────────────────────────────────────────────────
+   740→function DashboardTab() {
+   741→  const { data: stats } = useFetch<Stats>("/api/stats");
+   742→  const {
+   743→    data: items,
+   744→    loading: itemsLoading,
+   745→    error: itemsError,
+   746→  } = useFetch<CollectionItem[]>("/api/collection/items");
+   747→  const { data: partSupply } = useFetch<PartSupplyOrder[]>(
+   748→    "/api/collection/part-supply"
+   749→  );
+   750→  const { data: daily } = useFetch<DailyCollection[]>(
+   751→    "/api/collection/daily"
+   752→  );
+   753→  const { data: projects } = useFetch<Project[]>("/api/projects");
+   754→  const { data: stores } = useFetch<StoreItem[]>("/api/stores");
+   755→  const { data: procurementFiles } =
+   756→    useFetch<ProcurementFile[]>("/api/procurement");
+   757→
+   758→  // All project files (used by the Collection Pipeline). Refreshed on demand
+   759→  // (Sync button, Transfer-to-Zone action, etc.).
+   760→  const allFiles = useAllProjectFiles();
+   761→  const { toast } = useToast();
+   762→
+   763→  // Pipeline filter — which collection-status stage is selected. "all" shows
+   764→  // every file (default). Clicking a stage card sets this and scrolls the
+   765→  // file list into view.
+   766→  const [pipelineFilter, setPipelineFilter] = useState<string>("all");
+   767→  const [syncing, setSyncing] = useState(false);
+   768→  const [zoneTransferId, setZoneTransferId] = useState<string | null>(null);
+   769→
+   770→  // Filter state
+   771→  const [projectFilter, setProjectFilter] = useState<string>("all");
+   772→  const [voteFilter, setVoteFilter] = useState<string>("all");
+   773→  const [typeFilter, setTypeFilter] = useState<string>("all");
+   774→  const [viewMode, setViewMode] = useState<"numbers" | "value">("numbers");
+   775→
+   776→  // Lookups
+   777→  const storeByName = useMemo(() => {
+   778→    const m = new Map<string, StoreItem>();
+   779→    (stores ?? []).forEach((s) => {
+   780→      const key = (s.description || "").toLowerCase().trim();
+   781→      if (key && !m.has(key)) m.set(key, s);
+   782→    });
+   783→    return m;
+   784→  }, [stores]);
+   785→
+   786→  const projectById = useMemo(
+   787→    () => new Map((projects ?? []).map((p) => [p.id, p])),
+   788→    [projects]
+   789→  );
+   790→  const projectByVote = useMemo(
+   791→    () =>
+   792→      new Map(
+   793→        (projects ?? [])
+   794→          .filter((p) => !!p.voteNumber)
+   795→          .map((p) => [p.voteNumber, p])
+   796→      ),
+   797→    [projects]
+   798→  );
+   799→  const votes = useMemo(
+   800→    () =>
+   801→      Array.from(
+   802→        new Set((projects ?? []).map((p) => p.voteNumber).filter(Boolean))
+   803→      ).sort(),
+   804→    [projects]
+   805→  );
+   806→
+   807→  // Filtered datasets
+   808→  const filteredDaily = useMemo(() => {
+   809→    let rows = applyProjVoteFilter(
+   810→      daily ?? [],
+   811→      "receivedFrom",
+   812→      projectFilter,
+   813→      voteFilter,
+   814→      projectById,
+   815→      projectByVote
+   816→    );
+   817→    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+   818→    return rows;
+   819→  }, [
+   820→    daily,
+   821→    projectFilter,
+   822→    voteFilter,
+   823→    typeFilter,
+   824→    projectById,
+   825→    projectByVote,
+   826→    storeByName,
+   827→  ]);
+   828→
+   829→  const filteredItems = useMemo(() => {
+   830→    let rows = applyProjVoteFilter(
+   831→      items ?? [],
+   832→      "supplier",
+   833→      projectFilter,
+   834→      voteFilter,
+   835→      projectById,
+   836→      projectByVote
+   837→    );
+   838→    rows = applyTypeFilter(rows, "name", typeFilter, storeByName);
+   839→    return rows;
+   840→  }, [
+   841→    items,
+   842→    projectFilter,
+   843→    voteFilter,
+   844→    typeFilter,
+   845→    projectById,
+   846→    projectByVote,
+   847→    storeByName,
+   848→  ]);
+   849→
+   850→  const filteredPartSupply = useMemo(() => {
+   851→    let rows = applyProjVoteFilter(
+   852→      partSupply ?? [],
+   853→      "supplier",
+   854→      projectFilter,
+   855→      voteFilter,
+   856→      projectById,
+   857→      projectByVote
+   858→    );
+   859→    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+   860→    return rows;
+   861→  }, [
+   862→    partSupply,
+   863→    projectFilter,
+   864→    voteFilter,
+   865→    typeFilter,
+   866→    projectById,
+   867→    projectByVote,
+   868→    storeByName,
+   869→  ]);
+   870→
+   871→  // Stat figures (derived from filtered datasets)
+   872→  const pendingItems = filteredItems.filter(
+   873→    (i) => i.status === "Pending" || i.status === "In Progress"
+   874→  );
+   875→  const pendingQty = pendingItems.reduce(
+   876→    (s, i) => s + (i.expectedQty || 0),
+   877→    0
+   878→  );
+   879→  const pendingValue = pendingItems.reduce(
+   880→    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+   881→    0
+   882→  );
+   883→
+   884→  const activePartSupplyOrders = filteredPartSupply.filter(
+   885→    (o) => o.status === "Active"
+   886→  );
+   887→  const activePartSupplyCount =
+   888→    stats?.collection?.partSupplyActive != null &&
+   889→    projectFilter === "all" &&
+   890→    voteFilter === "all" &&
+   891→    typeFilter === "all"
+   892→      ? stats.collection.partSupplyActive
+   893→      : activePartSupplyOrders.length;
+   894→  const activePartSupplyValue = activePartSupplyOrders.reduce(
+   895→    (s, o) => s + valueFor(o.receivedQty, o.itemName, storeByName),
+   896→    0
+   897→  );
+   898→
+   899→  const collectedItems = filteredItems.filter(
+   900→    (i) => i.status === "Collected"
+   901→  );
+   902→  const collectedValue = collectedItems.reduce(
+   903→    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+   904→    0
+   905→  );
+   906→
+   907→  const todayStr = todayISO();
+   908→  const todayDaily = filteredDaily.filter((d) => d.date === todayStr);
+   909→  const todayDailyCount = todayDaily.length;
+   910→  const todayDailyValue = todayDaily.reduce(
+   911→    (s, d) => s + valueFor(d.qty, d.itemName, storeByName),
+   912→    0
+   913→  );
+   914→
+   915→  // Trend chart — last 7 days (qty or value depending on viewMode)
+   916→  const trendData = useMemo(() => {
+   917→    const days = getLast7Days();
+   918→    const map = new Map<string, number>();
+   919→    filteredDaily.forEach((d) => {
+   920→      const v =
+   921→        viewMode === "value" ? valueFor(d.qty, d.itemName, storeByName) : d.qty || 0;
+   922→      map.set(d.date, (map.get(d.date) || 0) + v);
+   923→    });
+   924→    return days.map((date) => ({
+   925→      name: formatDateLabel(date),
+   926→      qty: map.get(date) || 0,
+   927→    }));
+   928→  }, [filteredDaily, viewMode, storeByName]);
+   929→
+   930→  // Status breakdown (counts or values depending on viewMode)
+   931→  const statusBreakdown = useMemo(() => {
+   932→    const counts: Record<string, number> = {};
+   933→    filteredItems.forEach((i) => {
+   934→      const v =
+   935→        viewMode === "value"
+   936→          ? valueFor(i.expectedQty, i.name, storeByName)
+   937→          : 1;
+   938→      counts[i.status] = (counts[i.status] || 0) + v;
+   939→    });
+   940→    return COLLECTION_STATUSES.filter((s) => counts[s] > 0).map((name) => ({
+   941→      name,
+   942→      value: counts[name],
+   943→    }));
+   944→  }, [filteredItems, viewMode, storeByName]);
+   945→
+   946→  const recentDaily = filteredDaily.slice(0, 5);
+   947→
+   948→  // Files with a processed PO — these items are on the way and ready to
+   949→  // be collected (PO Placed / Order Placed / Items Dispatched / In Transit).
+   950→  const poProcessedFiles = useMemo(() => {
+   951→    return (procurementFiles ?? []).filter((f) =>
+   952→      isPoProcessed(f.presentPosition)
+   953→    );
+   954→  }, [procurementFiles]);
+   955→
+   956→  const poProcessedQty = poProcessedFiles.reduce((s, f) => s + (f.qty || 0), 0);
+   957→  const poProcessedValue = poProcessedFiles.reduce(
+   958→    (s, f) => s + (f.fileCost || 0),
+   959→    0
+   960→  );
+   961→
+   962→  // ── Collection Pipeline counts ──────────────────────────────
+   963→  // Each stage = number of project files whose collectionStatus matches that
+   964→  // stage. Files with collectionStatus "Pending" are surfaced separately (they
+   965→  // are eligible for the PO → Collection sync).
+   966→  const pipelineCounts = useMemo(() => {
+   967→    const counts: Record<string, number> = {};
+   968→    FILE_COLLECTION_STATUSES.forEach((s) => (counts[s] = 0));
+   969→    (allFiles.data ?? []).forEach((f) => {
+   970→      const key = f.collectionStatus || "Pending";
+   971→      counts[key] = (counts[key] || 0) + 1;
+   972→    });
+   973→    return counts;
+   974→  }, [allFiles.data]);
+   975→
+   976→  // Files matching the currently-selected pipeline stage. When `pipelineFilter`
+   977→  // is "all", shows every file with a collectionStatus other than "Pending".
+   978→  const pipelineFiles = useMemo(() => {
+   979→    const list = (allFiles.data ?? []).filter((f) => {
+   980→      if (pipelineFilter === "all") {
+   981→        return f.collectionStatus && f.collectionStatus !== "Pending";
+   982→      }
+   983→      return f.collectionStatus === pipelineFilter;
+   984→    });
+   985→    return list.sort((a, b) =>
+   986→      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+   987→    );
+   988→  }, [allFiles.data, pipelineFilter]);
+   989→
+   990→  async function handleSyncPoToCollection() {
+   991→    setSyncing(true);
+   992→    const res = await apiRequest("/api/sync/po-to-collection", "POST");
+   993→    setSyncing(false);
+   994→    if (!res.ok) {
+   995→      toast({
+   996→        title: "Sync failed",
+   997→        description: res.error,
+   998→        variant: "destructive",
+   999→      });
+  1000→      return;
+  1001→    }
+  1002→    const data = res.data as { syncedCount?: number };
+  1003→    const count = data?.syncedCount ?? 0;
+  1004→    toast({
+  1005→      title: count > 0 ? `Synced ${count} file(s)` : "Nothing to sync",
+  1006→      description:
+  1007→        count > 0
+  1008→          ? `${count} PO Placed file(s) moved to "In Collection".`
+  1009→          : "No PO Placed files pending sync.",
+  1010→    });
+  1011→    allFiles.refresh();
+  1012→  }
+  1013→
+  1014→  async function handleTransferToZone(file: ProjectFile) {
+  1015→    setZoneTransferId(file.id);
+  1016→    const res = await updateFileCollectionStatus(file, "Transferred to Zone", {
+  1017→      changedBy: "Collection Officer",
+  1018→    });
+  1019→    setZoneTransferId(null);
+  1020→    if (!res.ok) {
+  1021→      toast({
+  1022→        title: "Transfer to Zone failed",
+  1023→        description: res.error,
+  1024→        variant: "destructive",
+  1025→      });
+  1026→      return;
+  1027→    }
+  1028→    toast({
+  1029→      title: "Transferred to Zone",
+  1030→      description: `${file.itemName} moved to Zone store. Stock updated.`,
+  1031→    });
+  1032→    allFiles.refresh();
+  1033→  }
+  1034→
+  1035→  if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
+  1036→  if (itemsError) return <ErrorState message={itemsError} />;
+  1037→
+  1038→  const filtersActive =
+  1039→    projectFilter !== "all" ||
+  1040→    voteFilter !== "all" ||
+  1041→    typeFilter !== "all";
+  1042→
+  1043→  function clearFilters() {
+  1044→    setProjectFilter("all");
+  1045→    setVoteFilter("all");
+  1046→    setTypeFilter("all");
+  1047→  }
+  1048→
+  1049→  return (
+  1050→    <div className="space-y-5">
+  1051→      {/* Filter bar */}
+  1052→      <div className="bg-card border border-border rounded-xl p-4">
+  1053→        <div className="flex items-center justify-between gap-2 mb-3">
+  1054→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1055→            <Filter className="h-4 w-4" /> Filters
+  1056→          </div>
+  1057→          {filtersActive && (
+  1058→            <Button
+  1059→              size="sm"
+  1060→              variant="ghost"
+  1061→              className="h-7 text-xs gap-1.5"
+  1062→              onClick={clearFilters}
+  1063→            >
+  1064→              <X className="h-3.5 w-3.5" /> Clear
+  1065→            </Button>
+  1066→          )}
+  1067→        </div>
+  1068→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+  1069→          <div className="space-y-1.5">
+  1070→            <Label className="text-xs text-muted-foreground">By Project</Label>
+  1071→            <Select value={projectFilter} onValueChange={setProjectFilter}>
+  1072→              <SelectTrigger className="w-full">
+  1073→                <SelectValue placeholder="All Projects" />
+  1074→              </SelectTrigger>
+  1075→              <SelectContent>
+  1076→                <SelectItem value="all">All Projects</SelectItem>
+  1077→                {(projects ?? []).map((p) => (
+  1078→                  <SelectItem key={p.id} value={p.id}>
+  1079→                    {p.name}
+  1080→                  </SelectItem>
+  1081→                ))}
+  1082→              </SelectContent>
+  1083→            </Select>
+  1084→          </div>
+  1085→          <div className="space-y-1.5">
+  1086→            <Label className="text-xs text-muted-foreground">By Vote</Label>
+  1087→            <Select value={voteFilter} onValueChange={setVoteFilter}>
+  1088→              <SelectTrigger className="w-full">
+  1089→                <SelectValue placeholder="All Votes" />
+  1090→              </SelectTrigger>
+  1091→              <SelectContent>
+  1092→                <SelectItem value="all">All Votes</SelectItem>
+  1093→                {votes.map((v) => (
+  1094→                  <SelectItem key={v} value={v}>
+  1095→                    {v}
+  1096→                  </SelectItem>
+  1097→                ))}
+  1098→              </SelectContent>
+  1099→            </Select>
+  1100→          </div>
+  1101→          <div className="space-y-1.5">
+  1102→            <Label className="text-xs text-muted-foreground">By Type</Label>
+  1103→            <Select value={typeFilter} onValueChange={setTypeFilter}>
+  1104→              <SelectTrigger className="w-full">
+  1105→                <SelectValue placeholder="All Types" />
+  1106→              </SelectTrigger>
+  1107→              <SelectContent>
+  1108→                <SelectItem value="all">All Types</SelectItem>
+  1109→                {FILE_CATEGORIES.filter((c) => c !== "GEN").map((c) => (
+  1110→                  <SelectItem key={c} value={c}>
+  1111→                    {c}
+  1112→                  </SelectItem>
+  1113→                ))}
+  1114→              </SelectContent>
+  1115→            </Select>
+  1116→          </div>
+  1117→          <div className="space-y-1.5">
+  1118→            <Label className="text-xs text-muted-foreground">View</Label>
+  1119→            <div className="flex rounded-md border border-border overflow-hidden h-9">
+  1120→              <button
+  1121→                type="button"
+  1122→                onClick={() => setViewMode("numbers")}
+  1123→                className={cn(
+  1124→                  "flex-1 text-xs font-medium transition-colors px-3",
+  1125→                  viewMode === "numbers"
+  1126→                    ? "bg-primary text-primary-foreground"
+  1127→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+  1128→                )}
+  1129→              >
+  1130→                By Numbers
+  1131→              </button>
+  1132→              <button
+  1133→                type="button"
+  1134→                onClick={() => setViewMode("value")}
+  1135→                className={cn(
+  1136→                  "flex-1 text-xs font-medium transition-colors px-3 border-l border-border",
+  1137→                  viewMode === "value"
+  1138→                    ? "bg-primary text-primary-foreground"
+  1139→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+  1140→                )}
+  1141→              >
+  1142→                By Value
+  1143→              </button>
+  1144→            </div>
+  1145→          </div>
+  1146→        </div>
+  1147→      </div>
+  1148→
+  1149→      {/* Collection Pipeline — workflow stages with counts + Sync button */}
+  1150→      <div className="bg-card border border-border rounded-xl p-4">
+  1151→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+  1152→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1153→            <Workflow className="h-4 w-4" /> Collection Pipeline
+  1154→          </div>
+  1155→          <div className="flex items-center gap-2 flex-wrap">
+  1156→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1157→              {pipelineCounts["Pending"]} pending sync
+  1158→            </CustomBadge>
+  1159→            <Button
+  1160→              size="sm"
+  1161→              variant="outline"
+  1162→              onClick={handleSyncPoToCollection}
+  1163→              disabled={syncing}
+  1164→              className="gap-1.5 h-8"
+  1165→            >
+  1166→              {syncing ? (
+  1167→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1168→              ) : (
+  1169→                <RefreshCw className="h-3.5 w-3.5" />
+  1170→              )}
+  1171→              Sync PO → Collection
+  1172→            </Button>
+  1173→          </div>
+  1174→        </div>
+  1175→        <p className="text-xs text-muted-foreground mb-3">
+  1176→          Files appear here automatically after a Purchasing Order (PO) is
+  1177→          published. Click a stage to filter the file list below.
+  1178→        </p>
+  1179→        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2">
+  1180→          {FILE_COLLECTION_STATUSES.map((stage) => {
+  1181→            const count = pipelineCounts[stage] || 0;
+  1182→            const active = pipelineFilter === stage;
+  1183→            return (
+  1184→              <button
+  1185→                key={stage}
+  1186→                type="button"
+  1187→                onClick={() =>
+  1188→                  setPipelineFilter((cur) => (cur === stage ? "all" : stage))
+  1189→                }
+  1190→                className={cn(
+  1191→                  "text-left rounded-lg border p-2.5 transition-all hover:border-primary/60 hover:shadow-sm",
+  1192→                  active
+  1193→                    ? "border-primary bg-primary/10 ring-1 ring-primary/40"
+  1194→                    : "border-border bg-secondary/20"
+  1195→                )}
+  1196→                aria-pressed={active}
+  1197→              >
+  1198→                <div className="flex items-center justify-between gap-1">
+  1199→                  <span
+  1200→                    className={cn(
+  1201→                      "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
+  1202→                      fileCollectionStatusColor(stage)
+  1203→                    )}
+  1204→                  >
+  1205→                    {stage}
+  1206→                  </span>
+  1207→                </div>
+  1208→                <p className="mt-1 text-xl font-bold text-foreground leading-tight">
+  1209→                  {count}
+  1210→                </p>
+  1211→                <p className="text-[10px] text-muted-foreground">
+  1212→                  file{count !== 1 ? "s" : ""}
+  1213→                </p>
+  1214→              </button>
+  1215→            );
+  1216→          })}
+  1217→        </div>
+  1218→      </div>
+  1219→
+  1220→      {/* Pipeline-filtered file list */}
+  1221→      <div className="bg-card border border-border rounded-xl p-4">
+  1222→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+  1223→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1224→            <FileText className="h-4 w-4" />
+  1225→            Files in Pipeline
+  1226→            <CustomBadge className="bg-secondary border-border text-muted-foreground ml-1">
+  1227→              {pipelineFilter === "all"
+  1228→                ? "All active"
+  1229→                : pipelineFilter}
+  1230→              {" · "}
+  1231→              {pipelineFiles.length}
+  1232→            </CustomBadge>
+  1233→          </div>
+  1234→          {pipelineFilter !== "all" && (
+  1235→            <Button
+  1236→              size="sm"
+  1237→              variant="ghost"
+  1238→              className="h-7 text-xs gap-1.5"
+  1239→              onClick={() => setPipelineFilter("all")}
+  1240→            >
+  1241→              <X className="h-3.5 w-3.5" /> Clear stage filter
+  1242→            </Button>
+  1243→          )}
+  1244→        </div>
+  1245→        {allFiles.loading ? (
+  1246→          <LoadingState label="Loading project files..." />
+  1247→        ) : pipelineFiles.length === 0 ? (
+  1248→          <EmptyState
+  1249→            icon={FileText}
+  1250→            title="No files at this stage"
+  1251→            description={
+  1252→              pipelineFilter === "all"
+  1253→                ? "Files will appear here once a PO is placed and synced to collection."
+  1254→                : `No files currently in "${pipelineFilter}" status.`
+  1255→            }
+  1256→          />
+  1257→        ) : (
+  1258→          <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1259→            <ul className="divide-y divide-border">
+  1260→              {pipelineFiles.map((f) => {
+  1261→                const project = projectById.get(f.projectId);
+  1262→                const isAtAreaStore =
+  1263→                  f.collectionStatus === "Transferred to Area Store";
+  1264→                const isTransferring = zoneTransferId === f.id;
+  1265→                return (
+  1266→                  <li
+  1267→                    key={f.id}
+  1268→                    className="px-2 py-3 flex items-start gap-3 hover:bg-secondary/20 transition-colors"
+  1269→                  >
+  1270→                    <div
+  1271→                      className={cn(
+  1272→                        "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+  1273→                        fileCollectionStatusColor(f.collectionStatus)
+  1274→                      )}
+  1275→                    >
+  1276→                      <PackageCheck className="h-4 w-4" />
+  1277→                    </div>
+  1278→                    <div className="min-w-0 flex-1">
+  1279→                      <div className="flex flex-wrap items-center gap-2">
+  1280→                        <p className="text-sm font-medium text-foreground truncate">
+  1281→                          {f.itemName}
+  1282→                        </p>
+  1283→                        <CustomBadge className="bg-secondary text-muted-foreground border-border font-mono">
+  1284→                          {f.prNumber}
+  1285→                        </CustomBadge>
+  1286→                        {f.purchaseOrderNumber && (
+  1287→                          <CustomBadge className="bg-amber-500/15 text-amber-500 dark:text-amber-400 border-amber-500/30 font-mono">
+  1288→                            <ShoppingCart className="h-3 w-3 mr-1" />
+  1289→                            {f.purchaseOrderNumber}
+  1290→                          </CustomBadge>
+  1291→                        )}
+  1292→                      </div>
+  1293→                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+  1294→                        {project?.name || "—"} ·{" "}
+  1295→                        {formatNumber(f.qty)} {f.unit} ·{" "}
+  1296→                        {f.supplier || "—"} · {f.presentPosition}
+  1297→                      </p>
+  1298→                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+  1299→                        <CustomBadge
+  1300→                          className={cn(
+  1301→                            "border",
+  1302→                            fileCollectionStatusColor(f.collectionStatus)
+  1303→                          )}
+  1304→                        >
+  1305→                          {f.collectionStatus}
+  1306→                        </CustomBadge>
+  1307→                        {f.collectionSyncedAt && (
+  1308→                          <span className="text-[10px] text-muted-foreground">
+  1309→                            Synced {formatDateTime(f.collectionSyncedAt)}
+  1310→                          </span>
+  1311→                        )}
+  1312→                      </div>
+  1313→                    </div>
+  1314→                    {isAtAreaStore && (
+  1315→                      <Button
+  1316→                        size="sm"
+  1317→                        variant="outline"
+  1318→                        className="gap-1.5 h-7 text-xs shrink-0 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+  1319→                        onClick={() => handleTransferToZone(f)}
+  1320→                        disabled={isTransferring}
+  1321→                      >
+  1322→                        {isTransferring ? (
+  1323→                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1324→                        ) : (
+  1325→                          <ArrowRight className="h-3.5 w-3.5" />
+  1326→                        )}
+  1327→                        Transfer to Zone
+  1328→                      </Button>
+  1329→                    )}
+  1330→                  </li>
+  1331→                );
+  1332→              })}
+  1333→            </ul>
+  1334→          </div>
+  1335→        )}
+  1336→      </div>
+  1337→
+  1338→      {/* Stat cards */}
+  1339→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  1340→        <StatCard
+  1341→          label="Items to be Received"
+  1342→          value={
+  1343→            viewMode === "value"
+  1344→              ? formatCurrency(pendingValue)
+  1345→              : pendingItems.length
+  1346→          }
+  1347→          icon={PackageX}
+  1348→          accent="blue"
+  1349→          sub={
+  1350→            viewMode === "value"
+  1351→              ? `${formatCurrency(pendingValue)} expected value`
+  1352→              : `${formatNumber(pendingQty)} qty expected`
+  1353→          }
+  1354→        />
+  1355→        <StatCard
+  1356→          label="Part Supply Items"
+  1357→          value={
+  1358→            viewMode === "value"
+  1359→              ? formatCurrency(activePartSupplyValue)
+  1360→              : activePartSupplyCount
+  1361→          }
+  1362→          icon={Layers}
+  1363→          accent="amber"
+  1364→          sub={
+  1365→            viewMode === "value"
+  1366→              ? `${formatCurrency(activePartSupplyValue)} received value`
+  1367→              : "Active part-supply orders"
+  1368→          }
+  1369→        />
+  1370→        <StatCard
+  1371→          label="Collected Items"
+  1372→          value={
+  1373→            viewMode === "value"
+  1374→              ? formatCurrency(todayDailyValue)
+  1375→              : collectedItems.length
+  1376→          }
+  1377→          icon={PackageCheck}
+  1378→          accent="green"
+  1379→          sub={
+  1380→            viewMode === "value"
+  1381→              ? `${formatCurrency(todayDailyValue)} collected today`
+  1382→              : `${todayDailyCount} collected today`
+  1383→          }
+  1384→        />
+  1385→      </div>
+  1386→
+  1387→      {/* Charts */}
+  1388→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  1389→        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
+  1390→          <div className="flex items-center justify-between mb-4">
+  1391→            <h3 className="text-sm font-semibold text-foreground">
+  1392→              Collection Trend — Last 7 Days
+  1393→            </h3>
+  1394→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1395→              {viewMode === "value" ? "By Value" : "By Numbers"}
+  1396→            </CustomBadge>
+  1397→          </div>
+  1398→          {trendData.length > 0 ? (
+  1399→            <ResponsiveContainer width="100%" height={280}>
+  1400→              <LineChart
+  1401→                data={trendData}
+  1402→                margin={{ top: 5, right: 16, left: 0, bottom: 5 }}
+  1403→              >
+  1404→                <CartesianGrid
+  1405→                  strokeDasharray="3 3"
+  1406→                  stroke="#2d3548"
+  1407→                  vertical={false}
+  1408→                />
+  1409→                <XAxis
+  1410→                  dataKey="name"
+  1411→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1412→                  axisLine={{ stroke: "#2d3548" }}
+  1413→                  tickLine={{ stroke: "#2d3548" }}
+  1414→                />
+  1415→                <YAxis
+  1416→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1417→                  axisLine={{ stroke: "#2d3548" }}
+  1418→                  tickLine={{ stroke: "#2d3548" }}
+  1419→                  tickFormatter={(v: number) =>
+  1420→                    viewMode === "value"
+  1421→                      ? v >= 1000
+  1422→                        ? `${(v / 1000).toFixed(0)}k`
+  1423→                        : String(v)
+  1424→                      : formatNumber(v)
+  1425→                  }
+  1426→                  width={48}
+  1427→                />
+  1428→                <Tooltip
+  1429→                  contentStyle={{
+  1430→                    background: "#1a1f2e",
+  1431→                    border: "1px solid #2d3548",
+  1432→                    borderRadius: 8,
+  1433→                    fontSize: 12,
+  1434→                  }}
+  1435→                  formatter={(value: number) => [
+  1436→                    viewMode === "value"
+  1437→                      ? formatCurrency(value)
+  1438→                      : formatNumber(value),
+  1439→                    viewMode === "value" ? "Value" : "Qty",
+  1440→                  ]}
+  1441→                />
+  1442→                <Line
+  1443→                  type="monotone"
+  1444→                  dataKey="qty"
+  1445→                  name={viewMode === "value" ? "Value Collected" : "Qty Collected"}
+  1446→                  stroke="#3b82f6"
+  1447→                  strokeWidth={2}
+  1448→                  dot={{ fill: "#3b82f6", r: 3 }}
+  1449→                  activeDot={{ r: 5 }}
+  1450→                />
+  1451→              </LineChart>
+  1452→            </ResponsiveContainer>
+  1453→          ) : (
+  1454→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1455→              No collection data
+  1456→            </p>
+  1457→          )}
+  1458→        </div>
+  1459→
+  1460→        <div className="bg-card border border-border rounded-xl p-5">
+  1461→          <div className="flex items-center justify-between mb-4">
+  1462→            <h3 className="text-sm font-semibold text-foreground">
+  1463→              Items by Status
+  1464→            </h3>
+  1465→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1466→              {viewMode === "value" ? "Value" : "Count"}
+  1467→            </CustomBadge>
+  1468→          </div>
+  1469→          {statusBreakdown.length > 0 ? (
+  1470→            <ResponsiveContainer width="100%" height={280}>
+  1471→              <PieChart>
+  1472→                <Pie
+  1473→                  data={statusBreakdown}
+  1474→                  dataKey="value"
+  1475→                  nameKey="name"
+  1476→                  cx="50%"
+  1477→                  cy="50%"
+  1478→                  outerRadius={90}
+  1479→                  innerRadius={45}
+  1480→                  paddingAngle={2}
+  1481→                >
+  1482→                  {statusBreakdown.map((entry, i) => (
+  1483→                    <Cell
+  1484→                      key={i}
+  1485→                      fill={
+  1486→                        PIE_STATUS_COLORS[entry.name] || DEFAULT_PIE_COLOR
+  1487→                      }
+  1488→                    />
+  1489→                  ))}
+  1490→                </Pie>
+  1491→                <Tooltip
+  1492→                  contentStyle={{
+  1493→                    background: "#1a1f2e",
+  1494→                    border: "1px solid #2d3548",
+  1495→                    borderRadius: 8,
+  1496→                    fontSize: 12,
+  1497→                  }}
+  1498→                  formatter={(value: number) =>
+  1499→                    viewMode === "value"
+  1500→                      ? formatCurrency(value)
+  1501→                      : formatNumber(value)
+  1502→                  }
+  1503→                />
+  1504→                <Legend wrapperStyle={{ fontSize: 10 }} />
+  1505→              </PieChart>
+  1506→            </ResponsiveContainer>
+  1507→          ) : (
+  1508→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1509→              No items
+  1510→            </p>
+  1511→          )}
+  1512→        </div>
+  1513→      </div>
+  1514→
+  1515→      {/* Recent activity */}
+  1516→      <div className="bg-card border border-border rounded-xl p-5">
+  1517→        <div className="flex items-center justify-between mb-4">
+  1518→          <h3 className="text-sm font-semibold text-foreground">
+  1519→            Recent Collection Activity
+  1520→          </h3>
+  1521→          <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1522→            Last {recentDaily.length || 0}
+  1523→          </CustomBadge>
+  1524→        </div>
+  1525→        {recentDaily.length === 0 ? (
+  1526→          <EmptyState
+  1527→            icon={CalendarDays}
+  1528→            title="No recent collections"
+  1529→            description={
+  1530→              filtersActive
+  1531→                ? "No collections match the current filters."
+  1532→                : "Daily collections will appear here once recorded."
+  1533→            }
+  1534→          />
+  1535→        ) : (
+  1536→          <ul className="space-y-3">
+  1537→            {recentDaily.map((d) => (
+  1538→              <li
+  1539→                key={d.id}
+  1540→                className="flex items-start gap-3 pb-3 border-b border-border last:border-0 last:pb-0"
+  1541→              >
+  1542→                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+  1543→                  <PackageCheck className="h-4 w-4" />
+  1544→                </div>
+  1545→                <div className="min-w-0 flex-1">
+  1546→                  <p className="text-sm font-medium text-foreground truncate">
+  1547→                    {d.itemName}
+  1548→                  </p>
+  1549→                  <p className="text-xs text-muted-foreground">
+  1550→                    {viewMode === "value"
+  1551→                      ? `${formatCurrency(valueFor(d.qty, d.itemName, storeByName))} value`
+  1552→                      : `${formatNumber(d.qty)} qty`}{" "}
+  1553→                    · {d.receivedFrom || "—"} · {formatFullDate(d.date)}
+  1554→                  </p>
+  1555→                </div>
+  1556→                <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+  1557→                  {formatDateTime(d.recordedAt)}
+  1558→                </span>
+  1559→              </li>
+  1560→            ))}
+  1561→          </ul>
+  1562→        )}
+  1563→      </div>
+  1564→    </div>
+  1565→  );
+  1566→}
+  1567→
+  1568→// ─────────────────────────────────────────────────────────
+  1569→// Part Supply Tab
+  1570→// ─────────────────────────────────────────────────────────
+  1571→function PartSupplyTab() {
+  1572→  const { data: orders, loading, error, refresh } = useFetch<
+  1573→    PartSupplyOrder[]
+  1574→  >("/api/collection/part-supply");
+  1575→  const [expandedId, setExpandedId] = useState<string | null>(null);
+  1576→  const [addOpen, setAddOpen] = useState(false);
+  1577→  const [entryDialogOrder, setEntryDialogOrder] =
+  1578→    useState<PartSupplyOrder | null>(null);
+  1579→  const [printOrder, setPrintOrder] = useState<PartSupplyOrder | null>(null);
+  1580→  const { toast } = useToast();
+  1581→
+  1582→  function toggle(id: string) {
+  1583→    setExpandedId((cur) => (cur === id ? null : id));
+  1584→  }
+  1585→
+  1586→  if (loading) return <LoadingState label="Loading part-supply orders..." />;
+  1587→  if (error) return <ErrorState message={error} />;
+  1588→
+  1589→  return (
+  1590→    <div className="space-y-4">
+  1591→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+  1592→        <p className="text-sm text-muted-foreground">
+  1593→          Track multi-day deliveries (Ready-mix concrete, Quarry items, TMT
+  1594→          bars, etc.)
+  1595→        </p>
+  1596→        <Button
+  1597→          onClick={() => setAddOpen(true)}
+  1598→          size="sm"
+  1599→          className="gap-1.5 shrink-0"
+  1600→        >
+  1601→          <Plus className="h-4 w-4" /> Add Part Supply Order
+  1602→        </Button>
+  1603→      </div>
+  1604→
+  1605→      {!orders || orders.length === 0 ? (
+  1606→        <EmptyState
+  1607→          icon={Layers}
+  1608→          title="No part-supply orders"
+  1609→          description="Create an order to start tracking multi-day deliveries."
+  1610→          action={
+  1611→            <Button
+  1612→              onClick={() => setAddOpen(true)}
+  1613→              size="sm"
+  1614→              className="gap-1.5"
+  1615→            >
+  1616→              <Plus className="h-4 w-4" /> Add Part Supply Order
+  1617→            </Button>
+  1618→          }
+  1619→        />
+  1620→      ) : (
+  1621→        <div className="space-y-3">
+  1622→          {orders.map((order) => {
+  1623→            const pct =
+  1624→              order.orderedQty > 0
+  1625→                ? Math.min(
+  1626→                    (order.receivedQty / order.orderedQty) * 100,
+  1627→                    100
+  1628→                  )
+  1629→                : 0;
+  1630→            const expanded = expandedId === order.id;
+  1631→            const isCompleted =
+  1632→              order.status === "Completed" || order.balance <= 0;
+  1633→            return (
+  1634→              <div
+  1635→                key={order.id}
+  1636→                className={cn(
+  1637→                  "bg-card border border-border rounded-xl overflow-hidden transition-all",
+  1638→                  isCompleted && "opacity-70"
+  1639→                )}
+  1640→              >
+  1641→                {/* Header (always visible) */}
+  1642→                <button
+  1643→                  onClick={() => toggle(order.id)}
+  1644→                  className="w-full p-4 text-left hover:bg-secondary/30 transition-colors"
+  1645→                  aria-expanded={expanded}
+  1646→                >
+  1647→                  <div className="flex items-start gap-3">
+  1648→                    <div className="shrink-0 text-muted-foreground mt-0.5">
+  1649→                      {expanded ? (
+  1650→                        <ChevronDown className="h-4 w-4" />
+  1651→                      ) : (
+  1652→                        <ChevronRight className="h-4 w-4" />
+  1653→                      )}
+  1654→                    </div>
+  1655→                    <div className="min-w-0 flex-1">
+  1656→                      <div className="flex items-start justify-between gap-2">
+  1657→                        <div className="min-w-0">
+  1658→                          <p className="font-semibold text-foreground truncate">
+  1659→                            {order.itemName}
+  1660→                          </p>
+  1661→                          <p className="text-xs text-muted-foreground truncate">
+  1662→                            {parseSupplierWithPos(order.supplier).supplier || "—"} · Started{" "}
+  1663→                            {formatFullDate(order.startDate)}
+  1664→                          </p>
+  1665→                          {parseSupplierWithPos(order.supplier).pos.length > 0 && (
+  1666→                            <div className="flex flex-wrap gap-1 mt-1">
+  1667→                              {parseSupplierWithPos(order.supplier).pos.map((po) => (
+  1668→                                <CustomBadge
+  1669→                                  key={po}
+  1670→                                  className="bg-amber-500/15 text-amber-500 dark:text-amber-400 border-amber-500/30 font-mono"
+  1671→                                >
+  1672→                                  <Link2 className="h-3 w-3 mr-1" />
+  1673→                                  {po}
+  1674→                                </CustomBadge>
+  1675→                              ))}
+  1676→                            </div>
+  1677→                          )}
+  1678→                        </div>
+  1679→                        <CustomBadge
+  1680→                          className={cn(
+  1681→                            "border-0 shrink-0",
+  1682→                            statusColor(order.status)
+  1683→                          )}
+  1684→                        >
+  1685→                          {order.status}
+  1686→                        </CustomBadge>
+  1687→                      </div>
+  1688→                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+  1689→                        <MiniStat
+  1690→                          label="Ordered"
+  1691→                          value={formatNumber(order.orderedQty)}
+  1692→                        />
+  1693→                        <MiniStat
+  1694→                          label="Received"
+  1695→                          value={formatNumber(order.receivedQty)}
+  1696→                          valueClass="text-emerald-400"
+  1697→                        />
+  1698→                        <MiniStat
+  1699→                          label="Balance"
+  1700→                          value={formatNumber(order.balance)}
+  1701→                          valueClass="text-amber-400"
+  1702→                        />
+  1703→                        <div className="col-span-2 sm:col-span-1">
+  1704→                          <p className="text-[10px] uppercase text-muted-foreground">
+  1705→                            Complete ({pct.toFixed(0)}%)
+  1706→                          </p>
+  1707→                          <div className="h-2 w-full bg-secondary rounded-full overflow-hidden mt-1">
+  1708→                            <div
+  1709→                              className={cn(
+  1710→                                "h-full rounded-full transition-all",
+  1711→                                progressColor(pct)
+  1712→                              )}
+  1713→                              style={{ width: `${pct}%` }}
+  1714→                            />
+  1715→                          </div>
+  1716→                        </div>
+  1717→                      </div>
+  1718→                    </div>
+  1719→                  </div>
+  1720→                </button>
+  1721→
+  1722→                {/* Expanded body */}
+  1723→                {expanded && (
+  1724→                  <div className="border-t border-border p-4 space-y-4 bg-secondary/10">
+  1725→                    {/* Order summary bar */}
+  1726→                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 bg-card border border-border rounded-lg p-3">
+  1727→                      <SummaryCell
+  1728→                        label="Item"
+  1729→                        value={order.itemName}
+  1730→                      />
+  1731→                      <SummaryCell
+  1732→                        label="Ordered Qty"
+  1733→                        value={formatNumber(order.orderedQty)}
+  1734→                      />
+  1735→                      <SummaryCell
+  1736→                        label="Received Qty"
+  1737→                        value={formatNumber(order.receivedQty)}
+  1738→                        accent="text-emerald-400"
+  1739→                      />
+  1740→                      <SummaryCell
+  1741→                        label="Balance"
+  1742→                        value={formatNumber(order.balance)}
+  1743→                        accent="text-amber-400"
+  1744→                      />
+  1745→                      <div className="col-span-2 sm:col-span-4 lg:col-span-1">
+  1746→                        <p className="text-[10px] uppercase text-muted-foreground mb-1">
+  1747→                          Complete ({pct.toFixed(0)}%)
+  1748→                        </p>
+  1749→                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+  1750→                          <div
+  1751→                            className={cn(
+  1752→                              "h-full rounded-full transition-all",
+  1753→                              progressColor(pct)
+  1754→                            )}
+  1755→                            style={{ width: `${pct}%` }}
+  1756→                          />
+  1757→                        </div>
+  1758→                      </div>
+  1759→                    </div>
+  1760→
+  1761→                    {/* Delivery entries table */}
+  1762→                    <div>
+  1763→                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+  1764→                        <h4 className="text-sm font-semibold text-foreground">
+  1765→                          Delivery Entries ({order.entries.length})
+  1766→                        </h4>
+  1767→                        <div className="flex items-center gap-2">
+  1768→                          <Button
+  1769→                            variant="outline"
+  1770→                            size="sm"
+  1771→                            className="gap-1.5"
+  1772→                            onClick={() => setPrintOrder(order)}
+  1773→                          >
+  1774→                            <Printer className="h-4 w-4" /> Print Receipt
+  1775→                          </Button>
+  1776→                          {!isCompleted && (
+  1777→                            <Button
+  1778→                              size="sm"
+  1779→                              className="gap-1.5"
+  1780→                              onClick={() => setEntryDialogOrder(order)}
+  1781→                            >
+  1782→                              <Plus className="h-4 w-4" /> Add Entry
+  1783→                            </Button>
+  1784→                          )}
+  1785→                        </div>
+  1786→                      </div>
+  1787→                      {order.entries.length === 0 ? (
+  1788→                        <div className="py-6 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+  1789→                          No deliveries recorded yet. Click “Add Entry” to
+  1790→                          record the first delivery.
+  1791→                        </div>
+  1792→                      ) : (
+  1793→                        <div className="overflow-x-auto rounded-lg border border-border [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1794→                          <Table>
+  1795→                            <TableHeader>
+  1796→                              <TableRow className="border-border hover:bg-transparent">
+  1797→                                <TableHead className="text-muted-foreground">
+  1798→                                  Sr.
+  1799→                                </TableHead>
+  1800→                                <TableHead className="text-muted-foreground">
+  1801→                                  Date
+  1802→                                </TableHead>
+  1803→                                <TableHead className="text-muted-foreground">
+  1804→                                  Vehicle
+  1805→                                </TableHead>
+  1806→                                <TableHead className="text-muted-foreground text-right">
+  1807→                                  Qty
+  1808→                                </TableHead>
+  1809→                                <TableHead className="text-muted-foreground">
+  1810→                                  QC By
+  1811→                                </TableHead>
+  1812→                                <TableHead className="text-muted-foreground">
+  1813→                                  Provost Sailor
+  1814→                                </TableHead>
+  1815→                                <TableHead className="text-muted-foreground text-right">
+  1816→                                  Cum. Bal.
+  1817→                                </TableHead>
+  1818→                              </TableRow>
+  1819→                            </TableHeader>
+  1820→                            <TableBody>
+  1821→                              {order.entries.map((e) => (
+  1822→                                <TableRow
+  1823→                                  key={e.id}
+  1824→                                  className="border-border"
+  1825→                                >
+  1826→                                  <TableCell className="font-medium text-foreground">
+  1827→                                    {e.srNo}
+  1828→                                  </TableCell>
+  1829→                                  <TableCell className="text-foreground whitespace-nowrap">
+  1830→                                    {formatFullDate(e.date)}
+  1831→                                  </TableCell>
+  1832→                                  <TableCell className="text-foreground">
+  1833→                                    {e.vehicleNumber || "—"}
+  1834→                                  </TableCell>
+  1835→                                  <TableCell className="text-foreground text-right whitespace-nowrap">
+  1836→                                    {formatNumber(e.qty)}
+  1837→                                  </TableCell>
+  1838→                                  <TableCell className="text-foreground">
+  1839→                                    {e.qcCheckedBy || "—"}
+  1840→                                  </TableCell>
+  1841→                                  <TableCell className="text-foreground">
+  1842→                                    {e.driverName || "—"}
+  1843→                                  </TableCell>
+  1844→                                  <TableCell className="text-foreground text-right font-medium whitespace-nowrap">
+  1845→                                    {formatNumber(e.cumulativeBalance)}
+  1846→                                  </TableCell>
+  1847→                                </TableRow>
+  1848→                              ))}
+  1849→                            </TableBody>
+  1850→                          </Table>
+  1851→                        </div>
+  1852→                      )}
+  1853→                    </div>
+  1854→                  </div>
+  1855→                )}
+  1856→              </div>
+  1857→            );
+  1858→          })}
+  1859→        </div>
+  1860→      )}
+  1861→
+  1862→      {/* Add Order Dialog */}
+  1863→      <AddPartSupplyDialog
+  1864→        open={addOpen}
+  1865→        onOpenChange={setAddOpen}
+  1866→        onCreated={() => {
+  1867→          setAddOpen(false);
+  1868→          toast({ title: "Part supply order created" });
+  1869→          refresh();
+  1870→        }}
+  1871→      />
+  1872→
+  1873→      {/* Add Entry Dialog */}
+  1874→      {entryDialogOrder && (
+  1875→        <AddEntryDialog
+  1876→          order={entryDialogOrder}
+  1877→          open={!!entryDialogOrder}
+  1878→          onOpenChange={(o) => !o && setEntryDialogOrder(null)}
+  1879→          onCreated={() => {
+  1880→            setEntryDialogOrder(null);
+  1881→            toast({ title: "Delivery entry added" });
+  1882→            refresh();
+  1883→          }}
+  1884→        />
+  1885→      )}
+  1886→
+  1887→      {/* Print Receipt Dialog */}
+  1888→      {printOrder && (
+  1889→        <PrintReceiptDialog
+  1890→          order={printOrder}
+  1891→          open={!!printOrder}
+  1892→          onOpenChange={(o) => !o && setPrintOrder(null)}
+  1893→        />
+  1894→      )}
+  1895→    </div>
+  1896→  );
+  1897→}
+  1898→
+  1899→function MiniStat({
+  1900→  label,
+  1901→  value,
+  1902→  valueClass,
+  1903→}: {
+  1904→  label: string;
+  1905→  value: string;
+  1906→  valueClass?: string;
+  1907→}) {
+  1908→  return (
+  1909→    <div>
+  1910→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+  1911→      <p
+  1912→        className={cn(
+  1913→          "text-sm font-medium text-foreground",
+  1914→          valueClass
+  1915→        )}
+  1916→      >
+  1917→        {value}
+  1918→      </p>
+  1919→    </div>
+  1920→  );
+  1921→}
+  1922→
+  1923→function SummaryCell({
+  1924→  label,
+  1925→  value,
+  1926→  accent,
+  1927→}: {
+  1928→  label: string;
+  1929→  value: string;
+  1930→  accent?: string;
+  1931→}) {
+  1932→  return (
+  1933→    <div>
+  1934→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+  1935→      <p
+  1936→        className={cn(
+  1937→          "text-sm font-medium truncate",
+  1938→          accent ?? "text-foreground"
+  1939→        )}
+  1940→      >
+  1941→        {value}
+  1942→      </p>
+  1943→    </div>
+  1944→  );
+  1945→}
+  1946→
+  1947→// ─────────────────────────────────────────────────────────
+  1948→// Add Part Supply Order Dialog
+  1949→// ─────────────────────────────────────────────────────────
+  1950→function AddPartSupplyDialog({
+  1951→  open,
+  1952→  onOpenChange,
+  1953→  onCreated,
+  1954→}: {
+  1955→  open: boolean;
+  1956→  onOpenChange: (o: boolean) => void;
+  1957→  onCreated: () => void;
+  1958→}) {
+  1959→  const [itemName, setItemName] = useState("");
+  1960→  const [orderedQty, setOrderedQty] = useState("");
+  1961→  const [startDate, setStartDate] = useState(todayISO());
+  1962→  const [expectedEndDate, setExpectedEndDate] = useState("");
+  1963→  const [supplier, setSupplier] = useState("");
+  1964→  // Primary PO (drives auto-fill) — kept as a single-select for backwards
+  1965→  // UX. The split-order multi-select lives in `linkedPoIds`.
+  1966→  const [selectedPoId, setSelectedPoId] = useState<string>("");
+  1967→  // Linked PO IDs for split orders — multiple POs that this single part-supply
+  1968→  // order will fulfil. Stored as a Set for O(1) toggle.
+  1969→  const [linkedPoIds, setLinkedPoIds] = useState<Set<string>>(new Set());
+  1970→  // Optional manual PO numbers — when the user wants to link a PO that isn't
+  1971→  // in the procurement list yet, they can type the number(s) here.
+  1972→  const [manualPoNumbers, setManualPoNumbers] = useState("");
+  1973→  const [submitting, setSubmitting] = useState(false);
+  1974→  const { toast } = useToast();
+  1975→
+  1976→  // Fetch PO-processed procurement files (only when the dialog is open) so
+  1977→  // the user can pick an item and auto-fill its details.
+  1978→  const { data: procurementFiles, loading: poLoading } =
+  1979→    useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+  1980→
+  1981→  const poOptions = useMemo(() => {
+  1982→    return (procurementFiles ?? []).filter((f) =>
+  1983→      isPoProcessed(f.presentPosition)
+  1984→    );
+  1985→  }, [procurementFiles]);
+  1986→
+  1987→  function handlePoSelect(id: string) {
+  1988→    setSelectedPoId(id);
+  1989→    const f = poOptions.find((p) => p.id === id);
+  1990→    if (!f) return;
+  1991→    setItemName(f.itemName);
+  1992→    setOrderedQty(String(f.qty || ""));
+  1993→    setSupplier(f.supplier || "");
+  1994→    // Auto-link the primary PO if it isn't linked yet.
+  1995→    setLinkedPoIds((cur) => {
+  1996→      const next = new Set(cur);
+  1997→      next.add(id);
+  1998→      return next;
+  1999→    });
+  2000→  }
+
+[showing lines 1-2000 of 5002; use offset=2001 with limit to continue reading]

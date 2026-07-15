@@ -1,0 +1,720 @@
+// CE Logistic Panel — Prisma schema
+// Dockyard ERP: Projects, Procurement, Stores, Rate Finder, Collection
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── MODULE 2: PROJECTS ─────────────────────────
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  nameAbbreviation String? // abbreviated project name (e.g. "NSH" for "No.03 Slipway Hangar") — used as file group key prefix
+  voteNumber    String   // vote number OR "NON-NAVAL" OR "CONTRACTUAL"
+  voteAllocation Float   @default(0)
+  committed     Float    @default(0)
+  actualSpent   Float    @default(0)
+  startDate     String?
+  endDate       String?  // EDC (Estimated Date of Completion)
+  department    String?  // kept for backward compat
+  benefactor    String?  // replaces "Department" label
+  reference     String?  // reference (manually entered — how vote allocated)
+  projectType   String   @default("New Construction") // New Construction | Continue | Renovation | Maintenance | General Requirement | Contractual Job
+  financialMean String?  // Vote | Malima Fund | Non-Public Fund | Contractual (for non-naval)
+  requirementGroup String? // for Maintenance (recurring) projects: groups sub-requirements (e.g. "ENA Maintenance", "Water Purification")
+  projectOfficer String?
+  status        String   @default("Active") // Active | On Hold | Completed | Cancelled
+  description   String?
+  showOnDashboard Boolean @default(true) // toggle visibility on operational dashboard
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  files        ProjectFile[]
+  allocations  Allocation[]
+  estimates    Estimate[]
+  earmarks     EarmarkedItem[]
+}
+
+model ProjectFile {
+  id              String   @id @default(cuid())
+  projectId       String
+  prNumber        String
+  itemCode        String
+  itemName        String
+  unit            String
+  qty             Float    @default(0)
+  unitPrice       Float    @default(0)
+  fileCost        Float    @default(0)
+  supplier        String?
+  presentPosition String   @default("PR Raised") // see PRESENT_POSITIONS
+  fileCategory    String   @default("General")
+  fileNumber      String?  // file number received after initial RL raising
+  fileGroupKey    String?  // grouping key for multiple items under a single file (usually = prNumber or fileNumber)
+  fileGroupSeq    Int      @default(0) // auto-increment sequence number for file group key within a project
+  purchaseOrderNumber String? // PO number — when set, file auto-appears in Collection
+  collectionStatus String  @default("Pending") // Pending | In Collection | Collected | In QCI | QCI Passed | QCI Failed | Transferred to Area Store | Transferred to Zone
+  collectionSyncedAt DateTime? // when file was synced to collection after PO
+  createdBy       String?  // sailor name who created
+  authorizedBy    String?  // officer name who authorized
+  responsiblePerson String? // default responsible person for current position
+  isArchived      Boolean  @default(false) // NFA (Not For Action) archive instead of hard delete
+  archivedReason  String?  // reason for archiving
+  archivedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  logs        FileLog[]
+  approvals   FileApprovalEntry[]
+
+  @@index([projectId])
+  @@index([isArchived])
+}
+
+// ───────────────────────── FILE APPROVAL HISTORY ─────────────────────────
+// Extended log with Category, Role/Status, Personnel, Date & Time
+// Shown in extended view (not normal popup)
+model FileApprovalEntry {
+  id          String   @id @default(cuid())
+  fileId      String
+  category    String   // e.g. "General Order Request", "General Order Dispatch", "Procurement Request Assign"
+  roleStatus  String   // e.g. "Approved By", "Authorized By", "Assigned By"
+  personnel   String   // e.g. "LT JATK JAYAKODY (NRC3542)"
+  dateTime    String   // e.g. "20/01/2026 17:01:00"
+  createdAt   DateTime @default(now())
+
+  file ProjectFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+model FileLog {
+  id          String   @id @default(cuid())
+  fileId      String
+  oldPosition String?
+  newPosition String
+  changedBy   String?
+  comment     String?
+  changedAt   DateTime @default(now())
+
+  file ProjectFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+model Allocation {
+  id            String   @id @default(cuid())
+  projectId     String
+  date          String
+  description   String
+  amount        Float    @default(0)
+  type          String   @default("Commitment") // Commitment | Actual | Release
+  authorizedBy  String?
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ───────────────────────── MODULE 3: PROCUREMENT ─────────────────────────
+// Procurement files are stored independently so they can be queried across projects.
+model ProcurementFile {
+  id              String   @id @default(cuid())
+  projectId       String?
+  projectName     String?
+  voteNumber      String?
+  prNumber        String
+  itemCode        String
+  itemName        String
+  unit            String
+  qty             Float    @default(0)
+  unitPrice       Float    @default(0)
+  fileCost        Float    @default(0)
+  supplier        String?
+  presentPosition String   @default("PR Raised")
+  fileCategory    String   @default("General")
+  createdBy       String?
+  authorizedBy    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  logs ProcurementLog[]
+
+  @@index([presentPosition])
+  @@index([supplier])
+}
+
+model ProcurementLog {
+  id          String   @id @default(cuid())
+  fileId      String
+  oldPosition String?
+  newPosition String
+  changedBy   String?
+  comment     String?
+  changedAt   DateTime @default(now())
+
+  file ProcurementFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+// ───────────────────────── ESTIMATES (Project Step 1 & 2) ─────────────────────────
+model Estimate {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  status      String   @default("Draft") // Draft | Processed | Archived
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   EstimateItem[]
+
+  @@index([projectId])
+}
+
+model EstimateItem {
+  id                 String   @id @default(cuid())
+  estimateId         String
+  srNo               Int      @default(1)
+  itemName           String
+  itemCode           String?  // matched item code from DB (AI)
+  qty                Float    @default(0)
+  unit               String   @default("NOS")
+  estimateCost       Float    @default(0) // original estimate cost
+  approxCost         Float    @default(0) // RC rate if RC else estimate cost
+  isRC               Boolean  @default(false)
+  rcNumber           String?  // RC year/number if in RC list
+  rcRate             Float    @default(0)
+  rcSupplier         String?
+  lastPurchasePrice  Float    @default(0) // from DB previous purchases
+  availableStock     Float    @default(0) // balance stock
+  stockLocation      String?  // location if available
+  nonMovingStock     Float    @default(0)
+  status             String   @default("Pending") // Pending | Initiated
+  prNumber           String?  // PR/GORF number after Initiate File
+  fileNumber         String?  // file number with date
+  fileId             String?  // link to created ProjectFile
+  createdAt          DateTime @default(now())
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+}
+
+// ───────────────────────── EARMARKED ITEMS (Stores) ─────────────────────────
+model EarmarkedItem {
+  id            String   @id @default(cuid())
+  storeItemId   String?
+  itemDescription String
+  itemCode      String?
+  projectId     String
+  projectName   String
+  qty           Float    @default(0)
+  unit          String   @default("NOS")
+  authority     String?  // authority who gave approval
+  remarks       String?
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ───────────────────────── QC INSPECTION (Collection) ─────────────────────────
+model QCInspection {
+  id              String   @id @default(cuid())
+  qciNumber       String?  // QCI number (auto or manual)
+  refType         String   // daily | partsupply | splitorder | collection
+  refId           String
+  itemName        String
+  supplier        String?
+  qty             Float    @default(0)
+  qcLevel         String   // Fail | Below Average | Satisfactory | Good | Excellent
+  qcOfficer       String?  // CCED officer name (dropdown from stakeholders)
+  qcOfficerDetails String?
+  remarks         String?  // mandatory if Fail
+  fileNumber      String?  // linked file number
+  poNumber        String?  // linked PO number (for split orders)
+  sentToAreaStore Boolean  @default(false)
+  inspectedAt     DateTime @default(now())
+
+  @@index([refType, refId])
+}
+
+// ───────────────────────── STAKEHOLDERS (Officers, Sailors, Suppliers) ─────────────────────────
+model Stakeholder {
+  id            String   @id @default(cuid())
+  name          String
+  rankOrRate    String?  // rank for officers (e.g. Cdr, Lt), rate for sailors
+  svcNumber     String?  // SVC number
+  appointment   String?  // CSLOG, CLOGD, ASO(E), APO(E), AAPO(PT), CCED(E), CCEO(E), SCE(M), SCE(P&P)
+  department    String   @default("CSLOG") // CSLOG | CE
+  category      String   @default("Officer") // Officer | Sailor | Officer-in-Area
+  seniority     Int?     // seniority order from Navy List (lower = more senior)
+  areaStoreLocation String? // for sailors: BMS, Metal, General, Paint, Oil & Lubricant, Stationary
+  subjectClerk  String?  // subject clerk assignment
+  ilmsCced      String?  // Material and ILMS CCED assignment
+  officeNumber  String?
+  telephone     String?
+  whatsapp      String?
+  email         String?
+  availability  String   @default("Available") // Available | On Leave | Busy | Off Duty
+  role          String   @default("Officer") // kept for backward compat
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([department])
+  @@index([appointment])
+  @@index([category])
+}
+
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  contactPerson   String?
+  telephone       String?
+  whatsapp        String?
+  email           String?
+  address         String?
+  contractDetails String?  // general contract info / RC validity etc.
+  registrationNo  String?
+  vatNo           String?
+  bankDetails     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contacts    SupplierContact[]
+  nominations SupplierNomination[]
+  ratings     SupplierRating[]
+}
+
+model SupplierContact {
+  id          String   @id @default(cuid())
+  supplierId  String
+  name        String
+  designation String?
+  telephone   String?
+  whatsapp    String?
+  email       String?
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+model SupplierNomination {
+  id         String   @id @default(cuid())
+  supplierId String
+  itemCode   String?
+  itemName   String
+  category   String   @default("General")
+  createdAt  DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+model SupplierRating {
+  id               String   @id @default(cuid())
+  supplierId       String
+  qciScore         Float    @default(0)  // 1-5, from QC inspections
+  loyalty          Float    @default(0)  // 1-5
+  professionalism  Float    @default(0)  // 1-5
+  activeEngagement Float    @default(0)  // 1-5
+  values           Float    @default(0)  // 1-5
+  overallScore     Float    @default(0)  // computed average
+  remarks          String?
+  ratedBy          String?
+  ratedAt          DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+// ───────────────────────── ITEM MASTER (consolidated catalogue) ─────────────────────────
+model ItemMaster {
+  id            String   @id @default(cuid())
+  canonicalCode String   @unique  // the concluded single item code
+  description   String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  alternateCodes String?  // comma-separated duplicate/alternate codes consolidated
+  alternateNames String?  // comma-separated duplicate names
+  status        String   @default("Active") // Active | Merged | Discontinued
+  mergedInto    String?  // canonical code this was merged into
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([status])
+}
+
+// ───────────────────────── MODULE 4: STORES ─────────────────────────
+model StoreZone {
+  id                String   @id @default(cuid())
+  name              String   @unique // Zone A, Ready-Use Stores, etc.
+  type              String   @default("Zone") // Zone | Ready-Use | Balance | Project
+  totalValue        Float    @default(0)
+  itemCount         Int      @default(0)
+  lowStockCount     Int      @default(0)
+  recentReceipts    Int      @default(0)
+  pendingCollection Int      @default(0)
+  nonMovingCount    Int      @default(0)
+  createdAt         DateTime @default(now())
+}
+
+model StoreItem {
+  id            String   @id @default(cuid())
+  zoneId        String?
+  zoneName      String
+  description   String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  qty           Float    @default(0)
+  unitCost      Float    @default(0)
+  totalCost     Float    @default(0)
+  location      String?
+  minStock      Float    @default(0)
+  maxStock      Float    @default(0)
+  lastMovement  String?
+  supplier      String?
+  itemCode      String?
+  ilmsCode      String?
+  syncSource    String?  // "main-system" if synced from main DB (Zone stores), null if local
+  syncedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([zoneName])
+  @@index([category])
+}
+
+// ───────────────────────── MODULE 5: RATE FINDER ─────────────────────────
+model RateContract {
+  id          String   @id @default(cuid())
+  rateCode    String?  // RC rate code (from CSV "Rate code")
+  itemCode    String
+  description String
+  unit        String
+  rcPrice     Float    @default(0)
+  vat         Float    @default(0)  // VAT percentage or amount
+  warranty    String?  // warranty if available
+  brand       String?
+  makeModel   String?
+  category    String   @default("General")  // "Category (what says in topic)"
+  subCategory String?  // "Sub category (what says in table)"
+  supplier    String?  // RC supplier
+  rcYear      String
+  validFrom   String?
+  validUntil  String?  // validity up to
+  uploadedAt  DateTime @default(now())
+
+  @@index([rcYear])
+  @@index([category])
+  @@index([rateCode])
+}
+
+model DiscontinuedItem {
+  id               String   @id @default(cuid())
+  itemCode         String
+  description      String
+  unit             String
+  lastRCPrice      Float    @default(0)
+  lastRCYear       String?
+  discontinuedDate String?
+  reason           String?
+  alternatives     String?  // comma separated item codes/names
+  createdAt        DateTime @default(now())
+}
+
+// ───────────────────────── MODULE 6: COLLECTION ─────────────────────────
+model CollectionItem {
+  id          String   @id @default(cuid())
+  name        String
+  expectedQty Float    @default(0)
+  status      String   @default("Pending") // Pending | In Progress | Collected
+  dueDate     String?
+  supplier    String?
+  createdAt   DateTime @default(now())
+}
+
+model PartSupplyOrder {
+  id              String   @id @default(cuid())
+  itemName        String
+  orderedQty      Float    @default(0)
+  receivedQty     Float    @default(0)
+  balance         Float    @default(0)
+  startDate       String?
+  expectedEndDate String?
+  status          String   @default("Active") // Active | Completed
+  supplier        String?
+  createdAt       DateTime @default(now())
+
+  entries PartSupplyEntry[]
+}
+
+model PartSupplyEntry {
+  id                 String  @id @default(cuid())
+  orderId            String
+  srNo               Int     @default(1)
+  date               String
+  vehicleNumber      String?
+  qty                Float   @default(0)
+  qcCheckedBy        String?
+  sailorCount        Int     @default(0)
+  driverName         String?
+  driverLicense      String?
+  driverPhone        String?
+  cumulativeBalance  Float   @default(0)
+  createdAt          DateTime @default(now())
+
+  order PartSupplyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model DailyCollection {
+  id           String   @id @default(cuid())
+  date         String
+  itemName     String
+  qty          Float    @default(0)
+  receivedFrom String?
+  recordedBy   String?
+  recordedAt   DateTime @default(now())
+  // Vehicle & gate pass info
+  vehicleType  String?  // SLN | Civil
+  vehicleNumber String?
+  gatePassNumber String? // for SLN vehicles
+  driverName   String?
+  driverLicense String?
+  driverPhone  String?
+  // Personnel involved
+  provostCheckedBy String? // Provost sailor who checked (dropdown)
+  ceSailorInvolved String? // CCED sailor (dropdown)
+  cslogSailorInvolved String? // CSLOG sailor (dropdown)
+  // QCI workflow
+  sentToQCI    Boolean  @default(false)
+  sentToQCIAt  DateTime?
+  isOld        Boolean  @default(false) // moved to "old" after QCI
+
+  @@index([date])
+  @@index([sentToQCI])
+}
+
+// ───────────────────────── SPLIT ORDERS (Collection) ─────────────────────────
+// A file where orders are split — same single file has 2+ POs, collected separately.
+// Items sent to QCI differently under unique PO numbers but same file number.
+model SplitOrder {
+  id              String   @id @default(cuid())
+  fileNumber      String   // the common file number
+  prNumber        String?
+  itemName        String
+  totalQty        Float    @default(0)
+  status          String   @default("Active") // Active | Completed
+  supplier        String?
+  linkedPOs       String?  // comma-separated PO numbers
+  createdAt       DateTime @default(now())
+
+  entries SplitOrderEntry[]
+
+  @@index([fileNumber])
+}
+
+model SplitOrderEntry {
+  id              String   @id @default(cuid())
+  splitOrderId    String
+  poNumber        String   // unique PO number for this split
+  qty             Float    @default(0)
+  receivedQty     Float    @default(0)
+  balance         Float    @default(0)
+  status          String   @default("Pending") // Pending | Collected | In QCI | QCI Passed | Transferred
+  date            String?
+  // collection details
+  vehicleType     String?
+  vehicleNumber   String?
+  gatePassNumber  String?
+  driverName      String?
+  provostCheckedBy String?
+  ceSailorInvolved String?
+  cslogSailorInvolved String?
+  sentToQCI       Boolean  @default(false)
+  sentToQCIAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  splitOrder SplitOrder @relation(fields: [splitOrderId], references: [id], onDelete: Cascade)
+
+  @@index([splitOrderId])
+}
+
+// ───────────────────────── AREA STORES (CSLOG — oncharge/off-charge) ─────────────────────────
+// Area stores belong to CSLOG but records kept here for easy management.
+// Oncharge = received via QCI (NAV 251 reference); Off-charge = transferred to Stores locations (NAV 255)
+// Off-charge flow: Area Store → (NAV 251 intermediate stores) → (NAV 255 to CCED Stores / Zone / Project / RU)
+model AreaStoreRecord {
+  id            String   @id @default(cuid())
+  storeName     String   // BMS | Metal | General | Paint | Oil & Lubricant | Stationary
+  itemCode      String?
+  itemName      String
+  category      String   @default("General")
+  unit          String   @default("NOS")
+  qty           Float    @default(0)
+  unitCost      Float    @default(0)
+  totalCost     Float    @default(0)
+  recordType    String   // Oncharge | OffCharge | IntermediateOffCharge | FinalOffCharge
+  navReference  String?  // NAV 251 (oncharge/intermediate) or NAV 255 (off-charge to CCED Stores)
+  qcInspectionId String? // link to QC inspection if oncharge via QCI
+  fileNumber    String?  // file number referred to store
+  location      String?  // store location
+  destinationStore String? // for off-charge: destination store (Zone A, Project Stores, RU Stores, etc.)
+  offChargeStage String? // Stage 1 (to intermediate) | Stage 2 (to CCED Stores/Zone)
+  date          String?
+  remarks       String?
+  createdAt     DateTime @default(now())
+
+  @@index([storeName])
+  @@index([recordType])
+  @@index([navReference])
+}
+
+// ───────────────────────── PROCESS FLOWS & FINANCIAL DELEGATION (Settings) ─────────────────────────
+// Defines the file action process for RC, Non-Rate, and ARO (Contractual) flows.
+// Each flow has ordered steps; each step can have a default responsible person.
+model ProcessFlow {
+  id          String   @id @default(cuid())
+  name        String   // RC | Non-Rate | ARO (Contractual)
+  description String?
+  financialDelegationId String? // optional default delegation linked at the flow level
+  createdAt   DateTime @default(now())
+
+  steps ProcessStep[]
+}
+
+model ProcessStep {
+  id               String   @id @default(cuid())
+  flowId           String
+  stepOrder        Int?     // optional (no longer required — steps linked via before/after)
+  positionName     String?  // optional (predefined stage OR custom step name — one required)
+  predefinedStage  String?  // if using a predefined stage (Pre Tender, NHQ, DPC, etc.)
+  description      String?  // brief description (financial delegation shown here if relevant)
+  beforeStepId     String?  // mandatory — which step comes before this one
+  afterStepId      String?  // optional — which step comes after this one
+  department       String?  // CCED | CSLOG | others
+  responsibleOfficers String? // JSON array of officer names (from stakeholder directory)
+  responsibleSailors String?  // JSON array of sailor names (from stakeholder directory)
+  defaultResponsiblePerson String? // kept for backward compat
+  financialDelegationLevel String? // kept for backward compat (display only, not editable at step level)
+  isTenderStage    Boolean  @default(false)
+  isEvaluationStage Boolean @default(false)
+  prefixedNumber   String?  // auto-show prefixed number if relevant
+  createdAt        DateTime @default(now())
+
+  flow ProcessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+}
+
+// ───────────────────────── FINANCIAL DELEGATION (Value & Step) ─────────────────────────
+model FinancialDelegation {
+  id          String   @id @default(cuid())
+  value       Float    @default(0) // e.g. 500000
+  authority   String   // e.g. "Cdr", "Capt", "FC", "AOE", "CNC"
+  label       String?  // computed: "Up to Rs. 500,000 — Cdr"
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+// ───────────────────────── USER PROFILES (Settings) ─────────────────────────
+model UserProfile {
+  id          String   @id @default(cuid())
+  username    String   @unique
+  displayName String
+  email       String?
+  role        String   @default("Officer") // Admin | Manager | Officer | Clerk | Viewer
+  stakeholderId String? // link to Stakeholder
+  department  String?
+  passwordHash String?  // bcrypt-style hash (simple hash for demo)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── VOTES (Settings — Vote/Funds management) ─────────────────────────
+model Vote {
+  id          String   @id @default(cuid())
+  voteNumber  String   @unique
+  description String
+  voteType    String   @default("Capital") // Capital | Recurring
+  department  String?  // SLN | MOD | custom
+  allocation  Float    @default(0)
+  financialYear String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── NAVY LIST IMPORT (Stakeholders seniority) ─────────────────────────
+model NavyListImport {
+  id          String   @id @default(cuid())
+  name        String
+  rank        String?
+  svcNumber   String?
+  appointment String?
+  seniority   Int      @default(999)
+  department  String?
+  category    String?
+  importedAt  DateTime @default(now())
+}
+
+// ───────────────────────── STORE MANAGEMENT SETTINGS ─────────────────────────
+model StoreSetting {
+  id              String   @id @default(cuid())
+  storeName       String   @unique
+  storeType       String   @default("Zone") // Zone | AreaStore | Ready-Use | Balance | Project
+  department      String?  // CCED | CSLOG
+  responsiblePersons String? // JSON array of responsible person names (sailors)
+  responsibleOfficers String? // JSON array of responsible officer names
+  responsiblePerson String? // kept for backward compat
+  location        String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ───────────────────────── NUMBER PREFIXES (Settings — default prefix parts) ─────────────────────────
+// Default/predetermined prefix parts for document numbers. During initiation, only the end number is entered.
+// e.g. PR prefix "PR/2025/" → user enters "0142" → full number "PR/2025/0142"
+model NumberPrefix {
+  id          String   @id @default(cuid())
+  docType     String   @unique // PR | NAV255 | NAV254 | PO | FILE
+  subCategory String?  // optional sub-category for document type
+  processType String?  // which Process (main) it belongs to: RC | Non-Rate | Contractual | NHQ
+  prefix      String   @default("") // e.g. "PR/2025/" or "NAV/255/2025/"
+  suffix      String?  // optional suffix
+  nextNumber  Int      @default(1) // auto-increment suggestion
+  description String?
+  stepId      String?  // link to ProcessStep (for step-relevant prefixes)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── THEME PROFILE (user-selected theme/color) ─────────────────────────
+model ThemeProfile {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. "Ocean Blue", "Emerald", "Sunset", "Royal Purple"
+  mode        String   @default("dark") // dark | light
+  primary     String   @default("#3b82f6")
+  accent      String   @default("#8b5cf6")
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}

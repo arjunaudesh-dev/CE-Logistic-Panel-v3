@@ -1,0 +1,611 @@
+     1→     1→"use client";
+     2→     2→import { useState, useRef } from "react";
+     3→     3→import { apiRequest } from "@/lib/use-fetch";
+     4→     4→import { Button } from "@/components/ui/button";
+     5→     5→import { Input } from "@/components/ui/input";
+     6→     6→import { Label } from "@/components/ui/label";
+     7→     7→import { Textarea } from "@/components/ui/textarea";
+     8→     8→import {
+     9→     9→  Select,
+    10→    10→  SelectContent,
+    11→    11→  SelectItem,
+    12→    12→  SelectTrigger,
+    13→    13→  SelectValue,
+    14→    14→} from "@/components/ui/select";
+    15→    15→import {
+    16→    16→  Dialog,
+    17→    17→  DialogContent,
+    18→    18→  DialogHeader,
+    19→    19→  DialogTitle,
+    20→    20→  DialogFooter,
+    21→    21→} from "@/components/ui/dialog";
+    22→    22→import { CustomBadge } from "@/components/erp/badges";
+    23→    23→import { useToast } from "@/hooks/use-toast";
+    24→    24→import {
+    25→    25→  PROJECT_STATUSES,
+    26→    26→  PROJECT_TYPES,
+    27→    27→  FINANCIAL_MEANS,
+    28→    28→  projectTypeColor,
+    29→    29→  financialMeanColor,
+    30→    30→} from "@/lib/constants";
+    31→    31→import { EstimateItemsTable } from "./estimate-items";
+    32→    32→import {
+    33→    33→  Loader2,
+    34→    34→  X,
+    35→    35→  ArrowLeft,
+    36→    36→  ArrowRight,
+    37→    37→  Plus,
+    38→    38→  Trash2,
+    39→    39→  FileSpreadsheet,
+    40→    40→  Sparkles,
+    41→    41→  Check,
+    42→    42→  ClipboardList,
+    43→    43→  Download,
+    44→    44→  Upload,
+    45→    45→  AlertCircle,
+    46→    46→  Info,
+    47→    47→} from "lucide-react";
+    48→    48→import { cn } from "@/lib/utils";
+    49→    49→
+    50→    50→interface EstimateRow {
+    51→    51→  itemName: string;
+    52→    52→  qty: string;
+    53→    53→  unit: string;
+    54→    54→  estimateCost: string;
+    55→    55→}
+    56→    56→
+    57→    57→interface Props {
+    58→    58→  open: boolean;
+    59→    59→  onClose: () => void;
+    60→    60→  onCreated: (project: { id: string; name: string; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null }) => void;
+    61→    61→}
+    62→    62→
+    63→    63→const UNITS = ["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"];
+    64→    64→
+    65→    65→export function AddProjectWizard({ open, onClose, onCreated }: Props) {
+    66→    66→  const [step, setStep] = useState<1 | 2>(1);
+    67→    67→  const [saving, setSaving] = useState(false);
+    68→    68→  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
+    69→    69→  const [createdEstimateId, setCreatedEstimateId] = useState<string | null>(null);
+    70→    70→  const { toast } = useToast();
+    71→    71→  const fileInputRef = useRef<HTMLInputElement>(null);
+    72→    72→  const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
+    73→    73→
+    74→    74→  const [form, setForm] = useState({
+    75→    75→    name: "",
+    76→    76→    voteNumber: "",
+    77→    77→    voteAllocation: "",
+    78→    78→    committed: "0",
+    79→    79→    actualSpent: "0",
+    80→    80→    startDate: "",
+    81→    81→    endDate: "", // EDC
+    82→    82→    benefactor: "", // replaces Department
+    83→    83→    reference: "", // manual text — how vote allocated
+    84→    84→    projectType: "New Construction",
+    85→    85→    financialMean: "Vote",
+    86→    86→    projectOfficer: "",
+    87→    87→    status: "Active",
+    88→    88→    description: "",
+    89→    89→  });
+    90→    90→  const [estimateRows, setEstimateRows] = useState<EstimateRow[]>([
+    91→    91→    { itemName: "", qty: "", unit: "NOS", estimateCost: "" },
+    92→    92→  ]);
+    93→    93→
+    94→    94→  const addRow = () =>
+    95→    95→    setEstimateRows([...estimateRows, { itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+    96→    96→  const removeRow = (idx: number) =>
+    97→    97→    setEstimateRows(estimateRows.filter((_, i) => i !== idx));
+    98→    98→  const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
+    99→    99→    setEstimateRows(estimateRows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+   100→   100→
+   101→   101→  // Valid (filled) estimate rows — at least one is required to enable Step 2
+   102→   102→  const validEstimateRows = estimateRows.filter(
+   103→   103→    (r) => r.itemName.trim() && (Number(r.qty) > 0 || Number(r.estimateCost) > 0)
+   104→   104→  );
+   105→   105→  const hasValidEstimate = validEstimateRows.length > 0;
+   106→   106→
+   107→   107→  const isNonVote = form.financialMean && form.financialMean !== "Vote";
+   108→   108→
+   109→   109→  const downloadTemplate = () => {
+   110→   110→    const header = "ItemName,Qty,Unit,EstimateCost";
+   111→   111→    const sample = "Centrifugal Pump 15kW,2,NOS,185000";
+   112→   112→    const csv = `${header}\n${sample}\n`;
+   113→   113→    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+   114→   114→    const url = URL.createObjectURL(blob);
+   115→   115→    const a = document.createElement("a");
+   116→   116→    a.href = url;
+   117→   117→    a.download = "material-estimate-template.csv";
+   118→   118→    a.click();
+   119→   119→    URL.revokeObjectURL(url);
+   120→   120→    toast({ title: "Template downloaded", description: "Fill in ItemName, Qty, Unit, EstimateCost" });
+   121→   121→  };
+   122→   122→
+   123→   123→  // Simple CSV parser — handles quoted fields with commas
+   124→   124→  const parseCsv = (text: string): string[][] => {
+   125→   125→    const rows: string[][] = [];
+   126→   126→    let cur: string[] = [];
+   127→   127→    let field = "";
+   128→   128→    let inQuotes = false;
+   129→   129→    for (let i = 0; i < text.length; i++) {
+   130→   130→      const ch = text[i];
+   131→   131→      if (inQuotes) {
+   132→   132→        if (ch === '"' && text[i + 1] === '"') {
+   133→   133→          field += '"';
+   134→   134→          i++;
+   135→   135→        } else if (ch === '"') {
+   136→   136→          inQuotes = false;
+   137→   137→        } else {
+   138→   138→          field += ch;
+   139→   139→        }
+   140→   140→      } else {
+   141→   141→        if (ch === '"') inQuotes = true;
+   142→   142→        else if (ch === ",") {
+   143→   143→          cur.push(field);
+   144→   144→          field = "";
+   145→   145→        } else if (ch === "\n" || ch === "\r") {
+   146→   146→          if (ch === "\r" && text[i + 1] === "\n") i++;
+   147→   147→          cur.push(field);
+   148→   148→          rows.push(cur);
+   149→   149→          cur = [];
+   150→   150→          field = "";
+   151→   151→        } else {
+   152→   152→          field += ch;
+   153→   153→        }
+   154→   154→      }
+   155→   155→    }
+   156→   156→    if (field.length > 0 || cur.length > 0) {
+   157→   157→      cur.push(field);
+   158→   158→      rows.push(cur);
+   159→   159→    }
+   160→   160→    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+   161→   161→  };
+   162→   162→
+   163→   163→  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   164→   164→    const file = e.target.files?.[0];
+   165→   165→    if (!file) return;
+   166→   166→    if (!file.name.toLowerCase().endsWith(".csv")) {
+   167→   167→      toast({ title: "Please upload a CSV file", variant: "destructive" });
+   168→   168→      e.target.value = "";
+   169→   169→      return;
+   170→   170→    }
+   171→   171→    try {
+   172→   172→      const text = await file.text();
+   173→   173→      const rows = parseCsv(text);
+   174→   174→      if (rows.length === 0) {
+   175→   175→        toast({ title: "CSV file is empty", variant: "destructive" });
+   176→   176→        e.target.value = "";
+   177→   177→        return;
+   178→   178→      }
+   179→   179→      const header = rows[0].map((c) => c.trim().toLowerCase());
+   180→   180→      const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
+   181→   181→      const idxQty = header.findIndex((h) => h.includes("qty"));
+   182→   182→      const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
+   183→   183→      const idxCost = header.findIndex((h) => h.includes("cost") || h.includes("price"));
+   184→   184→      const dataRows = idxName >= 0 ? rows.slice(1) : rows;
+   185→   185→      const parsed: EstimateRow[] = dataRows
+   186→   186→        .map((r) => ({
+   187→   187→          itemName: idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim(),
+   188→   188→          qty: idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim(),
+   189→   189→          unit: (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS",
+   190→   190→          estimateCost: idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim(),
+   191→   191→        }))
+   192→   192→        .filter((r) => r.itemName);
+   193→   193→      if (parsed.length === 0) {
+   194→   194→        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+   195→   195→        e.target.value = "";
+   196→   196→        return;
+   197→   197→      }
+   198→   198→      setPreviewRows(parsed);
+   199→   199→    } catch {
+   200→   200→      toast({ title: "Failed to read CSV file", variant: "destructive" });
+   201→   201→    }
+   202→   202→    e.target.value = "";
+   203→   203→  };
+   204→   204→
+   205→   205→  const confirmImport = () => {
+   206→   206→    if (!previewRows) return;
+   207→   207→    setEstimateRows(previewRows);
+   208→   208→    toast({ title: `Imported ${previewRows.length} estimate rows` });
+   209→   209→    setPreviewRows(null);
+   210→   210→  };
+   211→   211→
+   212→   212→  const handleSaveAndProcess = async () => {
+   213→   213→    if (!form.name || !form.voteNumber) {
+   214→   214→      toast({ title: "Project Name and Vote Number are required", variant: "destructive" });
+   215→   215→      return;
+   216→   216→    }
+   217→   217→    const validRows = estimateRows.filter((r) => r.itemName.trim());
+   218→   218→    if (validRows.length === 0) {
+   219→   219→      toast({ title: "Add at least one material estimate item", variant: "destructive" });
+   220→   220→      return;
+   221→   221→    }
+   222→   222→    setSaving(true);
+   223→   223→    // 1. Create project
+   224→   224→    const projRes = await apiRequest("/api/projects", "POST", form);
+   225→   225→    if (!projRes.ok) {
+   226→   226→      setSaving(false);
+   227→   227→      toast({ title: "Failed to create project", description: projRes.error, variant: "destructive" });
+   228→   228→      return;
+   229→   229→    }
+   230→   230→    const project = projRes.data as { id: string };
+   231→   231→    // 2. Export Estimate into DB
+   232→   232→    const estRes = await apiRequest("/api/estimates", "POST", {
+   233→   233→      projectId: project.id,
+   234→   234→      name: `${form.name} — Material Estimate`,
+   235→   235→      items: validRows.map((r) => ({
+   236→   236→        itemName: r.itemName,
+   237→   237→        qty: Number(r.qty) || 0,
+   238→   238→        unit: r.unit,
+   239→   239→        estimateCost: Number(r.estimateCost) || 0,
+   240→   240→      })),
+   241→   241→    });
+   242→   242→    setSaving(false);
+   243→   243→    if (estRes.ok) {
+   244→   244→      const est = estRes.data as { id: string };
+   245→   245→      setCreatedProjectId(project.id);
+   246→   246→      setCreatedEstimateId(est.id);
+   247→   247→      setStep(2);
+   248→   248→      toast({ title: "Project & estimate saved", description: "Now process the estimate with AI (Step 2)" });
+   249→   249→    } else {
+   250→   250→      toast({ title: "Estimate save failed", description: estRes.error, variant: "destructive" });
+   251→   251→    }
+   252→   252→  };
+   253→   253→
+   254→   254→  const handleGoToProject = () => {
+   255→   255→    if (createdProjectId) {
+   256→   256→      onCreated({
+   257→   257→        id: createdProjectId,
+   258→   258→        name: form.name,
+   259→   259→        voteNumber: form.voteNumber,
+   260→   260→        voteAllocation: Number(form.voteAllocation) || 0,
+   261→   261→        committed: Number(form.committed) || 0,
+   262→   262→        actualSpent: Number(form.actualSpent) || 0,
+   263→   263→        benefactor: form.benefactor || null,
+   264→   264→        reference: form.reference || null,
+   265→   265→        endDate: form.endDate || null,
+   266→   266→        startDate: form.startDate || null,
+   267→   267→        projectType: form.projectType,
+   268→   268→        financialMean: form.financialMean,
+   269→   269→      });
+   270→   270→      // reset
+   271→   271→      setStep(1);
+   272→   272→      setCreatedProjectId(null);
+   273→   273→      setCreatedEstimateId(null);
+   274→   274→      setForm({
+   275→   275→        name: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
+   276→   276→        startDate: "", endDate: "", benefactor: "", reference: "",
+   277→   277→        projectType: "New Construction", financialMean: "Vote",
+   278→   278→        projectOfficer: "", status: "Active", description: "",
+   279→   279→      });
+   280→   280→      setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "" }]);
+   281→   281→    }
+   282→   282→  };
+   283→   283→
+   284→   284→  if (!open) return null;
+   285→   285→
+   286→   286→  return (
+   287→   287→    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+   288→   288→      {/* Header */}
+   289→   289→      <div className="h-14 border-b border-border bg-card flex items-center justify-between px-4 sm:px-6 shrink-0">
+   290→   290→        <div className="flex items-center gap-3">
+   291→   291→          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+   292→   292→            <X className="h-5 w-5" />
+   293→   293→          </button>
+   294→   294→          <h2 className="font-semibold text-foreground text-sm sm:text-base">
+   295→   295→            Add New Project — {step === 1 ? "Step 1: Details & Material Estimate" : "Step 2: Processed Estimate (AI)"}
+   296→   296→          </h2>
+   297→   297→        </div>
+   298→   298→        {/* Stepper */}
+   299→   299→        <div className="hidden sm:flex items-center gap-2 text-xs">
+   300→   300→          <StepBadge n={1} active={step === 1} done={step > 1} label="Details + Estimate" />
+   301→   301→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   302→   302→          <StepBadge n={2} active={step === 2} done={false} label="AI Processing" />
+   303→   303→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   304→   304→          <StepBadge n={3} active={false} done={false} label="Project Window" />
+   305→   305→        </div>
+   306→   306→      </div>
+   307→   307→
+   308→   308→      <div className="flex-1 overflow-y-auto scrollbar-thin">
+   309→   309→        {step === 1 && (
+   310→   310→          <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
+   311→   311→            {/* Project details */}
+   312→   312→            <section className="bg-card border border-border rounded-xl p-5">
+   313→   313→              <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+   314→   314→                <ClipboardList className="h-4 w-4 text-primary" /> Project Details
+   315→   315→              </h3>
+   316→   316→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   317→   317→                <div className="sm:col-span-2 space-y-1.5">
+   318→   318→                  <Label>Project Name *</Label>
+   319→   319→                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
+   320→   320→                </div>
+   321→   321→                <div className="space-y-1.5">
+   322→   322→                  <Label>Vote Number *</Label>
+   323→   323→                  <Input
+   324→   324→                    value={form.voteNumber}
+   325→   325→                    onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+   326→   326→                    placeholder={isNonVote ? "NON-NAVAL or CONTRACTUAL" : "e.g. V-2025-001"}
+   327→   327→                    className="bg-background border-border"
+   328→   328→                  />
+   329→   329→                  {isNonVote && (
+   330→   330→                    <p className="text-[11px] text-amber-400 flex items-start gap-1">
+   331→   331→                      <Info className="h-3 w-3 mt-0.5 shrink-0" />
+   332→   332→                      Non-Vote funding — Vote Number can be &apos;NON-NAVAL&apos; or &apos;CONTRACTUAL&apos;
+   333→   333→                    </p>
+   334→   334→                  )}
+   335→   335→                </div>
+   336→   336→
+   337→   337→                {/* Project Type */}
+   338→   338→                <div className="space-y-1.5">
+   339→   339→                  <Label>Project Type *</Label>
+   340→   340→                  <Select value={form.projectType} onValueChange={(v) => setForm({ ...form, projectType: v })}>
+   341→   341→                    <SelectTrigger className="bg-background border-border">
+   342→   342→                      <SelectValue />
+   343→   343→                    </SelectTrigger>
+   344→   344→                    <SelectContent>
+   345→   345→                      {PROJECT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   346→   346→                    </SelectContent>
+   347→   347→                  </Select>
+   348→   348→                  {form.projectType && (
+   349→   349→                    <div className="pt-0.5">
+   350→   350→                      <CustomBadge className={cn("border", projectTypeColor(form.projectType))}>
+   351→   351→                        {form.projectType}
+   352→   352→                      </CustomBadge>
+   353→   353→                    </div>
+   354→   354→                  )}
+   355→   355→                </div>
+   356→   356→
+   357→   357→                {/* Financial Mean */}
+   358→   358→                <div className="space-y-1.5">
+   359→   359→                  <Label>Financial Mean *</Label>
+   360→   360→                  <Select value={form.financialMean} onValueChange={(v) => setForm({ ...form, financialMean: v })}>
+   361→   361→                    <SelectTrigger className="bg-background border-border">
+   362→   362→                      <SelectValue />
+   363→   363→                    </SelectTrigger>
+   364→   364→                    <SelectContent>
+   365→   365→                      {FINANCIAL_MEANS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+   366→   366→                    </SelectContent>
+   367→   367→                  </Select>
+   368→   368→                  {form.financialMean && (
+   369→   369→                    <div className="pt-0.5">
+   370→   370→                      <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
+   371→   371→                        {form.financialMean}
+   372→   372→                      </CustomBadge>
+   373→   373→                    </div>
+   374→   374→                  )}
+   375→   375→                </div>
+   376→   376→
+   377→   377→                {/* Reference — manual text entry (how vote allocated) */}
+   378→   378→                <div className="space-y-1.5">
+   379→   379→                  <Label>Reference (how vote allocated)</Label>
+   380→   380→                  <Input
+   381→   381→                    value={form.reference}
+   382→   382→                    onChange={(e) => setForm({ ...form, reference: e.target.value })}
+   383→   383→                    placeholder="e.g. Vote 2104 - Allocation 2025"
+   384→   384→                    className="bg-background border-border"
+   385→   385→                  />
+   386→   386→                </div>
+   387→   387→
+   388→   388→                <div className="space-y-1.5">
+   389→   389→                  <Label>Vote Allocation (Rs.)</Label>
+   390→   390→                  <Input type="number" value={form.voteAllocation} onChange={(e) => setForm({ ...form, voteAllocation: e.target.value })} placeholder="0" className="bg-background border-border" />
+   391→   391→                </div>
+   392→   392→                <div className="space-y-1.5">
+   393→   393→                  <Label>Benefactor</Label>
+   394→   394→                  <Input value={form.benefactor} onChange={(e) => setForm({ ...form, benefactor: e.target.value })} placeholder="e.g. Engineering Dept" className="bg-background border-border" />
+   395→   395→                </div>
+   396→   396→                <div className="space-y-1.5">
+   397→   397→                  <Label>Start Date</Label>
+   398→   398→                  <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="bg-background border-border" />
+   399→   399→                </div>
+   400→   400→                <div className="space-y-1.5">
+   401→   401→                  <Label>EDC (Estimated Date of Completion)</Label>
+   402→   402→                  <Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="bg-background border-border" />
+   403→   403→                </div>
+   404→   404→                <div className="space-y-1.5">
+   405→   405→                  <Label>Project Officer</Label>
+   406→   406→                  <Input value={form.projectOfficer} onChange={(e) => setForm({ ...form, projectOfficer: e.target.value })} placeholder="e.g. Cdr. R. Perera" className="bg-background border-border" />
+   407→   407→                </div>
+   408→   408→                <div className="space-y-1.5">
+   409→   409→                  <Label>Status</Label>
+   410→   410→                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+   411→   411→                    <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   412→   412→                    <SelectContent>
+   413→   413→                      {PROJECT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   414→   414→                    </SelectContent>
+   415→   415→                  </Select>
+   416→   416→                </div>
+   417→   417→                <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
+   418→   418→                  <Label>Description</Label>
+   419→   419→                  <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Brief description..." className="bg-background border-border" />
+   420→   420→                </div>
+   421→   421→              </div>
+   422→   422→            </section>
+   423→   423→
+   424→   424→            {/* Material Estimate — MANDATORY */}
+   425→   425→            <section className="bg-card border border-border rounded-xl p-5">
+   426→   426→              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+   427→   427→                <div className="min-w-0">
+   428→   428→                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   429→   429→                    <FileSpreadsheet className="h-4 w-4 text-primary" />
+   430→   430→                    Material Estimate
+   431→   431→                    <span className="text-[11px] font-normal text-amber-400 flex items-center gap-1">
+   432→   432→                      <AlertCircle className="h-3 w-3" />
+   433→   433→                      Mandatory — required to create project material list
+   434→   434→                    </span>
+   435→   435→                  </h3>
+   436→   436→                </div>
+   437→   437→                <div className="flex items-center gap-2 flex-wrap">
+   438→   438→                  <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+   439→   439→                    <Download className="h-4 w-4" /> Download Template
+   440→   440→                  </Button>
+   441→   441→                  <Button
+   442→   442→                    onClick={() => fileInputRef.current?.click()}
+   443→   443→                    size="sm"
+   444→   444→                    variant="outline"
+   445→   445→                    className="gap-1.5"
+   446→   446→                  >
+   447→   447→                    <Upload className="h-4 w-4" /> Upload Estimate
+   448→   448→                  </Button>
+   449→   449→                  <input
+   450→   450→                    ref={fileInputRef}
+   451→   451→                    type="file"
+   452→   452→                    accept=".csv"
+   453→   453→                    className="hidden"
+   454→   454→                    onChange={handleFileUpload}
+   455→   455→                  />
+   456→   456→                  <Button onClick={addRow} size="sm" variant="outline" className="gap-1.5">
+   457→   457→                    <Plus className="h-4 w-4" /> Add Row
+   458→   458→                  </Button>
+   459→   459→                </div>
+   460→   460→              </div>
+   461→   461→
+   462→   462→              <div className="border border-border rounded-lg overflow-hidden">
+   463→   463→                <div className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   464→   464→                  <span>Item Name</span>
+   465→   465→                  <span className="text-right">Qty</span>
+   466→   466→                  <span>Deno</span>
+   467→   467→                  <span className="text-right">Est. Cost (Rs.)</span>
+   468→   468→                  <span></span>
+   469→   469→                </div>
+   470→   470→                <div className="divide-y divide-border">
+   471→   471→                  {estimateRows.map((row, idx) => (
+   472→   472→                    <div key={idx} className="grid grid-cols-[1fr_80px_90px_120px_40px] gap-2 px-3 py-2 items-center">
+   473→   473→                      <Input value={row.itemName} onChange={(e) => updateRow(idx, "itemName", e.target.value)} placeholder="e.g. Centrifugal Pump 15kW" className="bg-background border-border h-8 text-sm" />
+   474→   474→                      <Input type="number" value={row.qty} onChange={(e) => updateRow(idx, "qty", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   475→   475→                      <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
+   476→   476→                        <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
+   477→   477→                        <SelectContent>
+   478→   478→                          {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+   479→   479→                        </SelectContent>
+   480→   480→                      </Select>
+   481→   481→                      <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   482→   482→                      <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
+   483→   483→                        <Trash2 className="h-4 w-4" />
+   484→   484→                      </button>
+   485→   485→                    </div>
+   486→   486→                  ))}
+   487→   487→                </div>
+   488→   488→              </div>
+   489→   489→              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+   490→   490→                <Info className="h-3 w-3" />
+   491→   491→                Tip: Estimate cost is per-unit. After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+   492→   492→                {!hasValidEstimate && (
+   493→   493→                  <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
+   494→   494→                )}
+   495→   495→              </p>
+   496→   496→            </section>
+   497→   497→
+   498→   498→            {/* Actions */}
+   499→   499→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   500→   500→              <Button variant="outline" onClick={onClose}>Cancel</Button>
+   501→   501→              <div className="flex items-center gap-2">
+   502→   502→                {!hasValidEstimate && (
+   503→   503→                  <span className="text-xs text-amber-400 hidden sm:flex items-center gap-1">
+   504→   504→                    <AlertCircle className="h-3.5 w-3.5" />
+   505→   505→                    Add estimate items to continue
+   506→   506→                  </span>
+   507→   507→                )}
+   508→   508→                <Button
+   509→   509→                  onClick={handleSaveAndProcess}
+   510→   510→                  disabled={saving || !hasValidEstimate}
+   511→   511→                  className="gap-1.5"
+   512→   512→                  title={!hasValidEstimate ? "Add at least one estimate item with item name + qty/cost" : undefined}
+   513→   513→                >
+   514→   514→                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   515→   515→                  Export Estimate &amp; Process (Step 2)
+   516→   516→                </Button>
+   517→   517→              </div>
+   518→   518→            </div>
+   519→   519→          </div>
+   520→   520→        )}
+   521→   521→
+   522→   522→        {step === 2 && createdEstimateId && (
+   523→   523→          <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
+   524→   524→            <div className="bg-card border border-border rounded-xl p-5">
+   525→   525→              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+   526→   526→                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   527→   527→                  <Sparkles className="h-4 w-4 text-primary" /> Processed Estimate — AI Matched Items
+   528→   528→                </h3>
+   529→   529→                <p className="text-xs text-muted-foreground">
+   530→   530→                  Review matched items, then &quot;Initiate File&quot; to raise PRs. Initiated files forward to the Project Window.
+   531→   531→                </p>
+   532→   532→              </div>
+   533→   533→              <EstimateItemsTable
+   534→   534→                estimateId={createdEstimateId}
+   535→   535→                showProcessButton
+   536→   536→              />
+   537→   537→            </div>
+   538→   538→
+   539→   539→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   540→   540→              <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5">
+   541→   541→                <ArrowLeft className="h-4 w-4" /> Back to Details
+   542→   542→              </Button>
+   543→   543→              <Button onClick={handleGoToProject} className="gap-1.5">
+   544→   544→                Go to Project Window (Step 3) <ArrowRight className="h-4 w-4" />
+   545→   545→              </Button>
+   546→   546→            </div>
+   547→   547→          </div>
+   548→   548→        )}
+   549→   549→      </div>
+   550→   550→
+   551→   551→      {/* CSV Import Preview Dialog */}
+   552→   552→      <Dialog open={!!previewRows} onOpenChange={(o) => !o && setPreviewRows(null)}>
+   553→   553→        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   554→   554→          <DialogHeader>
+   555→   555→            <DialogTitle className="text-foreground flex items-center gap-2">
+   556→   556→              <Upload className="h-5 w-5 text-primary" />
+   557→   557→              Preview Imported Estimate ({previewRows?.length || 0} rows)
+   558→   558→            </DialogTitle>
+   559→   559→          </DialogHeader>
+   560→   560→          <p className="text-xs text-muted-foreground -mt-1">
+   561→   561→            Review the parsed CSV rows below. Confirming will <span className="font-medium text-foreground">replace</span> the current estimate rows.
+   562→   562→          </p>
+   563→   563→          {previewRows && previewRows.length > 0 && (
+   564→   564→            <div className="border border-border rounded-lg overflow-hidden">
+   565→   565→              <div className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   566→   566→                <span>Item Name</span>
+   567→   567→                <span className="text-right">Qty</span>
+   568→   568→                <span>Unit</span>
+   569→   569→                <span className="text-right">Est. Cost</span>
+   570→   570→              </div>
+   571→   571→              <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
+   572→   572→                {previewRows.map((r, i) => (
+   573→   573→                  <div key={i} className="grid grid-cols-[1fr_70px_80px_110px] gap-2 px-3 py-1.5 text-sm items-center">
+   574→   574→                    <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
+   575→   575→                    <span className="text-right">{r.qty || "—"}</span>
+   576→   576→                    <span className="text-xs">{r.unit || "NOS"}</span>
+   577→   577→                    <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+   578→   578→                  </div>
+   579→   579→                ))}
+   580→   580→              </div>
+   581→   581→            </div>
+   582→   582→          )}
+   583→   583→          <DialogFooter>
+   584→   584→            <Button variant="outline" onClick={() => setPreviewRows(null)}>Cancel</Button>
+   585→   585→            <Button onClick={confirmImport} disabled={!previewRows || previewRows.length === 0} className="gap-1.5">
+   586→   586→              <Check className="h-4 w-4" /> Confirm Import ({previewRows?.length || 0} rows)
+   587→   587→            </Button>
+   588→   588→          </DialogFooter>
+   589→   589→        </DialogContent>
+   590→   590→      </Dialog>
+   591→   591→    </div>
+   592→   592→  );
+   593→   593→}
+   594→   594→
+   595→   595→function StepBadge({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
+   596→   596→  return (
+   597→   597→    <div className={cn(
+   598→   598→      "flex items-center gap-1.5 px-2.5 py-1 rounded-md",
+   599→   599→      active ? "bg-primary text-primary-foreground" : done ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary text-muted-foreground"
+   600→   600→    )}>
+   601→   601→      <span className={cn(
+   602→   602→        "h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold",
+   603→   603→        active ? "bg-primary-foreground text-primary" : done ? "bg-emerald-500 text-white" : "bg-muted-foreground/30"
+   604→   604→      )}>
+   605→   605→        {done ? <Check className="h-2.5 w-2.5" /> : n}
+   606→   606→      </span>
+   607→   607→      <span className="font-medium">{label}</span>
+   608→   608→    </div>
+   609→   609→  );
+   610→   610→}
+   611→   611→

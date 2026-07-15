@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  AlertDialog,
+    19→  AlertDialogContent,
+    20→  AlertDialogHeader,
+    21→  AlertDialogFooter,
+    22→  AlertDialogTitle,
+    23→  AlertDialogDescription,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→} from "@/components/ui/alert-dialog";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Input } from "@/components/ui/input";
+    29→import { Label } from "@/components/ui/label";
+    30→import { Textarea } from "@/components/ui/textarea";
+    31→import { Checkbox } from "@/components/ui/checkbox";
+    32→import {
+    33→  Select,
+    34→  SelectContent,
+    35→  SelectItem,
+    36→  SelectTrigger,
+    37→  SelectValue,
+    38→} from "@/components/ui/select";
+    39→import {
+    40→  Table,
+    41→  TableHeader,
+    42→  TableBody,
+    43→  TableHead,
+    44→  TableRow,
+    45→  TableCell,
+    46→} from "@/components/ui/table";
+    47→import { ScrollArea } from "@/components/ui/scroll-area";
+    48→import { useToast } from "@/hooks/use-toast";
+    49→import {
+    50→  USER_ROLES,
+    51→  userRoleColor,
+    52→  PROCESS_FLOW_TYPES,
+    53→  processFlowColor,
+    54→} from "@/lib/constants";
+    55→import { cn } from "@/lib/utils";
+    56→import {
+    57→  Settings,
+    58→  Users,
+    59→  Warehouse,
+    60→  GitBranch,
+    61→  Plus,
+    62→  Pencil,
+    63→  Trash2,
+    64→  Shield,
+    65→  Award,
+    66→  TrendingUp,
+    67→  Loader2,
+    68→  Search,
+    69→  X,
+    70→  UserCircle2,
+    71→  Mail,
+    72→  Building2,
+    73→  CheckCircle2,
+    74→  XCircle,
+    75→  Layers,
+    76→  Gavel,
+    77→  ClipboardCheck,
+    78→  Banknote,
+    79→  ArrowRight,
+    80→  ListTree,
+    81→} from "lucide-react";
+    82→
+    83→// ─────────────────────────────────────────────────────────
+    84→// Types
+    85→// ─────────────────────────────────────────────────────────
+    86→interface UserProfile {
+    87→  id: string;
+    88→  username: string;
+    89→  displayName: string;
+    90→  email: string | null;
+    91→  role: string;
+    92→  stakeholderId: string | null;
+    93→  department: string | null;
+    94→  active: boolean;
+    95→  createdAt: string;
+    96→  updatedAt?: string;
+    97→}
+    98→
+    99→interface StoreConfig {
+   100→  id: string;
+   101→  storeName: string;
+   102→  storeType: string;
+   103→  responsiblePerson: string | null;
+   104→  location: string | null;
+   105→  active: boolean;
+   106→  createdAt: string;
+   107→  updatedAt?: string;
+   108→}
+   109→
+   110→interface ProcessStep {
+   111→  id: string;
+   112→  flowId: string;
+   113→  stepOrder: number;
+   114→  positionName: string;
+   115→  description: string | null;
+   116→  defaultResponsiblePerson: string | null;
+   117→  financialDelegationLevel: string | null;
+   118→  isTenderStage: boolean;
+   119→  isEvaluationStage: boolean;
+   120→  createdAt: string;
+   121→}
+   122→
+   123→interface ProcessFlow {
+   124→  id: string;
+   125→  name: string;
+   126→  description: string | null;
+   127→  createdAt: string;
+   128→  steps: ProcessStep[];
+   129→}
+   130→
+   131→// ─────────────────────────────────────────────────────────
+   132→// Constants — local to settings module
+   133→// ─────────────────────────────────────────────────────────
+   134→const STORE_TYPES = ["Zone", "AreaStore", "Ready-Use", "Balance", "Project"] as const;
+   135→
+   136→const DEPARTMENTS = ["CSLOG", "CE", "Finance", "Administration", "Operations"] as const;
+   137→
+   138→function storeTypeColor(type: string): string {
+   139→  switch (type) {
+   140→    case "Zone":
+   141→      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   142→    case "AreaStore":
+   143→      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+   144→    case "Ready-Use":
+   145→      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   146→    case "Balance":
+   147→      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   148→    case "Project":
+   149→      return "bg-pink-500/15 text-pink-400 border-pink-500/30";
+   150→    default:
+   151→      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+   152→  }
+   153→}
+   154→
+   155→function storeTypeLabel(type: string): string {
+   156→  switch (type) {
+   157→    case "AreaStore":
+   158→      return "Area Store";
+   159→    case "Ready-Use":
+   160→      return "Ready-Use";
+   161→    default:
+   162→      return type;
+   163→  }
+   164→}
+   165→
+   166→function activeBadgeClass(active: boolean): string {
+   167→  return active
+   168→    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+   169→    : "bg-red-500/15 text-red-400 border-red-500/30";
+   170→}
+   171→
+   172→function formatDate(value: string | null | undefined): string {
+   173→  if (!value) return "—";
+   174→  const d = new Date(value);
+   175→  if (isNaN(d.getTime())) return "—";
+   176→  return d.toLocaleString("en-GB", {
+   177→    day: "2-digit",
+   178→    month: "short",
+   179→    year: "numeric",
+   180→  });
+   181→}
+   182→
+   183→/** Returns the accent stripe / pill color classes for a flow name. */
+   184→function flowAccent(name: string): {
+   185→  badge: string;
+   186→  dot: string;
+   187→  ring: string;
+   188→  headerBg: string;
+   189→  border: string;
+   190→  text: string;
+   191→  stepDot: string;
+   192→} {
+   193→  switch (name) {
+   194→    case "RC":
+   195→      return {
+   196→        badge: processFlowColor("RC"),
+   197→        dot: "bg-emerald-500",
+   198→        ring: "ring-emerald-500/30",
+   199→        headerBg: "bg-emerald-500/10",
+   200→        border: "border-emerald-500/30",
+   201→        text: "text-emerald-400",
+   202→        stepDot: "bg-emerald-500",
+   203→      };
+   204→    case "Non-Rate":
+   205→      return {
+   206→        badge: processFlowColor("Non-Rate"),
+   207→        dot: "bg-amber-500",
+   208→        ring: "ring-amber-500/30",
+   209→        headerBg: "bg-amber-500/10",
+   210→        border: "border-amber-500/30",
+   211→        text: "text-amber-400",
+   212→        stepDot: "bg-amber-500",
+   213→      };
+   214→    case "ARO (Contractual)":
+   215→      return {
+   216→        badge: processFlowColor("ARO (Contractual)"),
+   217→        dot: "bg-violet-500",
+   218→        ring: "ring-violet-500/30",
+   219→        headerBg: "bg-violet-500/10",
+   220→        border: "border-violet-500/30",
+   221→        text: "text-violet-400",
+   222→        stepDot: "bg-violet-500",
+   223→      };
+   224→    default:
+   225→      return {
+   226→        badge: processFlowColor(name),
+   227→        dot: "bg-slate-500",
+   228→        ring: "ring-slate-500/30",
+   229→        headerBg: "bg-slate-500/10",
+   230→        border: "border-slate-500/30",
+   231→        text: "text-slate-300",
+   232→        stepDot: "bg-slate-500",
+   233→      };
+   234→  }
+   235→}
+   236→
+   237→// ─────────────────────────────────────────────────────────
+   238→// Main Module
+   239→// ─────────────────────────────────────────────────────────
+   240→export function SettingsModule() {
+   241→  const [tab, setTab] = useState<"users" | "stores" | "process">("process");
+   242→
+   243→  return (
+   244→    <div className="space-y-6">
+   245→      <PageHeader
+   246→        title="Settings"
+   247→        description="Manage user profiles, store configuration & procurement process flows"
+   248→        icon={Settings}
+   249→      />
+   250→      <Tabs value={tab} onValueChange={(v) => setTab(v as "users" | "stores" | "process")}>
+   251→        <TabsList className="bg-card border border-border">
+   252→          <TabsTrigger value="users">
+   253→            <Users className="h-4 w-4" />
+   254→            User Profiles
+   255→          </TabsTrigger>
+   256→          <TabsTrigger value="stores">
+   257→            <Warehouse className="h-4 w-4" />
+   258→            Store Management
+   259→          </TabsTrigger>
+   260→          <TabsTrigger value="process">
+   261→            <GitBranch className="h-4 w-4" />
+   262→            Process
+   263→          </TabsTrigger>
+   264→        </TabsList>
+   265→        <TabsContent value="users">
+   266→          <UserProfilesTab />
+   267→        </TabsContent>
+   268→        <TabsContent value="stores">
+   269→          <StoreManagementTab />
+   270→        </TabsContent>
+   271→        <TabsContent value="process">
+   272→          <ProcessFlowsTab />
+   273→        </TabsContent>
+   274→      </Tabs>
+   275→    </div>
+   276→  );
+   277→}
+   278→
+   279→// ═════════════════════════════════════════════════════════
+   280→// TAB 1 — User Profiles
+   281→// ═════════════════════════════════════════════════════════
+   282→function UserProfilesTab() {
+   283→  const { data: list, loading, error, refresh } = useFetch<UserProfile[]>(
+   284→    "/api/settings/users"
+   285→  );
+   286→  const { toast } = useToast();
+   287→
+   288→  const [search, setSearch] = useState("");
+   289→  const [roleFilter, setRoleFilter] = useState("all");
+   290→  const [deptFilter, setDeptFilter] = useState("all");
+   291→  const [activeFilter, setActiveFilter] = useState("all");
+   292→
+   293→  const [addOpen, setAddOpen] = useState(false);
+   294→  const [editTarget, setEditTarget] = useState<UserProfile | null>(null);
+   295→  const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
+   296→  const [deleting, setDeleting] = useState(false);
+   297→
+   298→  const filtered = useMemo(() => {
+   299→    if (!list) return [];
+   300→    const s = search.trim().toLowerCase();
+   301→    return list.filter((u) => {
+   302→      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+   303→      if (deptFilter !== "all" && (u.department ?? "—") !== deptFilter) return false;
+   304→      if (activeFilter === "active" && !u.active) return false;
+   305→      if (activeFilter === "inactive" && u.active) return false;
+   306→      if (s) {
+   307→        const hay =
+   308→          `${u.username} ${u.displayName} ${u.email ?? ""} ${u.department ?? ""}`.toLowerCase();
+   309→        if (!hay.includes(s)) return false;
+   310→      }
+   311→      return true;
+   312→    });
+   313→  }, [list, search, roleFilter, deptFilter, activeFilter]);
+   314→
+   315→  const filtersActive =
+   316→    search !== "" ||
+   317→    roleFilter !== "all" ||
+   318→    deptFilter !== "all" ||
+   319→    activeFilter !== "all";
+   320→
+   321→  function clearFilters() {
+   322→    setSearch("");
+   323→    setRoleFilter("all");
+   324→    setDeptFilter("all");
+   325→    setActiveFilter("all");
+   326→  }
+   327→
+   328→  const activeCount = useMemo(
+   329→    () => list?.filter((u) => u.active).length ?? 0,
+   330→    [list]
+   331→  );
+   332→  const adminCount = useMemo(
+   333→    () => list?.filter((u) => u.role === "Admin").length ?? 0,
+   334→    [list]
+   335→  );
+   336→
+   337→  async function handleDelete() {
+   338→    if (!deleteTarget) return;
+   339→    setDeleting(true);
+   340→    const res = await apiRequest(
+   341→      `/api/settings/users/${deleteTarget.id}`,
+   342→      "DELETE"
+   343→    );
+   344→    setDeleting(false);
+   345→    if (res.ok) {
+   346→      toast({
+   347→        title: "User deleted",
+   348→        description: deleteTarget.displayName,
+   349→      });
+   350→      setDeleteTarget(null);
+   351→      refresh();
+   352→    } else {
+   353→      toast({
+   354→        title: "Failed to delete",
+   355→        description: res.error,
+   356→        variant: "destructive",
+   357→      });
+   358→    }
+   359→  }
+   360→
+   361→  if (loading) return <LoadingState label="Loading users..." />;
+   362→  if (error) return <ErrorState message={error} />;
+   363→
+   364→  return (
+   365→    <div className="space-y-4">
+   366→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   367→        <StatCard
+   368→          label="Total Users"
+   369→          value={list?.length ?? 0}
+   370→          icon={Users}
+   371→          accent="blue"
+   372→          sub="All profiles"
+   373→        />
+   374→        <StatCard
+   375→          label="Active"
+   376→          value={activeCount}
+   377→          icon={CheckCircle2}
+   378→          accent="green"
+   379→          sub="Can sign in"
+   380→        />
+   381→        <StatCard
+   382→          label="Administrators"
+   383→          value={adminCount}
+   384→          icon={Shield}
+   385→          accent="red"
+   386→          sub="Full access"
+   387→        />
+   388→        <StatCard
+   389→          label="Departments"
+   390→          value={
+   391→            new Set(
+   392→              list?.map((u) => u.department).filter(Boolean) as string[]
+   393→            ).size
+   394→          }
+   395→          icon={Building2}
+   396→          accent="purple"
+   397→          sub="Distinct units"
+   398→        />
+   399→      </div>
+   400→
+   401→      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+   402→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+   403→          <div className="flex-1 min-w-0">
+   404→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+   405→              Search (Username / Name / Email)
+   406→            </Label>
+   407→            <div className="relative">
+   408→              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   409→              <Input
+   410→                placeholder="Search users..."
+   411→                value={search}
+   412→                onChange={(e) => setSearch(e.target.value)}
+   413→                className="pl-9 bg-background"
+   414→              />
+   415→            </div>
+   416→          </div>
+   417→          <div className="grid grid-cols-3 gap-2 lg:gap-3">
+   418→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+   419→              <SelectTrigger className="bg-background w-full">
+   420→                <SelectValue placeholder="Role" />
+   421→              </SelectTrigger>
+   422→              <SelectContent>
+   423→                <SelectItem value="all">All Roles</SelectItem>
+   424→                {USER_ROLES.map((r) => (
+   425→                  <SelectItem key={r} value={r}>
+   426→                    {r}
+   427→                  </SelectItem>
+   428→                ))}
+   429→              </SelectContent>
+   430→            </Select>
+   431→            <Select value={deptFilter} onValueChange={setDeptFilter}>
+   432→              <SelectTrigger className="bg-background w-full">
+   433→                <SelectValue placeholder="Dept" />
+   434→              </SelectTrigger>
+   435→              <SelectContent>
+   436→                <SelectItem value="all">All Departments</SelectItem>
+   437→                {DEPARTMENTS.map((d) => (
+   438→                  <SelectItem key={d} value={d}>
+   439→                    {d}
+   440→                  </SelectItem>
+   441→                ))}
+   442→              </SelectContent>
+   443→            </Select>
+   444→            <Select value={activeFilter} onValueChange={setActiveFilter}>
+   445→              <SelectTrigger className="bg-background w-full">
+   446→                <SelectValue placeholder="Status" />
+   447→              </SelectTrigger>
+   448→              <SelectContent>
+   449→                <SelectItem value="all">All Status</SelectItem>
+   450→                <SelectItem value="active">Active only</SelectItem>
+   451→                <SelectItem value="inactive">Inactive only</SelectItem>
+   452→              </SelectContent>
+   453→            </Select>
+   454→          </div>
+   455→          <div className="flex items-center gap-2">
+   456→            {filtersActive && (
+   457→              <Button
+   458→                type="button"
+   459→                variant="ghost"
+   460→                size="sm"
+   461→                onClick={clearFilters}
+   462→              >
+   463→                <X className="h-4 w-4 mr-1" />
+   464→                Clear
+   465→              </Button>
+   466→            )}
+   467→            <Button type="button" onClick={() => setAddOpen(true)}>
+   468→              <Plus className="h-4 w-4 mr-1" />
+   469→              Add User
+   470→            </Button>
+   471→          </div>
+   472→        </div>
+   473→      </div>
+   474→
+   475→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+   476→        {filtered.length === 0 ? (
+   477→          <EmptyState
+   478→            icon={Users}
+   479→            title={
+   480→              filtersActive ? "No matching users" : "No users configured"
+   481→            }
+   482→            description={
+   483→              filtersActive
+   484→                ? "Try adjusting your search or filters."
+   485→                : "Add your first user profile to get started."
+   486→            }
+   487→            action={
+   488→              filtersActive ? (
+   489→                <Button variant="outline" size="sm" onClick={clearFilters}>
+   490→                  Clear Filters
+   491→                </Button>
+   492→              ) : (
+   493→                <Button size="sm" onClick={() => setAddOpen(true)}>
+   494→                  <Plus className="h-4 w-4 mr-1" />
+   495→                  Add User
+   496→                </Button>
+   497→              )
+   498→            }
+   499→          />
+   500→        ) : (
+   501→          <ScrollArea className="max-h-[60vh]">
+   502→            <Table>
+   503→              <TableHeader className="sticky top-0 bg-card z-10">
+   504→                <TableRow className="border-border hover:bg-transparent">
+   505→                  <TableHead className="w-[40px]">Sr</TableHead>
+   506→                  <TableHead>Username</TableHead>
+   507→                  <TableHead>Display Name</TableHead>
+   508→                  <TableHead>Email</TableHead>
+   509→                  <TableHead>Role</TableHead>
+   510→                  <TableHead>Department</TableHead>
+   511→                  <TableHead>Status</TableHead>
+   512→                  <TableHead>Created</TableHead>
+   513→                  <TableHead className="text-right">Actions</TableHead>
+   514→                </TableRow>
+   515→              </TableHeader>
+   516→              <TableBody>
+   517→                {filtered.map((u, idx) => (
+   518→                  <TableRow key={u.id} className="border-border">
+   519→                    <TableCell className="text-xs text-muted-foreground">
+   520→                      {idx + 1}
+   521→                    </TableCell>
+   522→                    <TableCell>
+   523→                      <div className="flex items-center gap-2">
+   524→                        <div className="h-7 w-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-semibold">
+   525→                          {u.username.slice(0, 2).toUpperCase()}
+   526→                        </div>
+   527→                        <span className="font-medium text-foreground font-mono text-sm">
+   528→                          {u.username}
+   529→                        </span>
+   530→                      </div>
+   531→                    </TableCell>
+   532→                    <TableCell className="font-medium text-foreground">
+   533→                      {u.displayName}
+   534→                    </TableCell>
+   535→                    <TableCell>
+   536→                      {u.email ? (
+   537→                        <a
+   538→                          href={`mailto:${u.email}`}
+   539→                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+   540→                        >
+   541→                          <Mail className="h-3 w-3" />
+   542→                          {u.email}
+   543→                        </a>
+   544→                      ) : (
+   545→                        <span className="text-muted-foreground">—</span>
+   546→                      )}
+   547→                    </TableCell>
+   548→                    <TableCell>
+   549→                      <CustomBadge className={userRoleColor(u.role)}>
+   550→                        <Shield className="h-3 w-3 mr-1" />
+   551→                        {u.role}
+   552→                      </CustomBadge>
+   553→                    </TableCell>
+   554→                    <TableCell>
+   555→                      {u.department ? (
+   556→                        <span className="text-sm text-foreground">
+   557→                          {u.department}
+   558→                        </span>
+   559→                      ) : (
+   560→                        <span className="text-muted-foreground">—</span>
+   561→                      )}
+   562→                    </TableCell>
+   563→                    <TableCell>
+   564→                      <CustomBadge className={activeBadgeClass(u.active)}>
+   565→                        {u.active ? (
+   566→                          <>
+   567→                            <CheckCircle2 className="h-3 w-3 mr-1" />
+   568→                            Active
+   569→                          </>
+   570→                        ) : (
+   571→                          <>
+   572→                            <XCircle className="h-3 w-3 mr-1" />
+   573→                            Inactive
+   574→                          </>
+   575→                        )}
+   576→                      </CustomBadge>
+   577→                    </TableCell>
+   578→                    <TableCell className="text-xs text-muted-foreground">
+   579→                      {formatDate(u.createdAt)}
+   580→                    </TableCell>
+   581→                    <TableCell className="text-right">
+   582→                      <div className="flex items-center justify-end gap-1">
+   583→                        <Button
+   584→                          variant="ghost"
+   585→                          size="sm"
+   586→                          className="h-8 w-8 p-0"
+   587→                          onClick={() => setEditTarget(u)}
+   588→                          title="Edit user"
+   589→                        >
+   590→                          <Pencil className="h-4 w-4" />
+   591→                        </Button>
+   592→                        <Button
+   593→                          variant="ghost"
+   594→                          size="sm"
+   595→                          className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+   596→                          onClick={() => setDeleteTarget(u)}
+   597→                          title="Delete user"
+   598→                        >
+   599→                          <Trash2 className="h-4 w-4" />
+   600→                        </Button>
+   601→                      </div>
+   602→                    </TableCell>
+   603→                  </TableRow>
+   604→                ))}
+   605→              </TableBody>
+   606→            </Table>
+   607→          </ScrollArea>
+   608→        )}
+   609→      </div>
+   610→
+   611→      {/* Add dialog */}
+   612→      {addOpen && (
+   613→        <UserFormDialog
+   614→          key="add-user"
+   615→          open={addOpen}
+   616→          onOpenChange={setAddOpen}
+   617→          initial={null}
+   618→          onSaved={() => {
+   619→            setAddOpen(false);
+   620→            refresh();
+   621→          }}
+   622→        />
+   623→      )}
+   624→
+   625→      {/* Edit dialog (keyed remount ensures fresh form state) */}
+   626→      {editTarget && (
+   627→        <UserFormDialog
+   628→          key={`edit-${editTarget.id}`}
+   629→          open={!!editTarget}
+   630→          onOpenChange={(o) => !o && setEditTarget(null)}
+   631→          initial={editTarget}
+   632→          onSaved={() => {
+   633→            setEditTarget(null);
+   634→            refresh();
+   635→          }}
+   636→        />
+   637→      )}
+   638→
+   639→      {/* Delete confirm */}
+   640→      <AlertDialog
+   641→        open={!!deleteTarget}
+   642→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+   643→      >
+   644→        <AlertDialogContent>
+   645→          <AlertDialogHeader>
+   646→            <AlertDialogTitle>Delete user profile?</AlertDialogTitle>
+   647→            <AlertDialogDescription>
+   648→              This will permanently delete{" "}
+   649→              <span className="font-semibold text-foreground">
+   650→                {deleteTarget?.displayName}
+   651→              </span>{" "}
+   652→              ({deleteTarget?.username}). This action cannot be undone.
+   653→            </AlertDialogDescription>
+   654→          </AlertDialogHeader>
+   655→          <AlertDialogFooter>
+   656→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+   657→            <AlertDialogAction
+   658→              onClick={handleDelete}
+   659→              disabled={deleting}
+   660→              className="bg-red-600 hover:bg-red-700 text-white"
+   661→            >
+   662→              {deleting ? (
+   663→                <>
+   664→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+   665→                  Deleting...
+   666→                </>
+   667→              ) : (
+   668→                "Delete User"
+   669→              )}
+   670→            </AlertDialogAction>
+   671→          </AlertDialogFooter>
+   672→        </AlertDialogContent>
+   673→      </AlertDialog>
+   674→    </div>
+   675→  );
+   676→}
+   677→
+   678→// ─────────────────────────────────────────────────────────
+   679→// User Form Dialog (Add/Edit)
+   680→// ─────────────────────────────────────────────────────────
+   681→interface UserFormProps {
+   682→  open: boolean;
+   683→  onOpenChange: (o: boolean) => void;
+   684→  initial: UserProfile | null;
+   685→  onSaved: () => void;
+   686→}
+   687→
+   688→function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps) {
+   689→  const isEdit = !!initial;
+   690→  const { toast } = useToast();
+   691→  const [saving, setSaving] = useState(false);
+   692→
+   693→  const [username, setUsername] = useState(initial?.username ?? "");
+   694→  const [displayName, setDisplayName] = useState(initial?.displayName ?? "");
+   695→  const [email, setEmail] = useState(initial?.email ?? "");
+   696→  const [role, setRole] = useState<string>(initial?.role ?? "Officer");
+   697→  const [department, setDepartment] = useState<string>(
+   698→    initial?.department ?? "CSLOG"
+   699→  );
+   700→  const [active, setActive] = useState<boolean>(initial?.active ?? true);
+   701→
+   702→  async function handleSubmit(e: React.FormEvent) {
+   703→    e.preventDefault();
+   704→    if (!username.trim() || !displayName.trim()) {
+   705→      toast({
+   706→        title: "Username and Display Name are required",
+   707→        variant: "destructive",
+   708→      });
+   709→      return;
+   710→    }
+   711→    setSaving(true);
+   712→    const body = {
+   713→      username: username.trim(),
+   714→      displayName: displayName.trim(),
+   715→      email: email.trim() || null,
+   716→      role,
+   717→      department,
+   718→      active,
+   719→    };
+   720→    const res = isEdit
+   721→      ? await apiRequest(`/api/settings/users/${initial!.id}`, "PUT", body)
+   722→      : await apiRequest("/api/settings/users", "POST", body);
+   723→    setSaving(false);
+   724→    if (res.ok) {
+   725→      toast({
+   726→        title: isEdit ? "User updated" : "User created",
+   727→        description: body.displayName,
+   728→      });
+   729→      onSaved();
+   730→    } else {
+   731→      toast({
+   732→        title: "Failed to save",
+   733→        description: res.error,
+   734→        variant: "destructive",
+   735→      });
+   736→    }
+   737→  }
+   738→
+   739→  return (
+   740→    <Dialog open={open} onOpenChange={onOpenChange}>
+   741→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   742→        <DialogHeader>
+   743→          <DialogTitle className="flex items-center gap-2">
+   744→            <UserCircle2 className="h-5 w-5 text-primary" />
+   745→            {isEdit ? "Edit User Profile" : "Add User Profile"}
+   746→          </DialogTitle>
+   747→          <DialogDescription>
+   748→            Configure login identity, role permissions and department
+   749→            assignment.
+   750→          </DialogDescription>
+   751→        </DialogHeader>
+   752→        <form onSubmit={handleSubmit} className="space-y-4">
+   753→          <Field label="Username" required>
+   754→            <Input
+   755→              value={username}
+   756→              onChange={(e) => setUsername(e.target.value)}
+   757→              placeholder="e.g. rperera"
+   758→              className="bg-background font-mono"
+   759→              required
+   760→            />
+   761→          </Field>
+   762→          <Field label="Display Name" required>
+   763→            <Input
+   764→              value={displayName}
+   765→              onChange={(e) => setDisplayName(e.target.value)}
+   766→              placeholder="e.g. Cdr. R. Perera"
+   767→              className="bg-background"
+   768→              required
+   769→            />
+   770→          </Field>
+   771→          <Field label="Email">
+   772→            <Input
+   773→              type="email"
+   774→              value={email}
+   775→              onChange={(e) => setEmail(e.target.value)}
+   776→              placeholder="name@navy.lk"
+   777→              className="bg-background"
+   778→            />
+   779→          </Field>
+   780→          <div className="grid grid-cols-2 gap-4">
+   781→            <Field label="Role">
+   782→              <Select value={role} onValueChange={setRole}>
+   783→                <SelectTrigger className="bg-background">
+   784→                  <SelectValue placeholder="Select role" />
+   785→                </SelectTrigger>
+   786→                <SelectContent>
+   787→                  {USER_ROLES.map((r) => (
+   788→                    <SelectItem key={r} value={r}>
+   789→                      {r}
+   790→                    </SelectItem>
+   791→                  ))}
+   792→                </SelectContent>
+   793→              </Select>
+   794→            </Field>
+   795→            <Field label="Department">
+   796→              <Select value={department} onValueChange={setDepartment}>
+   797→                <SelectTrigger className="bg-background">
+   798→                  <SelectValue placeholder="Select department" />
+   799→                </SelectTrigger>
+   800→                <SelectContent>
+   801→                  {DEPARTMENTS.map((d) => (
+   802→                    <SelectItem key={d} value={d}>
+   803→                      {d}
+   804→                    </SelectItem>
+   805→                  ))}
+   806→                </SelectContent>
+   807→              </Select>
+   808→            </Field>
+   809→          </div>
+   810→          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+   811→            <Checkbox
+   812→              id="user-active"
+   813→              checked={active}
+   814→              onCheckedChange={(v) => setActive(v === true)}
+   815→            />
+   816→            <div className="flex-1">
+   817→              <Label htmlFor="user-active" className="text-sm font-medium cursor-pointer">
+   818→                Active user
+   819→              </Label>
+   820→              <p className="text-xs text-muted-foreground">
+   821→                Inactive users cannot sign in or perform actions.
+   822→              </p>
+   823→            </div>
+   824→            <CustomBadge className={activeBadgeClass(active)}>
+   825→              {active ? "Active" : "Inactive"}
+   826→            </CustomBadge>
+   827→          </div>
+   828→          <DialogFooter>
+   829→            <Button
+   830→              type="button"
+   831→              variant="outline"
+   832→              onClick={() => onOpenChange(false)}
+   833→              disabled={saving}
+   834→            >
+   835→              Cancel
+   836→            </Button>
+   837→            <Button type="submit" disabled={saving}>
+   838→              {saving ? (
+   839→                <>
+   840→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+   841→                  Saving...
+   842→                </>
+   843→              ) : (
+   844→                <>
+   845→                  <CheckCircle2 className="h-4 w-4 mr-1" />
+   846→                  {isEdit ? "Save Changes" : "Create User"}
+   847→                </>
+   848→              )}
+   849→            </Button>
+   850→          </DialogFooter>
+   851→        </form>
+   852→      </DialogContent>
+   853→    </Dialog>
+   854→  );
+   855→}
+   856→
+   857→// ═════════════════════════════════════════════════════════
+   858→// TAB 2 — Store Management
+   859→// ═════════════════════════════════════════════════════════
+   860→function StoreManagementTab() {
+   861→  const { data: list, loading, error, refresh } = useFetch<StoreConfig[]>(
+   862→    "/api/settings/stores-config"
+   863→  );
+   864→  const { toast } = useToast();
+   865→
+   866→  const [search, setSearch] = useState("");
+   867→  const [typeFilter, setTypeFilter] = useState("all");
+   868→  const [activeFilter, setActiveFilter] = useState("all");
+   869→
+   870→  const [addOpen, setAddOpen] = useState(false);
+   871→  const [editTarget, setEditTarget] = useState<StoreConfig | null>(null);
+   872→  const [deleteTarget, setDeleteTarget] = useState<StoreConfig | null>(null);
+   873→  const [deleting, setDeleting] = useState(false);
+   874→
+   875→  const filtered = useMemo(() => {
+   876→    if (!list) return [];
+   877→    const s = search.trim().toLowerCase();
+   878→    return list.filter((st) => {
+   879→      if (typeFilter !== "all" && st.storeType !== typeFilter) return false;
+   880→      if (activeFilter === "active" && !st.active) return false;
+   881→      if (activeFilter === "inactive" && st.active) return false;
+   882→      if (s) {
+   883→        const hay =
+   884→          `${st.storeName} ${st.storeType} ${st.responsiblePerson ?? ""} ${st.location ?? ""}`.toLowerCase();
+   885→        if (!hay.includes(s)) return false;
+   886→      }
+   887→      return true;
+   888→    });
+   889→  }, [list, search, typeFilter, activeFilter]);
+   890→
+   891→  const filtersActive =
+   892→    search !== "" || typeFilter !== "all" || activeFilter !== "all";
+   893→
+   894→  function clearFilters() {
+   895→    setSearch("");
+   896→    setTypeFilter("all");
+   897→    setActiveFilter("all");
+   898→  }
+   899→
+   900→  const activeCount = useMemo(
+   901→    () => list?.filter((s) => s.active).length ?? 0,
+   902→    [list]
+   903→  );
+   904→
+   905→  const typeBreakdown = useMemo(() => {
+   906→    const map = new Map<string, number>();
+   907→    list?.forEach((s) => {
+   908→      map.set(s.storeType, (map.get(s.storeType) ?? 0) + 1);
+   909→    });
+   910→    return map;
+   911→  }, [list]);
+   912→
+   913→  async function handleDelete() {
+   914→    if (!deleteTarget) return;
+   915→    setDeleting(true);
+   916→    const res = await apiRequest(
+   917→      `/api/settings/stores-config/${deleteTarget.id}`,
+   918→      "DELETE"
+   919→    );
+   920→    setDeleting(false);
+   921→    if (res.ok) {
+   922→      toast({
+   923→        title: "Store deleted",
+   924→        description: deleteTarget.storeName,
+   925→      });
+   926→      setDeleteTarget(null);
+   927→      refresh();
+   928→    } else {
+   929→      toast({
+   930→        title: "Failed to delete",
+   931→        description: res.error,
+   932→        variant: "destructive",
+   933→      });
+   934→    }
+   935→  }
+   936→
+   937→  if (loading) return <LoadingState label="Loading store configuration..." />;
+   938→  if (error) return <ErrorState message={error} />;
+   939→
+   940→  return (
+   941→    <div className="space-y-4">
+   942→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   943→        <StatCard
+   944→          label="Total Stores"
+   945→          value={list?.length ?? 0}
+   946→          icon={Warehouse}
+   947→          accent="blue"
+   948→          sub="All configurations"
+   949→        />
+   950→        <StatCard
+   951→          label="Active"
+   952→          value={activeCount}
+   953→          icon={CheckCircle2}
+   954→          accent="green"
+   955→          sub="Operational"
+   956→        />
+   957→        <StatCard
+   958→          label="Zones"
+   959→          value={typeBreakdown.get("Zone") ?? 0}
+   960→          icon={Layers}
+   961→          accent="purple"
+   962→          sub="Storage zones"
+   963→        />
+   964→        <StatCard
+   965→          label="Area Stores"
+   966→          value={typeBreakdown.get("AreaStore") ?? 0}
+   967→          icon={Building2}
+   968→          accent="amber"
+   969→          sub="Category stores"
+   970→        />
+   971→      </div>
+   972→
+   973→      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+   974→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+   975→          <div className="flex-1 min-w-0">
+   976→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+   977→              Search (Name / Person / Location)
+   978→            </Label>
+   979→            <div className="relative">
+   980→              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   981→              <Input
+   982→                placeholder="Search stores..."
+   983→                value={search}
+   984→                onChange={(e) => setSearch(e.target.value)}
+   985→                className="pl-9 bg-background"
+   986→              />
+   987→            </div>
+   988→          </div>
+   989→          <div className="grid grid-cols-2 gap-2 lg:gap-3">
+   990→            <Select value={typeFilter} onValueChange={setTypeFilter}>
+   991→              <SelectTrigger className="bg-background w-full">
+   992→                <SelectValue placeholder="Type" />
+   993→              </SelectTrigger>
+   994→              <SelectContent>
+   995→                <SelectItem value="all">All Types</SelectItem>
+   996→                {STORE_TYPES.map((t) => (
+   997→                  <SelectItem key={t} value={t}>
+   998→                    {storeTypeLabel(t)}
+   999→                  </SelectItem>
+  1000→                ))}
+  1001→              </SelectContent>
+  1002→            </Select>
+  1003→            <Select value={activeFilter} onValueChange={setActiveFilter}>
+  1004→              <SelectTrigger className="bg-background w-full">
+  1005→                <SelectValue placeholder="Status" />
+  1006→              </SelectTrigger>
+  1007→              <SelectContent>
+  1008→                <SelectItem value="all">All Status</SelectItem>
+  1009→                <SelectItem value="active">Active only</SelectItem>
+  1010→                <SelectItem value="inactive">Inactive only</SelectItem>
+  1011→              </SelectContent>
+  1012→            </Select>
+  1013→          </div>
+  1014→          <div className="flex items-center gap-2">
+  1015→            {filtersActive && (
+  1016→              <Button
+  1017→                type="button"
+  1018→                variant="ghost"
+  1019→                size="sm"
+  1020→                onClick={clearFilters}
+  1021→              >
+  1022→                <X className="h-4 w-4 mr-1" />
+  1023→                Clear
+  1024→              </Button>
+  1025→            )}
+  1026→            <Button type="button" onClick={() => setAddOpen(true)}>
+  1027→              <Plus className="h-4 w-4 mr-1" />
+  1028→              Add Store
+  1029→            </Button>
+  1030→          </div>
+  1031→        </div>
+  1032→      </div>
+  1033→
+  1034→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1035→        {filtered.length === 0 ? (
+  1036→          <EmptyState
+  1037→            icon={Warehouse}
+  1038→            title={
+  1039→              filtersActive ? "No matching stores" : "No stores configured"
+  1040→            }
+  1041→            description={
+  1042→              filtersActive
+  1043→                ? "Try adjusting your search or filters."
+  1044→                : "Add your first store configuration (Zone, Area Store, Ready-Use, Balance, Project)."
+  1045→            }
+  1046→            action={
+  1047→              filtersActive ? (
+  1048→                <Button variant="outline" size="sm" onClick={clearFilters}>
+  1049→                  Clear Filters
+  1050→                </Button>
+  1051→              ) : (
+  1052→                <Button size="sm" onClick={() => setAddOpen(true)}>
+  1053→                  <Plus className="h-4 w-4 mr-1" />
+  1054→                  Add Store
+  1055→                </Button>
+  1056→              )
+  1057→            }
+  1058→          />
+  1059→        ) : (
+  1060→          <ScrollArea className="max-h-[60vh]">
+  1061→            <Table>
+  1062→              <TableHeader className="sticky top-0 bg-card z-10">
+  1063→                <TableRow className="border-border hover:bg-transparent">
+  1064→                  <TableHead className="w-[40px]">Sr</TableHead>
+  1065→                  <TableHead>Store Name</TableHead>
+  1066→                  <TableHead>Type</TableHead>
+  1067→                  <TableHead>Responsible Person</TableHead>
+  1068→                  <TableHead>Location</TableHead>
+  1069→                  <TableHead>Status</TableHead>
+  1070→                  <TableHead className="text-right">Actions</TableHead>
+  1071→                </TableRow>
+  1072→              </TableHeader>
+  1073→              <TableBody>
+  1074→                {filtered.map((s, idx) => (
+  1075→                  <TableRow key={s.id} className="border-border">
+  1076→                    <TableCell className="text-xs text-muted-foreground">
+  1077→                      {idx + 1}
+  1078→                    </TableCell>
+  1079→                    <TableCell>
+  1080→                      <div className="flex items-center gap-2">
+  1081→                        <div className="h-7 w-7 rounded-md bg-primary/15 text-primary flex items-center justify-center">
+  1082→                          <Warehouse className="h-4 w-4" />
+  1083→                        </div>
+  1084→                        <span className="font-medium text-foreground">
+  1085→                          {s.storeName}
+  1086→                        </span>
+  1087→                      </div>
+  1088→                    </TableCell>
+  1089→                    <TableCell>
+  1090→                      <CustomBadge className={storeTypeColor(s.storeType)}>
+  1091→                        {storeTypeLabel(s.storeType)}
+  1092→                      </CustomBadge>
+  1093→                    </TableCell>
+  1094→                    <TableCell>
+  1095→                      {s.responsiblePerson ? (
+  1096→                        <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
+  1097→                          <UserCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+  1098→                          {s.responsiblePerson}
+  1099→                        </span>
+  1100→                      ) : (
+  1101→                        <span className="text-muted-foreground">—</span>
+  1102→                      )}
+  1103→                    </TableCell>
+  1104→                    <TableCell>
+  1105→                      {s.location ? (
+  1106→                        <span className="text-sm text-foreground">
+  1107→                          {s.location}
+  1108→                        </span>
+  1109→                      ) : (
+  1110→                        <span className="text-muted-foreground">—</span>
+  1111→                      )}
+  1112→                    </TableCell>
+  1113→                    <TableCell>
+  1114→                      <CustomBadge className={activeBadgeClass(s.active)}>
+  1115→                        {s.active ? (
+  1116→                          <>
+  1117→                            <CheckCircle2 className="h-3 w-3 mr-1" />
+  1118→                            Active
+  1119→                          </>
+  1120→                        ) : (
+  1121→                          <>
+  1122→                            <XCircle className="h-3 w-3 mr-1" />
+  1123→                            Inactive
+  1124→                          </>
+  1125→                        )}
+  1126→                      </CustomBadge>
+  1127→                    </TableCell>
+  1128→                    <TableCell className="text-right">
+  1129→                      <div className="flex items-center justify-end gap-1">
+  1130→                        <Button
+  1131→                          variant="ghost"
+  1132→                          size="sm"
+  1133→                          className="h-8 w-8 p-0"
+  1134→                          onClick={() => setEditTarget(s)}
+  1135→                          title="Edit store"
+  1136→                        >
+  1137→                          <Pencil className="h-4 w-4" />
+  1138→                        </Button>
+  1139→                        <Button
+  1140→                          variant="ghost"
+  1141→                          size="sm"
+  1142→                          className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+  1143→                          onClick={() => setDeleteTarget(s)}
+  1144→                          title="Delete store"
+  1145→                        >
+  1146→                          <Trash2 className="h-4 w-4" />
+  1147→                        </Button>
+  1148→                      </div>
+  1149→                    </TableCell>
+  1150→                  </TableRow>
+  1151→                ))}
+  1152→              </TableBody>
+  1153→            </Table>
+  1154→          </ScrollArea>
+  1155→        )}
+  1156→      </div>
+  1157→
+  1158→      {addOpen && (
+  1159→        <StoreFormDialog
+  1160→          key="add-store"
+  1161→          open={addOpen}
+  1162→          onOpenChange={setAddOpen}
+  1163→          initial={null}
+  1164→          onSaved={() => {
+  1165→            setAddOpen(false);
+  1166→            refresh();
+  1167→          }}
+  1168→        />
+  1169→      )}
+  1170→
+  1171→      {editTarget && (
+  1172→        <StoreFormDialog
+  1173→          key={`edit-${editTarget.id}`}
+  1174→          open={!!editTarget}
+  1175→          onOpenChange={(o) => !o && setEditTarget(null)}
+  1176→          initial={editTarget}
+  1177→          onSaved={() => {
+  1178→            setEditTarget(null);
+  1179→            refresh();
+  1180→          }}
+  1181→        />
+  1182→      )}
+  1183→
+  1184→      <AlertDialog
+  1185→        open={!!deleteTarget}
+  1186→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+  1187→      >
+  1188→        <AlertDialogContent>
+  1189→          <AlertDialogHeader>
+  1190→            <AlertDialogTitle>Delete store configuration?</AlertDialogTitle>
+  1191→            <AlertDialogDescription>
+  1192→              This will permanently delete{" "}
+  1193→              <span className="font-semibold text-foreground">
+  1194→                {deleteTarget?.storeName}
+  1195→              </span>
+  1196→              . This action cannot be undone.
+  1197→            </AlertDialogDescription>
+  1198→          </AlertDialogHeader>
+  1199→          <AlertDialogFooter>
+  1200→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+  1201→            <AlertDialogAction
+  1202→              onClick={handleDelete}
+  1203→              disabled={deleting}
+  1204→              className="bg-red-600 hover:bg-red-700 text-white"
+  1205→            >
+  1206→              {deleting ? (
+  1207→                <>
+  1208→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1209→                  Deleting...
+  1210→                </>
+  1211→              ) : (
+  1212→                "Delete Store"
+  1213→              )}
+  1214→            </AlertDialogAction>
+  1215→          </AlertDialogFooter>
+  1216→        </AlertDialogContent>
+  1217→      </AlertDialog>
+  1218→    </div>
+  1219→  );
+  1220→}
+  1221→
+  1222→// ─────────────────────────────────────────────────────────
+  1223→// Store Form Dialog (Add/Edit)
+  1224→// ─────────────────────────────────────────────────────────
+  1225→interface StoreFormProps {
+  1226→  open: boolean;
+  1227→  onOpenChange: (o: boolean) => void;
+  1228→  initial: StoreConfig | null;
+  1229→  onSaved: () => void;
+  1230→}
+  1231→
+  1232→function StoreFormDialog({
+  1233→  open,
+  1234→  onOpenChange,
+  1235→  initial,
+  1236→  onSaved,
+  1237→}: StoreFormProps) {
+  1238→  const isEdit = !!initial;
+  1239→  const { toast } = useToast();
+  1240→  const [saving, setSaving] = useState(false);
+  1241→
+  1242→  const [storeName, setStoreName] = useState(initial?.storeName ?? "");
+  1243→  const [storeType, setStoreType] = useState<string>(
+  1244→    initial?.storeType ?? "Zone"
+  1245→  );
+  1246→  const [responsiblePerson, setResponsiblePerson] = useState(
+  1247→    initial?.responsiblePerson ?? ""
+  1248→  );
+  1249→  const [location, setLocation] = useState(initial?.location ?? "");
+  1250→  const [active, setActive] = useState<boolean>(initial?.active ?? true);
+  1251→
+  1252→  async function handleSubmit(e: React.FormEvent) {
+  1253→    e.preventDefault();
+  1254→    if (!storeName.trim()) {
+  1255→      toast({ title: "Store name is required", variant: "destructive" });
+  1256→      return;
+  1257→    }
+  1258→    setSaving(true);
+  1259→    const body = {
+  1260→      storeName: storeName.trim(),
+  1261→      storeType,
+  1262→      responsiblePerson: responsiblePerson.trim() || null,
+  1263→      location: location.trim() || null,
+  1264→      active,
+  1265→    };
+  1266→    const res = isEdit
+  1267→      ? await apiRequest(`/api/settings/stores-config/${initial!.id}`, "PUT", body)
+  1268→      : await apiRequest("/api/settings/stores-config", "POST", body);
+  1269→    setSaving(false);
+  1270→    if (res.ok) {
+  1271→      toast({
+  1272→        title: isEdit ? "Store updated" : "Store added",
+  1273→        description: body.storeName,
+  1274→      });
+  1275→      onSaved();
+  1276→    } else {
+  1277→      toast({
+  1278→        title: "Failed to save",
+  1279→        description: res.error,
+  1280→        variant: "destructive",
+  1281→      });
+  1282→    }
+  1283→  }
+  1284→
+  1285→  return (
+  1286→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1287→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+  1288→        <DialogHeader>
+  1289→          <DialogTitle className="flex items-center gap-2">
+  1290→            <Warehouse className="h-5 w-5 text-primary" />
+  1291→            {isEdit ? "Edit Store Configuration" : "Add Store Configuration"}
+  1292→          </DialogTitle>
+  1293→          <DialogDescription>
+  1294→            Define the store name, type, responsible person and location.
+  1295→          </DialogDescription>
+  1296→        </DialogHeader>
+  1297→        <form onSubmit={handleSubmit} className="space-y-4">
+  1298→          <Field label="Store Name" required>
+  1299→            <Input
+  1300→              value={storeName}
+  1301→              onChange={(e) => setStoreName(e.target.value)}
+  1302→              placeholder="e.g. Zone A / BMS Area Store / Ready-Use Stores"
+  1303→              className="bg-background"
+  1304→              required
+  1305→            />
+  1306→          </Field>
+  1307→          <Field label="Store Type">
+  1308→            <Select value={storeType} onValueChange={setStoreType}>
+  1309→              <SelectTrigger className="bg-background">
+  1310→                <SelectValue placeholder="Select store type" />
+  1311→              </SelectTrigger>
+  1312→              <SelectContent>
+  1313→                {STORE_TYPES.map((t) => (
+  1314→                  <SelectItem key={t} value={t}>
+  1315→                    {storeTypeLabel(t)}
+  1316→                  </SelectItem>
+  1317→                ))}
+  1318→              </SelectContent>
+  1319→            </Select>
+  1320→          </Field>
+  1321→          <Field label="Responsible Person">
+  1322→            <Input
+  1323→              value={responsiblePerson}
+  1324→              onChange={(e) => setResponsiblePerson(e.target.value)}
+  1325→              placeholder="e.g. PO Bandara / LS Silva"
+  1326→              className="bg-background"
+  1327→            />
+  1328→          </Field>
+  1329→          <Field label="Location">
+  1330→            <Input
+  1331→              value={location}
+  1332→              onChange={(e) => setLocation(e.target.value)}
+  1333→              placeholder="e.g. CSLOG BMS Bay / Dockyard Block A"
+  1334→              className="bg-background"
+  1335→            />
+  1336→          </Field>
+  1337→          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+  1338→            <Checkbox
+  1339→              id="store-active"
+  1340→              checked={active}
+  1341→              onCheckedChange={(v) => setActive(v === true)}
+  1342→            />
+  1343→            <div className="flex-1">
+  1344→              <Label
+  1345→                htmlFor="store-active"
+  1346→                className="text-sm font-medium cursor-pointer"
+  1347→              >
+  1348→                Active store
+  1349→              </Label>
+  1350→              <p className="text-xs text-muted-foreground">
+  1351→                Inactive stores are hidden from operational dropdowns.
+  1352→              </p>
+  1353→            </div>
+  1354→            <CustomBadge className={activeBadgeClass(active)}>
+  1355→              {active ? "Active" : "Inactive"}
+  1356→            </CustomBadge>
+  1357→          </div>
+  1358→          <DialogFooter>
+  1359→            <Button
+  1360→              type="button"
+  1361→              variant="outline"
+  1362→              onClick={() => onOpenChange(false)}
+  1363→              disabled={saving}
+  1364→            >
+  1365→              Cancel
+  1366→            </Button>
+  1367→            <Button type="submit" disabled={saving}>
+  1368→              {saving ? (
+  1369→                <>
+  1370→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1371→                  Saving...
+  1372→                </>
+  1373→              ) : (
+  1374→                <>
+  1375→                  <CheckCircle2 className="h-4 w-4 mr-1" />
+  1376→                  {isEdit ? "Save Changes" : "Add Store"}
+  1377→                </>
+  1378→              )}
+  1379→            </Button>
+  1380→          </DialogFooter>
+  1381→        </form>
+  1382→      </DialogContent>
+  1383→    </Dialog>
+  1384→  );
+  1385→}
+  1386→
+  1387→// ═════════════════════════════════════════════════════════
+  1388→// TAB 3 — Process Flows (centerpiece)
+  1389→// ═════════════════════════════════════════════════════════
+  1390→function ProcessFlowsTab() {
+  1391→  const { data: flows, loading, error, refresh } = useFetch<ProcessFlow[]>(
+  1392→    "/api/process-flows"
+  1393→  );
+  1394→  const { toast } = useToast();
+  1395→
+  1396→  const [addFlowOpen, setAddFlowOpen] = useState(false);
+  1397→  const [editFlowTarget, setEditFlowTarget] = useState<ProcessFlow | null>(null);
+  1398→  const [deleteFlowTarget, setDeleteFlowTarget] = useState<ProcessFlow | null>(
+  1399→    null
+  1400→  );
+  1401→  const [deletingFlow, setDeletingFlow] = useState(false);
+  1402→
+  1403→  // Step dialog state
+  1404→  const [addStepForFlow, setAddStepForFlow] = useState<ProcessFlow | null>(null);
+  1405→  const [editStepTarget, setEditStepTarget] = useState<{
+  1406→    flow: ProcessFlow;
+  1407→    step: ProcessStep;
+  1408→  } | null>(null);
+  1409→  const [deleteStepTarget, setDeleteStepTarget] = useState<{
+  1410→    flow: ProcessFlow;
+  1411→    step: ProcessStep;
+  1412→  } | null>(null);
+  1413→  const [deletingStep, setDeletingStep] = useState(false);
+  1414→
+  1415→  const totalSteps = useMemo(
+  1416→    () => flows?.reduce((acc, f) => acc + (f.steps?.length ?? 0), 0) ?? 0,
+  1417→    [flows]
+  1418→  );
+  1419→
+  1420→  function summaryLabel(name: string, steps: number): string {
+  1421→    return `${name} (${steps} step${steps === 1 ? "" : "s"})`;
+  1422→  }
+  1423→
+  1424→  async function handleDeleteFlow() {
+  1425→    if (!deleteFlowTarget) return;
+  1426→    setDeletingFlow(true);
+  1427→    const res = await apiRequest(
+  1428→      `/api/process-flows/${deleteFlowTarget.id}`,
+  1429→      "DELETE"
+  1430→    );
+  1431→    setDeletingFlow(false);
+  1432→    if (res.ok) {
+  1433→      toast({
+  1434→        title: "Process flow deleted",
+  1435→        description: deleteFlowTarget.name,
+  1436→      });
+  1437→      setDeleteFlowTarget(null);
+  1438→      refresh();
+  1439→    } else {
+  1440→      toast({
+  1441→        title: "Failed to delete",
+  1442→        description: res.error,
+  1443→        variant: "destructive",
+  1444→      });
+  1445→    }
+  1446→  }
+  1447→
+  1448→  async function handleDeleteStep() {
+  1449→    if (!deleteStepTarget) return;
+  1450→    setDeletingStep(true);
+  1451→    const res = await apiRequest(
+  1452→      `/api/process-flows/${deleteStepTarget.flow.id}/steps/${deleteStepTarget.step.id}`,
+  1453→      "DELETE"
+  1454→    );
+  1455→    setDeletingStep(false);
+  1456→    if (res.ok) {
+  1457→      toast({
+  1458→        title: "Step removed",
+  1459→        description: `${deleteStepTarget.step.positionName} from ${deleteStepTarget.flow.name} flow`,
+  1460→      });
+  1461→      setDeleteStepTarget(null);
+  1462→      refresh();
+  1463→    } else {
+  1464→      toast({
+  1465→        title: "Failed to delete step",
+  1466→        description: res.error,
+  1467→        variant: "destructive",
+  1468→      });
+  1469→    }
+  1470→  }
+  1471→
+  1472→  if (loading) return <LoadingState label="Loading process flows..." />;
+  1473→  if (error) return <ErrorState message={error} />;
+  1474→
+  1475→  const flowsArr = flows ?? [];
+  1476→
+  1477→  return (
+  1478→    <div className="space-y-5">
+  1479→      {/* Summary banner */}
+  1480→      <div className="bg-gradient-to-r from-card via-card to-secondary/40 border border-border rounded-xl p-5">
+  1481→        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+  1482→          <div className="flex items-start gap-3">
+  1483→            <div className="h-11 w-11 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+  1484→              <ListTree className="h-6 w-6" />
+  1485→            </div>
+  1486→            <div>
+  1487→              <p className="text-sm text-muted-foreground">
+  1488→                Procurement Process Flows Overview
+  1489→              </p>
+  1490→              <h2 className="text-xl font-bold text-foreground mt-0.5">
+  1491→                {flowsArr.length} process flow
+  1492→                {flowsArr.length === 1 ? "" : "s"} configured —{" "}
+  1493→                <span className="text-primary">{totalSteps}</span> total steps
+  1494→              </h2>
+  1495→              <p className="text-sm text-muted-foreground mt-1">
+  1496→                {flowsArr.length > 0
+  1497→                  ? flowsArr
+  1498→                      .map((f) => summaryLabel(f.name, f.steps?.length ?? 0))
+  1499→                      .join(" · ")
+  1500→                  : "No flows yet. Create one to define your procurement process."}
+  1501→              </p>
+  1502→            </div>
+  1503→          </div>
+  1504→          <Button onClick={() => setAddFlowOpen(true)} className="shrink-0">
+  1505→            <Plus className="h-4 w-4 mr-1" />
+  1506→            Add Flow
+  1507→          </Button>
+  1508→        </div>
+  1509→      </div>
+  1510→
+  1511→      {/* Flow cards */}
+  1512→      {flowsArr.length === 0 ? (
+  1513→        <EmptyState
+  1514→          icon={GitBranch}
+  1515→          title="No process flows configured"
+  1516→          description="Create RC, Non-Rate, or ARO (Contractual) flows to define how files move through your procurement pipeline — including tender stages, evaluation branches and financial delegation levels."
+  1517→          action={
+  1518→            <Button onClick={() => setAddFlowOpen(true)}>
+  1519→              <Plus className="h-4 w-4 mr-1" />
+  1520→              Add First Flow
+  1521→            </Button>
+  1522→          }
+  1523→        />
+  1524→      ) : (
+  1525→        <div className="space-y-6">
+  1526→          {flowsArr.map((flow) => (
+  1527→            <FlowCard
+  1528→              key={flow.id}
+  1529→              flow={flow}
+  1530→              onAddStep={() => setAddStepForFlow(flow)}
+  1531→              onEditStep={(step) =>
+  1532→                setEditStepTarget({ flow, step })
+  1533→              }
+  1534→              onDeleteStep={(step) =>
+  1535→                setDeleteStepTarget({ flow, step })
+  1536→              }
+  1537→              onEditFlow={() => setEditFlowTarget(flow)}
+  1538→              onDeleteFlow={() => setDeleteFlowTarget(flow)}
+  1539→            />
+  1540→          ))}
+  1541→        </div>
+  1542→      )}
+  1543→
+  1544→      {/* Add Flow dialog */}
+  1545→      {addFlowOpen && (
+  1546→        <FlowFormDialog
+  1547→          key="add-flow"
+  1548→          open={addFlowOpen}
+  1549→          onOpenChange={setAddFlowOpen}
+  1550→          initial={null}
+  1551→          onSaved={() => {
+  1552→            setAddFlowOpen(false);
+  1553→            refresh();
+  1554→          }}
+  1555→        />
+  1556→      )}
+  1557→
+  1558→      {/* Edit Flow dialog */}
+  1559→      {editFlowTarget && (
+  1560→        <FlowFormDialog
+  1561→          key={`edit-flow-${editFlowTarget.id}`}
+  1562→          open={!!editFlowTarget}
+  1563→          onOpenChange={(o) => !o && setEditFlowTarget(null)}
+  1564→          initial={editFlowTarget}
+  1565→          onSaved={() => {
+  1566→            setEditFlowTarget(null);
+  1567→            refresh();
+  1568→          }}
+  1569→        />
+  1570→      )}
+  1571→
+  1572→      {/* Delete Flow confirm */}
+  1573→      <AlertDialog
+  1574→        open={!!deleteFlowTarget}
+  1575→        onOpenChange={(o) => !o && setDeleteFlowTarget(null)}
+  1576→      >
+  1577→        <AlertDialogContent>
+  1578→          <AlertDialogHeader>
+  1579→            <AlertDialogTitle>Delete process flow?</AlertDialogTitle>
+  1580→            <AlertDialogDescription>
+  1581→              This will permanently delete the{" "}
+  1582→              <span className="font-semibold text-foreground">
+  1583→                {deleteFlowTarget?.name}
+  1584→              </span>{" "}
+  1585→              flow and all{" "}
+  1586→              <span className="font-semibold text-foreground">
+  1587→                {deleteFlowTarget?.steps?.length ?? 0}
+  1588→              </span>{" "}
+  1589→              of its steps. This action cannot be undone.
+  1590→            </AlertDialogDescription>
+  1591→          </AlertDialogHeader>
+  1592→          <AlertDialogFooter>
+  1593→            <AlertDialogCancel disabled={deletingFlow}>Cancel</AlertDialogCancel>
+  1594→            <AlertDialogAction
+  1595→              onClick={handleDeleteFlow}
+  1596→              disabled={deletingFlow}
+  1597→              className="bg-red-600 hover:bg-red-700 text-white"
+  1598→            >
+  1599→              {deletingFlow ? (
+  1600→                <>
+  1601→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1602→                  Deleting...
+  1603→                </>
+  1604→              ) : (
+  1605→                "Delete Flow"
+  1606→              )}
+  1607→            </AlertDialogAction>
+  1608→          </AlertDialogFooter>
+  1609→        </AlertDialogContent>
+  1610→      </AlertDialog>
+  1611→
+  1612→      {/* Add Step dialog */}
+  1613→      {addStepForFlow && (
+  1614→        <StepFormDialog
+  1615→          key={`add-step-${addStepForFlow.id}`}
+  1616→          open={!!addStepForFlow}
+  1617→          onOpenChange={(o) => !o && setAddStepForFlow(null)}
+  1618→          flow={addStepForFlow}
+  1619→          initial={null}
+  1620→          onSaved={() => {
+  1621→            setAddStepForFlow(null);
+  1622→            refresh();
+  1623→          }}
+  1624→        />
+  1625→      )}
+  1626→
+  1627→      {/* Edit Step dialog */}
+  1628→      {editStepTarget && (
+  1629→        <StepFormDialog
+  1630→          key={`edit-step-${editStepTarget.step.id}`}
+  1631→          open={!!editStepTarget}
+  1632→          onOpenChange={(o) => !o && setEditStepTarget(null)}
+  1633→          flow={editStepTarget.flow}
+  1634→          initial={editStepTarget.step}
+  1635→          onSaved={() => {
+  1636→            setEditStepTarget(null);
+  1637→            refresh();
+  1638→          }}
+  1639→        />
+  1640→      )}
+  1641→
+  1642→      {/* Delete Step confirm */}
+  1643→      <AlertDialog
+  1644→        open={!!deleteStepTarget}
+  1645→        onOpenChange={(o) => !o && setDeleteStepTarget(null)}
+  1646→      >
+  1647→        <AlertDialogContent>
+  1648→          <AlertDialogHeader>
+  1649→            <AlertDialogTitle>Delete process step?</AlertDialogTitle>
+  1650→            <AlertDialogDescription>
+  1651→              Remove{" "}
+  1652→              <span className="font-semibold text-foreground">
+  1653→                {deleteStepTarget?.step.positionName}
+  1654→              </span>{" "}
+  1655→              (Step {deleteStepTarget?.step.stepOrder}) from the{" "}
+  1656→              <span className="font-semibold text-foreground">
+  1657→                {deleteStepTarget?.flow.name}
+  1658→              </span>{" "}
+  1659→              flow.
+  1660→            </AlertDialogDescription>
+  1661→          </AlertDialogHeader>
+  1662→          <AlertDialogFooter>
+  1663→            <AlertDialogCancel disabled={deletingStep}>Cancel</AlertDialogCancel>
+  1664→            <AlertDialogAction
+  1665→              onClick={handleDeleteStep}
+  1666→              disabled={deletingStep}
+  1667→              className="bg-red-600 hover:bg-red-700 text-white"
+  1668→            >
+  1669→              {deletingStep ? (
+  1670→                <>
+  1671→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1672→                  Deleting...
+  1673→                </>
+  1674→              ) : (
+  1675→                "Delete Step"
+  1676→              )}
+  1677→            </AlertDialogAction>
+  1678→          </AlertDialogFooter>
+  1679→        </AlertDialogContent>
+  1680→      </AlertDialog>
+  1681→    </div>
+  1682→  );
+  1683→}
+  1684→
+  1685→// ─────────────────────────────────────────────────────────
+  1686→// Flow Card (header + vertical timeline of steps)
+  1687→// ─────────────────────────────────────────────────────────
+  1688→interface FlowCardProps {
+  1689→  flow: ProcessFlow;
+  1690→  onAddStep: () => void;
+  1691→  onEditStep: (step: ProcessStep) => void;
+  1692→  onDeleteStep: (step: ProcessStep) => void;
+  1693→  onEditFlow: () => void;
+  1694→  onDeleteFlow: () => void;
+  1695→}
+  1696→
+  1697→function FlowCard({
+  1698→  flow,
+  1699→  onAddStep,
+  1700→  onEditStep,
+  1701→  onDeleteStep,
+  1702→  onEditFlow,
+  1703→  onDeleteFlow,
+  1704→}: FlowCardProps) {
+  1705→  const accent = flowAccent(flow.name);
+  1706→  const steps = [...(flow.steps ?? [])].sort(
+  1707→    (a, b) => a.stepOrder - b.stepOrder
+  1708→  );
+  1709→
+  1710→  const tenderCount = steps.filter((s) => s.isTenderStage).length;
+  1711→  const evalCount = steps.filter((s) => s.isEvaluationStage).length;
+  1712→  const delegationCount = steps.filter(
+  1713→    (s) => s.financialDelegationLevel && s.financialDelegationLevel !== "—"
+  1714→  ).length;
+  1715→
+  1716→  return (
+  1717→    <div
+  1718→      className={cn(
+  1719→        "bg-card border rounded-xl overflow-hidden",
+  1720→        accent.border
+  1721→      )}
+  1722→    >
+  1723→      {/* Colored header */}
+  1724→      <div
+  1725→        className={cn(
+  1726→          "flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-5 border-b",
+  1727→          accent.headerBg,
+  1728→          accent.border
+  1729→        )}
+  1730→      >
+  1731→        <div className="flex items-start gap-3 min-w-0">
+  1732→          <div
+  1733→            className={cn(
+  1734→              "h-11 w-11 rounded-lg flex items-center justify-center shrink-0 ring-2",
+  1735→              accent.headerBg,
+  1736→              accent.ring
+  1737→            )}
+  1738→          >
+  1739→            <GitBranch className={cn("h-6 w-6", accent.text)} />
+  1740→          </div>
+  1741→          <div className="min-w-0">
+  1742→            <div className="flex items-center gap-2 flex-wrap">
+  1743→              <h3 className="text-lg font-bold text-foreground">{flow.name}</h3>
+  1744→              <CustomBadge className={accent.badge}>{flow.name} Flow</CustomBadge>
+  1745→              <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1746→                {steps.length} step{steps.length === 1 ? "" : "s"}
+  1747→              </CustomBadge>
+  1748→              {tenderCount > 0 && (
+  1749→                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+  1750→                  <Gavel className="h-3 w-3 mr-1" />
+  1751→                  {tenderCount} Tender
+  1752→                </CustomBadge>
+  1753→              )}
+  1754→              {evalCount > 0 && (
+  1755→                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+  1756→                  <ClipboardCheck className="h-3 w-3 mr-1" />
+  1757→                  {evalCount} Evaluation
+  1758→                </CustomBadge>
+  1759→              )}
+  1760→              {delegationCount > 0 && (
+  1761→                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
+  1762→                  <Banknote className="h-3 w-3 mr-1" />
+  1763→                  {delegationCount} Delegation{delegationCount === 1 ? "" : "s"}
+  1764→                </CustomBadge>
+  1765→              )}
+  1766→            </div>
+  1767→            {flow.description && (
+  1768→              <p className="text-sm text-muted-foreground mt-1">
+  1769→                {flow.description}
+  1770→              </p>
+  1771→            )}
+  1772→          </div>
+  1773→        </div>
+  1774→        <div className="flex items-center gap-1 shrink-0">
+  1775→          <Button
+  1776→            variant="outline"
+  1777→            size="sm"
+  1778→            onClick={onEditFlow}
+  1779→            className="bg-background/60"
+  1780→          >
+  1781→            <Pencil className="h-3.5 w-3.5 mr-1" />
+  1782→            Edit
+  1783→          </Button>
+  1784→          <Button
+  1785→            variant="outline"
+  1786→            size="sm"
+  1787→            onClick={onDeleteFlow}
+  1788→            className="bg-background/60 text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30"
+  1789→          >
+  1790→            <Trash2 className="h-3.5 w-3.5 mr-1" />
+  1791→            Delete
+  1792→          </Button>
+  1793→          <Button size="sm" onClick={onAddStep}>
+  1794→            <Plus className="h-3.5 w-3.5 mr-1" />
+  1795→            Add Step
+  1796→          </Button>
+  1797→        </div>
+  1798→      </div>
+  1799→
+  1800→      {/* Body — vertical timeline */}
+  1801→      <div className="p-5">
+  1802→        {steps.length === 0 ? (
+  1803→          <EmptyState
+  1804→            icon={ListTree}
+  1805→            title="No steps defined"
+  1806→            description="Add steps to outline the procurement file's journey through this flow."
+  1807→            action={
+  1808→              <Button size="sm" onClick={onAddStep}>
+  1809→                <Plus className="h-4 w-4 mr-1" />
+  1810→                Add First Step
+  1811→              </Button>
+  1812→            }
+  1813→          />
+  1814→        ) : (
+  1815→          <div className="relative pl-8 sm:pl-10">
+  1816→            {/* vertical line */}
+  1817→            <div
+  1818→              className={cn(
+  1819→                "absolute left-3 sm:left-4 top-2 bottom-2 w-0.5",
+  1820→                accent.dot,
+  1821→                "opacity-30"
+  1822→              )}
+  1823→            />
+  1824→            <ol className="space-y-4">
+  1825→              {steps.map((step, idx) => (
+  1826→                <StepTimelineItem
+  1827→                  key={step.id}
+  1828→                  step={step}
+  1829→                  isLast={idx === steps.length - 1}
+  1830→                  accent={accent}
+  1831→                  onEdit={() => onEditStep(step)}
+  1832→                  onDelete={() => onDeleteStep(step)}
+  1833→                />
+  1834→              ))}
+  1835→            </ol>
+  1836→          </div>
+  1837→        )}
+  1838→      </div>
+  1839→    </div>
+  1840→  );
+  1841→}
+  1842→
+  1843→// ─────────────────────────────────────────────────────────
+  1844→// Step Timeline Item
+  1845→// ─────────────────────────────────────────────────────────
+  1846→interface StepTimelineItemProps {
+  1847→  step: ProcessStep;
+  1848→  isLast: boolean;
+  1849→  accent: ReturnType<typeof flowAccent>;
+  1850→  onEdit: () => void;
+  1851→  onDelete: () => void;
+  1852→}
+  1853→
+  1854→function StepTimelineItem({
+  1855→  step,
+  1856→  accent,
+  1857→  onEdit,
+  1858→  onDelete,
+  1859→}: StepTimelineItemProps) {
+  1860→  const hasDelegation =
+  1861→    step.financialDelegationLevel &&
+  1862→    step.financialDelegationLevel.trim() !== "" &&
+  1863→    step.financialDelegationLevel !== "—";
+  1864→  const isBranch = step.isTenderStage || step.isEvaluationStage;
+  1865→
+  1866→  // Branch styling: tender = amber, evaluation = violet, both = combined
+  1867→  const branchBorder = step.isTenderStage
+  1868→    ? "border-l-amber-500"
+  1869→    : step.isEvaluationStage
+  1870→    ? "border-l-violet-500"
+  1871→    : "border-l-border";
+  1872→
+  1873→  return (
+  1874→    <li className="relative">
+  1875→      {/* Dot — colored by branch or by flow accent */}
+  1876→      <div
+  1877→        className={cn(
+  1878→          "absolute -left-[1.4rem] sm:-left-[1.6rem] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-card",
+  1879→          step.isTenderStage
+  1880→            ? "bg-amber-500"
+  1881→            : step.isEvaluationStage
+  1882→            ? "bg-violet-500"
+  1883→            : accent.stepDot
+  1884→        )}
+  1885→      >
+  1886→        {step.isTenderStage && step.isEvaluationStage && (
+  1887→          <div className="absolute inset-0 rounded-full bg-violet-500 mix-blend-lighten" />
+  1888→        )}
+  1889→      </div>
+  1890→
+  1891→      <div
+  1892→        className={cn(
+  1893→          "bg-secondary/30 border border-l-4 rounded-lg p-4 transition-colors hover:bg-secondary/50",
+  1894→          branchBorder
+  1895→        )}
+  1896→      >
+  1897→        {/* Top row: order + position + branch tags */}
+  1898→        <div className="flex flex-wrap items-center gap-2 mb-2">
+  1899→          <span
+  1900→            className={cn(
+  1901→              "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold",
+  1902→              accent.headerBg,
+  1903→              accent.text,
+  1904→              "border",
+  1905→              accent.border
+  1906→            )}
+  1907→          >
+  1908→            #{step.stepOrder}
+  1909→          </span>
+  1910→          <CustomBadge
+  1911→            className={cn(
+  1912→              "text-sm font-semibold",
+  1913→              accent.badge
+  1914→            )}
+  1915→          >
+  1916→            {step.positionName}
+  1917→          </CustomBadge>
+  1918→
+  1919→          {step.isTenderStage && (
+  1920→            <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+  1921→              <Gavel className="h-3 w-3 mr-1" />
+  1922→              TENDER
+  1923→            </CustomBadge>
+  1924→          )}
+  1925→          {step.isEvaluationStage && (
+  1926→            <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+  1927→              <ClipboardCheck className="h-3 w-3 mr-1" />
+  1928→              EVALUATION
+  1929→            </CustomBadge>
+  1930→          )}
+  1931→
+  1932→          <div className="ml-auto flex items-center gap-1">
+  1933→            <Button
+  1934→              variant="ghost"
+  1935→              size="sm"
+  1936→              className="h-7 w-7 p-0"
+  1937→              onClick={onEdit}
+  1938→              title="Edit step"
+  1939→            >
+  1940→              <Pencil className="h-3.5 w-3.5" />
+  1941→            </Button>
+  1942→            <Button
+  1943→              variant="ghost"
+  1944→              size="sm"
+  1945→              className="h-7 w-7 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+  1946→              onClick={onDelete}
+  1947→              title="Delete step"
+  1948→            >
+  1949→              <Trash2 className="h-3.5 w-3.5" />
+  1950→            </Button>
+  1951→          </div>
+  1952→        </div>
+  1953→
+  1954→        {/* Description */}
+  1955→        {step.description && (
+  1956→          <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+  1957→            {step.description}
+  1958→          </p>
+  1959→        )}
+  1960→
+  1961→        {/* Body: responsible person + financial delegation */}
+  1962→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1963→          <div className="rounded-lg border border-border bg-background/40 p-3">
+  1964→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
+  1965→              <UserCircle2 className="h-3 w-3" />
+  1966→              Default Responsible Person
+  1967→            </p>
+  1968→            <p className="text-sm font-medium text-foreground">
+  1969→              {step.defaultResponsiblePerson || "—"}
+  1970→            </p>
+  1971→          </div>
+  1972→          <div
+  1973→            className={cn(
+  1974→              "rounded-lg border p-3",
+  1975→              hasDelegation
+  1976→                ? "border-blue-500/40 bg-blue-500/5"
+  1977→                : "border-border bg-background/40"
+  1978→            )}
+  1979→          >
+  1980→            <p
+  1981→              className={cn(
+  1982→                "text-[10px] uppercase tracking-wide mb-1 flex items-center gap-1",
+  1983→                hasDelegation
+  1984→                  ? "text-blue-400"
+  1985→                  : "text-muted-foreground"
+  1986→              )}
+  1987→            >
+  1988→              <Award className="h-3 w-3" />
+  1989→              Financial Delegation Level
+  1990→            </p>
+  1991→            <p
+  1992→              className={cn(
+  1993→                "text-sm font-semibold",
+  1994→                hasDelegation ? "text-blue-300" : "text-muted-foreground"
+  1995→              )}
+  1996→            >
+  1997→              {step.financialDelegationLevel || "—"}
+  1998→            </p>
+  1999→          </div>
+  2000→        </div>
+
+[showing lines 1-2000 of 2485; use offset=2001 with limit to continue reading]

@@ -1,0 +1,1728 @@
+     1→"use client";
+     2→import { Fragment, useState, useMemo } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { Button } from "@/components/ui/button";
+     5→import { Input } from "@/components/ui/input";
+     6→import { Label } from "@/components/ui/label";
+     7→import { Checkbox } from "@/components/ui/checkbox";
+     8→import {
+     9→  Dialog,
+    10→  DialogContent,
+    11→  DialogHeader,
+    12→  DialogTitle,
+    13→  DialogFooter,
+    14→  DialogDescription,
+    15→} from "@/components/ui/dialog";
+    16→import {
+    17→  Popover,
+    18→  PopoverContent,
+    19→  PopoverTrigger,
+    20→} from "@/components/ui/popover";
+    21→import {
+    22→  Select,
+    23→  SelectContent,
+    24→  SelectItem,
+    25→  SelectTrigger,
+    26→  SelectValue,
+    27→} from "@/components/ui/select";
+    28→import {
+    29→  Table,
+    30→  TableBody,
+    31→  TableCell,
+    32→  TableHead,
+    33→  TableHeader,
+    34→  TableRow,
+    35→} from "@/components/ui/table";
+    36→import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
+    37→import { EmptyState, LoadingState } from "@/components/erp/states";
+    38→import { FileLogDialog, ProjectFile } from "./file-log";
+    39→import { EstimateItemsTable } from "./estimate-items";
+    40→import {
+    41→  formatCurrency,
+    42→  PRESENT_POSITIONS,
+    43→  FILE_CATEGORIES,
+    44→  positionColor,
+    45→  estimateStatusColor,
+    46→} from "@/lib/constants";
+    47→import { useToast } from "@/hooks/use-toast";
+    48→import {
+    49→  Plus,
+    50→  Search,
+    51→  History,
+    52→  Pencil,
+    53→  ChevronDown,
+    54→  ChevronUp,
+    55→  ChevronRight,
+    56→  FileText,
+    57→  Trash2,
+    58→  Loader2,
+    59→  Download,
+    60→  X,
+    61→  FileSignature,
+    62→  Sparkles,
+    63→  ArrowRight,
+    64→  User,
+    65→  UserCheck,
+    66→  Hash,
+    67→  RefreshCw,
+    68→  Files,
+    69→  CheckSquare,
+    70→  ListChecks,
+    71→} from "lucide-react";
+    72→import { cn } from "@/lib/utils";
+    73→
+    74→interface Project {
+    75→  id: string;
+    76→  name: string;
+    77→  voteNumber: string;
+    78→  voteAllocation: number;
+    79→  committed: number;
+    80→  actualSpent: number;
+    81→  benefactor?: string | null;
+    82→  reference?: string | null;
+    83→  endDate?: string | null;
+    84→  startDate?: string | null;
+    85→}
+    86→
+    87→interface Allocation {
+    88→  id: string;
+    89→  date: string;
+    90→  description: string;
+    91→  amount: number;
+    92→  type: string;
+    93→  authorizedBy: string | null;
+    94→}
+    95→
+    96→interface Estimate {
+    97→  id: string;
+    98→  name: string;
+    99→  status: string;
+   100→  items: { id: string; status: string; srNo: number; itemName: string }[];
+   101→}
+   102→
+   103→interface ProcessStep {
+   104→  id: string;
+   105→  positionName: string;
+   106→  defaultResponsiblePerson: string | null;
+   107→  financialDelegationLevel: string | null;
+   108→}
+   109→
+   110→interface ProcessFlow {
+   111→  id: string;
+   112→  name: string;
+   113→  steps: ProcessStep[];
+   114→}
+   115→
+   116→interface Props {
+   117→  project: Project;
+   118→  open: boolean;
+   119→  onOpenChange: (o: boolean) => void;
+   120→  onChanged: () => void;
+   121→}
+   122→
+   123→type FileNumberFilter = "all" | "with" | "without";
+   124→
+   125→export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
+   126→  const { data: files, loading, refresh } = useFetch<ProjectFile[]>(
+   127→    `/api/projects/${project.id}/files`
+   128→  );
+   129→  const { data: estimates, refresh: refreshEst } = useFetch<Estimate[]>(
+   130→    `/api/estimates?projectId=${project.id}`
+   131→  );
+   132→  // Fetch process flows once to support the "Update Position" popup's default responsible person lookup
+   133→  const { data: processFlows } = useFetch<ProcessFlow[]>(`/api/process-flows`);
+   134→  const [activeTab, setActiveTab] = useState<"raised" | "estimate">("raised");
+   135→  const [search, setSearch] = useState("");
+   136→  const [positionFilter, setPositionFilter] = useState("all");
+   137→  const [fileNumberFilter, setFileNumberFilter] = useState<FileNumberFilter>("all");
+   138→  const [addOpen, setAddOpen] = useState(false);
+   139→  const [updateFile, setUpdateFile] = useState<ProjectFile | null>(null);
+   140→  const [logFile, setLogFile] = useState<ProjectFile | null>(null);
+   141→  const [allocOpen, setAllocOpen] = useState(false);
+   142→  const [activeEstimateId, setActiveEstimateId] = useState<string | null>(null);
+   143→  const [sortKey, setSortKey] = useState<"createdAt" | "fileCost" | "prNumber">("createdAt");
+   144→  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+   145→  // Group-by-File (default ON) — merges items sharing the same PR/fileGroupKey into a single row
+   146→  const [groupByFile, setGroupByFile] = useState(true);
+   147→  // Tracks which group keys are expanded (showing their individual items)
+   148→  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+   149→  // Multi-select for bulk "Initiate Selected" — tracks selected ProjectFile IDs.
+   150→  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+   151→  // Bulk initiate dialog open state
+   152→  const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
+   153→  const { toast } = useToast();
+   154→
+   155→  const toggleGroup = (key: string) => {
+   156→    setExpandedGroups((prev) => {
+   157→      const next = new Set(prev);
+   158→      if (next.has(key)) next.delete(key);
+   159→      else next.add(key);
+   160→      return next;
+   161→    });
+   162→  };
+   163→
+   164→  // ─── Multi-select helpers ───
+   165→  // NOTE: derived state (allVisibleIds / visibleSelectedCount / suggestedNextPosition)
+   166→  // is computed further down — AFTER `filteredFiles` is defined — to avoid the
+   167→  // temporal-dead-zone when the useMemo callbacks evaluate on first render.
+   168→  const toggleSelect = (id: string) => {
+   169→    setSelectedIds((prev) => {
+   170→      const next = new Set(prev);
+   171→      if (next.has(id)) next.delete(id);
+   172→      else next.add(id);
+   173→      return next;
+   174→    });
+   175→  };
+   176→  const selectMany = (ids: string[], on: boolean) => {
+   177→    setSelectedIds((prev) => {
+   178→      const next = new Set(prev);
+   179→      if (on) ids.forEach((id) => next.add(id));
+   180→      else ids.forEach((id) => next.delete(id));
+   181→      return next;
+   182→    });
+   183→  };
+   184→  const clearSelection = () => setSelectedIds(new Set());
+   185→
+   186→  // Build a lookup of positionName -> defaultResponsiblePerson across all flows.
+   187→  // Multiple flows may define the same positionName; we keep the first non-empty match.
+   188→  const positionToResponsible = useMemo(() => {
+   189→    const map = new Map<string, string>();
+   190→    processFlows?.forEach((flow) => {
+   191→      flow.steps.forEach((step) => {
+   192→        if (step.positionName && step.defaultResponsiblePerson && !map.has(step.positionName)) {
+   193→          map.set(step.positionName, step.defaultResponsiblePerson);
+   194→        }
+   195→      });
+   196→    });
+   197→    return map;
+   198→  }, [processFlows]);
+   199→
+   200→  // Position summary
+   201→  const positionSummary = useMemo(() => {
+   202→    const map: Record<string, { count: number; cost: number }> = {};
+   203→    files?.forEach((f) => {
+   204→      if (!map[f.presentPosition]) map[f.presentPosition] = { count: 0, cost: 0 };
+   205→      map[f.presentPosition].count++;
+   206→      map[f.presentPosition].cost += f.fileCost;
+   207→    });
+   208→    return Object.entries(map).sort((a, b) => b[1].count - a[1].count);
+   209→  }, [files]);
+   210→
+   211→  const totalFileCost = files?.reduce((s, f) => s + f.fileCost, 0) ?? 0;
+   212→
+   213→  // pending estimate items (not yet initiated) — "items to be raised PR"
+   214→  const pendingEstimateItems = useMemo(() => {
+   215→    const list: Estimate["items"][number][] = [];
+   216→    estimates?.forEach((e) => {
+   217→      e.items.forEach((it) => {
+   218→        if (it.status === "Pending") list.push(it);
+   219→      });
+   220→    });
+   221→    return list;
+   222→  }, [estimates]);
+   223→  const initiatedCount = useMemo(
+   224→    () =>
+   225→      estimates?.reduce(
+   226→        (s, e) => s + e.items.filter((i) => i.status === "Initiated").length,
+   227→        0
+   228→      ) ?? 0,
+   229→    [estimates]
+   230→  );
+   231→
+   232→  // File-number counts for the filter toggle
+   233→  const fileNumberCounts = useMemo(() => {
+   234→    const all = files?.length || 0;
+   235→    const withFn = files?.filter((f) => f.fileNumber && f.fileNumber.trim()).length || 0;
+   236→    return { all, with: withFn, without: all - withFn };
+   237→  }, [files]);
+   238→
+   239→  const filteredFiles = useMemo(() => {
+   240→    let list = files || [];
+   241→    if (search) {
+   242→      const q = search.toLowerCase();
+   243→      list = list.filter(
+   244→        (f) =>
+   245→          f.prNumber.toLowerCase().includes(q) ||
+   246→          f.itemCode.toLowerCase().includes(q) ||
+   247→          f.itemName.toLowerCase().includes(q) ||
+   248→          (f.supplier || "").toLowerCase().includes(q) ||
+   249→          (f.fileNumber || "").toLowerCase().includes(q)
+   250→      );
+   251→    }
+   252→    if (positionFilter !== "all") {
+   253→      list = list.filter((f) => f.presentPosition === positionFilter);
+   254→    }
+   255→    if (fileNumberFilter === "with") {
+   256→      list = list.filter((f) => f.fileNumber && f.fileNumber.trim());
+   257→    } else if (fileNumberFilter === "without") {
+   258→      list = list.filter((f) => !f.fileNumber || !f.fileNumber.trim());
+   259→    }
+   260→    list = [...list].sort((a, b) => {
+   261→      let cmp = 0;
+   262→      if (sortKey === "fileCost") cmp = a.fileCost - b.fileCost;
+   263→      else if (sortKey === "prNumber") cmp = a.prNumber.localeCompare(b.prNumber);
+   264→      else cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+   265→      return sortDir === "asc" ? cmp : -cmp;
+   266→    });
+   267→    return list;
+   268→  }, [files, search, positionFilter, fileNumberFilter, sortKey, sortDir]);
+   269→
+   270→  const toggleSort = (key: typeof sortKey) => {
+   271→    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+   272→    else {
+   273→      setSortKey(key);
+   274→      setSortDir("desc");
+   275→    }
+   276→  };
+   277→
+   278→  // Group files by fileGroupKey (falls back to prNumber). Items sharing the same
+   279→  // key collapse into a single "merged" row in the register when groupByFile is ON.
+   280→  interface FileGroup {
+   281→    key: string;
+   282→    items: ProjectFile[];
+   283→    totalCost: number;
+   284→    totalQty: number;
+   285→    commonSupplier: string | null;
+   286→    commonCategory: string | null;
+   287→    commonPosition: string | null;
+   288→    commonFileNumber: string | null;
+   289→    commonUnit: string | null;
+   290→    commonResponsiblePerson: string | null;
+   291→    firstCreatedAt: string;
+   292→  }
+   293→
+   294→  const groupedView = useMemo<{ groups: FileGroup[]; singles: ProjectFile[] }>(() => {
+   295→    if (!groupByFile) return { groups: [], singles: filteredFiles };
+   296→    const map = new Map<string, ProjectFile[]>();
+   297→    for (const f of filteredFiles) {
+   298→      const k = (f.fileGroupKey && f.fileGroupKey.trim()) || f.prNumber;
+   299→      if (!map.has(k)) map.set(k, []);
+   300→      map.get(k)!.push(f);
+   301→    }
+   302→    const groups: FileGroup[] = [];
+   303→    const singles: ProjectFile[] = [];
+   304→    for (const [key, items] of map) {
+   305→      if (items.length >= 2) {
+   306→        const totalCost = items.reduce((s, f) => s + f.fileCost, 0);
+   307→        const totalQty = items.reduce((s, f) => s + f.qty, 0);
+   308→        const suppliers = new Set(items.map((f) => f.supplier).filter(Boolean));
+   309→        const categories = new Set(items.map((f) => f.fileCategory));
+   310→        const positions = new Set(items.map((f) => f.presentPosition));
+   311→        const fileNumbers = new Set(items.map((f) => f.fileNumber).filter(Boolean));
+   312→        const units = new Set(items.map((f) => f.unit));
+   313→        const responsible = new Set(items.map((f) => f.responsiblePerson).filter(Boolean));
+   314→        const firstCreatedAt = items
+   315→          .map((f) => f.createdAt)
+   316→          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+   317→        groups.push({
+   318→          key,
+   319→          items,
+   320→          totalCost,
+   321→          totalQty,
+   322→          commonSupplier: suppliers.size === 1 ? Array.from(suppliers)[0]! : null,
+   323→          commonCategory: categories.size === 1 ? items[0]!.fileCategory : null,
+   324→          commonPosition: positions.size === 1 ? items[0]!.presentPosition : null,
+   325→          commonFileNumber: fileNumbers.size === 1 ? Array.from(fileNumbers)[0]! : null,
+   326→          commonUnit: units.size === 1 ? items[0]!.unit : null,
+   327→          commonResponsiblePerson: responsible.size === 1 ? Array.from(responsible)[0]! : null,
+   328→          firstCreatedAt,
+   329→        });
+   330→      } else {
+   331→        singles.push(items[0]!);
+   332→      }
+   333→    }
+   334→    return { groups, singles };
+   335→  }, [filteredFiles, groupByFile]);
+   336→
+   337→  // ─── Multi-select derived state (depends on filteredFiles) ───
+   338→  const allVisibleIds = useMemo(
+   339→    () => filteredFiles.map((f) => f.id),
+   340→    [filteredFiles]
+   341→  );
+   342→  const visibleSelectedCount = useMemo(
+   343→    () => allVisibleIds.filter((id) => selectedIds.has(id)).length,
+   344→    [allVisibleIds, selectedIds]
+   345→  );
+   346→  const allVisibleSelected =
+   347→    allVisibleIds.length > 0 && visibleSelectedCount === allVisibleIds.length;
+   348→  const someVisibleSelected =
+   349→    visibleSelectedCount > 0 && visibleSelectedCount < allVisibleIds.length;
+   350→  const toggleSelectAllVisible = () =>
+   351→    selectMany(allVisibleIds, !allVisibleSelected);
+   352→
+   353→  // Resolve the "next position" suggestion — picks the next index after the most
+   354→  // common current position among the selected files (used as a default in the
+   355→  // Bulk Initiate dialog).
+   356→  const suggestedNextPosition = useMemo(() => {
+   357→    if (selectedIds.size === 0) return "GS Approval";
+   358→    const counts = new Map<string, number>();
+   359→    filteredFiles.forEach((f) => {
+   360→      if (selectedIds.has(f.id)) {
+   361→        counts.set(f.presentPosition, (counts.get(f.presentPosition) || 0) + 1);
+   362→      }
+   363→    });
+   364→    let top = "";
+   365→    let topN = 0;
+   366→    counts.forEach((n, pos) => {
+   367→      if (n > topN) {
+   368→        topN = n;
+   369→        top = pos;
+   370→      }
+   371→    });
+   372→    const idx = PRESENT_POSITIONS.indexOf(top as (typeof PRESENT_POSITIONS)[number]);
+   373→    if (idx >= 0 && idx < PRESENT_POSITIONS.length - 1) {
+   374→      return PRESENT_POSITIONS[idx + 1]!;
+   375→    }
+   376→    return top || "GS Approval";
+   377→  }, [filteredFiles, selectedIds]);
+   378→
+   379→  // Bulk Initiate: updates the present position of every selected file via
+   380→  // PUT /api/projects/{projectId}/files/{fileId}. Reports per-file success/failure
+   381→  // counts via toast and refreshes the file register + summary afterwards.
+   382→  const handleBulkInitiate = async (input: {
+   383→    newPosition: string;
+   384→    changedBy: string;
+   385→    comment: string;
+   386→  }) => {
+   387→    const selected = filteredFiles.filter((f) => selectedIds.has(f.id));
+   388→    if (selected.length === 0) {
+   389→      toast({ title: "No files selected", variant: "destructive" });
+   390→      return;
+   391→    }
+   392→    const results = await Promise.all(
+   393→      selected.map((f) =>
+   394→        apiRequest(`/api/projects/${project.id}/files/${f.id}`, "PUT", {
+   395→          presentPosition: input.newPosition,
+   396→          comment: input.comment.trim() || `Bulk initiated → ${input.newPosition}`,
+   397→          changedBy: input.changedBy.trim() || "Officer",
+   398→        })
+   399→      )
+   400→    );
+   401→    const failed = results.filter((r) => !r.ok);
+   402→    if (failed.length === 0) {
+   403→      toast({
+   404→        title: `Initiated ${selected.length} file(s) → ${input.newPosition}`,
+   405→        description: "Position updated for all selected files",
+   406→      });
+   407→    } else {
+   408→      toast({
+   409→        title: `${failed.length} of ${selected.length} update(s) failed`,
+   410→        description: failed[0]?.error,
+   411→        variant: "destructive",
+   412→      });
+   413→    }
+   414→    clearSelection();
+   415→    setBulkInitiateOpen(false);
+   416→    refresh();
+   417→    onChanged();
+   418→  };
+   419→
+   420→  const handleDelete = async (file: ProjectFile) => {
+   421→    if (!confirm(`Delete file ${file.prNumber} (${file.itemName})?`)) return;
+   422→    const res = await apiRequest(`/api/projects/${project.id}/files/${file.id}`, "DELETE");
+   423→    if (res.ok) {
+   424→      toast({ title: "File deleted" });
+   425→      refresh();
+   426→      onChanged();
+   427→    } else {
+   428→      toast({ title: "Delete failed", description: res.error, variant: "destructive" });
+   429→    }
+   430→  };
+   431→
+   432→  const exportExcel = () => {
+   433→    const rows = filteredFiles.map((f) => ({
+   434→      "PR Number": f.prNumber,
+   435→      "File Number": f.fileNumber || "",
+   436→      "Item Code": f.itemCode,
+   437→      "Item Name": f.itemName,
+   438→      Unit: f.unit,
+   439→      Qty: f.qty,
+   440→      "Unit Price": f.unitPrice,
+   441→      "File Cost": f.fileCost,
+   442→      Supplier: f.supplier || "",
+   443→      "Present Position": f.presentPosition,
+   444→      "Responsible Person": f.responsiblePerson || "",
+   445→      Category: f.fileCategory,
+   446→    }));
+   447→    const headers = Object.keys(rows[0] || { "PR Number": "" });
+   448→    const csv = [
+   449→      headers.join(","),
+   450→      ...rows.map((r) => headers.map((h) => `"${(r as Record<string, unknown>)[h] ?? ""}"`).join(",")),
+   451→    ].join("\n");
+   452→    const blob = new Blob([csv], { type: "text/csv" });
+   453→    const url = URL.createObjectURL(blob);
+   454→    const a = document.createElement("a");
+   455→    a.href = url;
+   456→    a.download = `${project.name}-files.csv`;
+   457→    a.click();
+   458→    URL.revokeObjectURL(url);
+   459→  };
+   460→
+   461→  // pick the first processed estimate (or any) for the "PR from Estimate" tab
+   462→  const estimateForTab = estimates?.find((e) => e.status === "Processed") || estimates?.[0] || null;
+   463→
+   464→  // Single file row renderer — shared between the ungrouped view and the
+   465→  // "singles" list of the grouped view. Lives inside the component so it can
+   466→  // access setLogFile / setUpdateFile / handleDelete / project.id / refresh.
+   467→  const renderSingleFileRow = (f: ProjectFile) => {
+   468→    const hasFileNumber = !!(f.fileNumber && f.fileNumber.trim());
+   469→    const isSelected = selectedIds.has(f.id);
+   470→    const itemCost = (f.unitPrice || 0) * (f.qty || 0);
+   471→    return (
+   472→      <TableRow
+   473→        key={f.id}
+   474→        className={cn(
+   475→          "border-border cursor-pointer hover:bg-secondary/40",
+   476→          isSelected && "bg-primary/[0.06]"
+   477→        )}
+   478→        onClick={() => setLogFile(f)}
+   479→      >
+   480→        <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+   481→          <Checkbox
+   482→            checked={isSelected}
+   483→            onCheckedChange={() => toggleSelect(f.id)}
+   484→            aria-label={`Select ${f.prNumber}`}
+   485→          />
+   486→        </TableCell>
+   487→        <TableCell className="font-mono text-xs text-foreground">{f.prNumber}</TableCell>
+   488→        <TableCell>
+   489→          {hasFileNumber ? (
+   490→            <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
+   491→              <Hash className="h-3 w-3" />
+   492→              {f.fileNumber}
+   493→            </span>
+   494→          ) : (
+   495→            <span className="text-muted-foreground">—</span>
+   496→          )}
+   497→        </TableCell>
+   498→        <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
+   499→        <TableCell className="text-foreground">{f.itemName}</TableCell>
+   500→        <TableCell className="text-right">{f.qty} {f.unit}</TableCell>
+   501→        <TableCell className="text-right">{formatCurrency(f.unitPrice)}</TableCell>
+   502→        <TableCell className="text-right text-foreground/90">{formatCurrency(itemCost)}</TableCell>
+   503→        <TableCell className="text-right font-medium text-foreground">{formatCurrency(f.fileCost)}</TableCell>
+   504→        <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
+   505→        <TableCell>
+   506→          <div className="flex flex-col gap-0.5">
+   507→            <PositionBadge position={f.presentPosition} />
+   508→            {f.responsiblePerson && (
+   509→              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+   510→                <User className="h-2.5 w-2.5" />
+   511→                {f.responsiblePerson}
+   512→              </span>
+   513→            )}
+   514→          </div>
+   515→        </TableCell>
+   516→        <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
+   517→        <TableCell className="text-right">
+   518→          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+   519→            <QuickUpdatePopover
+   520→              files={[f]}
+   521→              projectId={project.id}
+   522→              onSaved={() => { refresh(); onChanged(); }}
+   523→            />
+   524→            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
+   525→            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => handleDelete(f)} title="Delete file"><Trash2 className="h-3.5 w-3.5" /></Button>
+   526→          </div>
+   527→        </TableCell>
+   528→      </TableRow>
+   529→    );
+   530→  };
+   531→
+   532→  if (!open) return null;
+   533→
+   534→  return (
+   535→    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+   536→      {/* Header */}
+   537→      <div className="border-b border-border bg-card shrink-0">
+   538→        <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+   539→          <div className="flex items-center gap-3 min-w-0">
+   540→            <button onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground shrink-0">
+   541→              <X className="h-5 w-5" />
+   542→            </button>
+   543→            <div className="min-w-0">
+   544→              <h2 className="font-semibold text-foreground text-sm sm:text-base truncate">{project.name}</h2>
+   545→              <p className="text-xs text-muted-foreground">
+   546→                {project.voteNumber}
+   547→                {project.benefactor && ` · Benefactor: ${project.benefactor}`}
+   548→                {project.reference && ` · Ref: ${project.reference}`}
+   549→                {project.endDate && ` · EDC: ${new Date(project.endDate).toLocaleDateString("en-GB")}`}
+   550→              </p>
+   551→            </div>
+   552→          </div>
+   553→          <Button variant="outline" size="sm" onClick={() => setAllocOpen(true)} className="gap-1.5 shrink-0">
+   554→            <History className="h-4 w-4" /> Allocations
+   555→          </Button>
+   556→        </div>
+   557→        {/* Financial summary bar */}
+   558→        <div className="px-4 sm:px-6 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+   559→          <FinBox label="Vote Allocation" value={formatCurrency(project.voteAllocation)} tone="text-blue-400" />
+   560→          <FinBox label="Committed" value={formatCurrency(project.committed)} tone="text-amber-400" />
+   561→          <FinBox label="Actual Spent" value={formatCurrency(project.actualSpent)} tone="text-red-400" />
+   562→          <FinBox label="File Cost (Total)" value={formatCurrency(totalFileCost)} tone="text-emerald-400" />
+   563→        </div>
+   564→        {/* Tabs */}
+   565→        <div className="px-4 sm:px-6 flex items-center gap-1 border-t border-border">
+   566→          <TabButton
+   567→            active={activeTab === "raised"}
+   568→            onClick={() => setActiveTab("raised")}
+   569→            icon={<FileText className="h-3.5 w-3.5" />}
+   570→            label="PR Raised Files"
+   571→            count={files?.length || 0}
+   572→          />
+   573→          <TabButton
+   574→            active={activeTab === "estimate"}
+   575→            onClick={() => setActiveTab("estimate")}
+   576→            icon={<Sparkles className="h-3.5 w-3.5" />}
+   577→            label="PR from Estimate"
+   578→            count={pendingEstimateItems.length}
+   579→            tone="amber"
+   580→          />
+   581→        </div>
+   582→      </div>
+   583→
+   584→      {/* Body */}
+   585→      <div className="flex-1 overflow-y-auto scrollbar-thin">
+   586→        <div className="p-4 sm:p-6 space-y-4">
+   587→          {/* Position summary (always visible) */}
+   588→          <div>
+   589→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+   590→              Present Position Summary
+   591→            </h4>
+   592→            <div className="flex flex-wrap gap-2">
+   593→              {positionSummary.length === 0 ? (
+   594→                <p className="text-sm text-muted-foreground">No files yet.</p>
+   595→              ) : (
+   596→                positionSummary.map(([pos, info]) => (
+   597→                  <div key={pos} className={cn("flex items-center gap-2 rounded-lg border px-3 py-1.5", positionColor(pos))}>
+   598→                    <span className="text-sm font-medium">{pos}</span>
+   599→                    <span className="text-xs opacity-80">{info.count} file{info.count > 1 ? "s" : ""} · {formatCurrency(info.cost)}</span>
+   600→                  </div>
+   601→                ))
+   602→              )}
+   603→            </div>
+   604→          </div>
+   605→
+   606→          {activeTab === "raised" ? (
+   607→            <>
+   608→              {/* PR raised summary chips */}
+   609→              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+   610→                <MiniStat label="PR Raised (Files)" value={String(files?.length || 0)} sub={formatCurrency(totalFileCost)} tone="text-blue-400" />
+   611→                <MiniStat label="Initiated from Estimate" value={String(initiatedCount)} sub="forwarded PRs" tone="text-violet-400" />
+   612→                <MiniStat label="Items to Raise PR" value={String(pendingEstimateItems.length)} sub="from estimate" tone="text-amber-400" />
+   613→              </div>
+   614→
+   615→              {/* Toolbar */}
+   616→              <div className="flex flex-wrap items-center gap-2">
+   617→                <div className="relative flex-1 min-w-[200px]">
+   618→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   619→                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search PR, file no, item, supplier..." className="pl-9 bg-background border-border" />
+   620→                </div>
+   621→                <Select value={positionFilter} onValueChange={setPositionFilter}>
+   622→                  <SelectTrigger className="w-[180px] bg-background border-border"><SelectValue placeholder="Position" /></SelectTrigger>
+   623→                  <SelectContent>
+   624→                    <SelectItem value="all">All Positions</SelectItem>
+   625→                    {PRESENT_POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+   626→                  </SelectContent>
+   627→                </Select>
+   628→                {/* File Number filter toggle */}
+   629→                <div className="inline-flex rounded-md border border-border overflow-hidden bg-background">
+   630→                  <FilterPill
+   631→                    label={`All (${fileNumberCounts.all})`}
+   632→                    active={fileNumberFilter === "all"}
+   633→                    onClick={() => setFileNumberFilter("all")}
+   634→                  />
+   635→                  <FilterPill
+   636→                    label={`With File No (${fileNumberCounts.with})`}
+   637→                    active={fileNumberFilter === "with"}
+   638→                    onClick={() => setFileNumberFilter("with")}
+   639→                  />
+   640→                  <FilterPill
+   641→                    label={`Pending (${fileNumberCounts.without})`}
+   642→                    active={fileNumberFilter === "without"}
+   643→                    onClick={() => setFileNumberFilter("without")}
+   644→                  />
+   645→                </div>
+   646→                <Button variant="outline" size="sm" onClick={exportExcel} className="gap-1.5"><Download className="h-4 w-4" /> Export</Button>
+   647→                <Button
+   648→                  size="sm"
+   649→                  variant={groupByFile ? "default" : "outline"}
+   650→                  onClick={() => setGroupByFile((v) => !v)}
+   651→                  className="gap-1.5"
+   652→                  title="Toggle grouping multiple items in the same file into a single row"
+   653→                >
+   654→                  <Files className="h-4 w-4" />
+   655→                  {groupByFile ? "Grouped by File" : "Group by File"}
+   656→                </Button>
+   657→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
+   658→              </div>
+   659→
+   660→              {/* Selection bar — appears when at least one file is selected */}
+   661→              {selectedIds.size > 0 && (
+   662→                <div className="flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-2.5">
+   663→                  <div className="flex items-center gap-2 text-sm text-foreground">
+   664→                    <ListChecks className="h-4 w-4 text-primary" />
+   665→                    <span className="font-medium">{selectedIds.size} item{selectedIds.size > 1 ? "s" : ""} selected</span>
+   666→                    {visibleSelectedCount < selectedIds.size && (
+   667→                      <span className="text-xs text-muted-foreground">
+   668→                        ({visibleSelectedCount} on this page)
+   669→                      </span>
+   670→                    )}
+   671→                  </div>
+   672→                  <div className="flex items-center gap-2 ml-auto">
+   673→                    <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-xs gap-1.5">
+   674→                      <X className="h-3.5 w-3.5" /> Clear
+   675→                    </Button>
+   676→                    <Button
+   677→                      size="sm"
+   678→                      onClick={() => setBulkInitiateOpen(true)}
+   679→                      className="gap-1.5"
+   680→                      title="Move all selected files to a new present position"
+   681→                    >
+   682→                      <CheckSquare className="h-4 w-4" /> Initiate Selected
+   683→                    </Button>
+   684→                  </div>
+   685→                </div>
+   686→              )}
+   687→
+   688→              {/* File register table */}
+   689→              <div className="border border-border rounded-lg overflow-hidden">
+   690→                <div className="overflow-x-auto">
+   691→                  <Table>
+   692→                    <TableHeader>
+   693→                      <TableRow className="hover:bg-transparent border-border">
+   694→                        <TableHead className="text-muted-foreground w-10">
+   695→                          <Checkbox
+   696→                            checked={
+   697→                              allVisibleSelected
+   698→                                ? true
+   699→                                : someVisibleSelected
+   700→                                ? "indeterminate"
+   701→                                : false
+   702→                            }
+   703→                            onCheckedChange={toggleSelectAllVisible}
+   704→                            aria-label="Select all visible files"
+   705→                          />
+   706→                        </TableHead>
+   707→                        <SortTh label="PR Number" onClick={() => toggleSort("prNumber")} active={sortKey === "prNumber"} dir={sortDir} />
+   708→                        <TableHead className="text-muted-foreground">File Number</TableHead>
+   709→                        <TableHead className="text-muted-foreground">Item Code</TableHead>
+   710→                        <TableHead className="text-muted-foreground">Item Name</TableHead>
+   711→                        <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+   712→                        <TableHead className="text-muted-foreground text-right">Unit Price</TableHead>
+   713→                        <TableHead className="text-muted-foreground text-right">Cost</TableHead>
+   714→                        <SortTh label="File Cost" onClick={() => toggleSort("fileCost")} active={sortKey === "fileCost"} dir={sortDir} align="right" />
+   715→                        <TableHead className="text-muted-foreground">Supplier</TableHead>
+   716→                        <TableHead className="text-muted-foreground">Position</TableHead>
+   717→                        <TableHead className="text-muted-foreground">Category</TableHead>
+   718→                        <TableHead className="text-muted-foreground text-right">Actions</TableHead>
+   719→                      </TableRow>
+   720→                    </TableHeader>
+   721→                    <TableBody>
+   722→                      {loading ? (
+   723→                        <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
+   724→                      ) : filteredFiles.length === 0 ? (
+   725→                        <TableRow><TableCell colSpan={13} className="text-center py-8 text-muted-foreground">No files found. Click &quot;Add File&quot; to create one.</TableCell></TableRow>
+   726→                      ) : groupByFile && groupedView.groups.length > 0 ? (
+   727→                        <>
+   728→                          {groupedView.groups.map((g) => {
+   729→                            const expanded = expandedGroups.has(g.key);
+   730→                            return (
+   731→                              <Fragment key={g.key}>
+   732→                                {/* Group header (merged) row */}
+   733→                                <TableRow
+   734→                                  className="border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50"
+   735→                                  onClick={() => toggleGroup(g.key)}
+   736→                                >
+   737→                                  <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+   738→                                    {(() => {
+   739→                                      const groupIds = g.items.map((it) => it.id);
+   740→                                      const selCount = groupIds.filter((id) => selectedIds.has(id)).length;
+   741→                                      const checked = selCount === groupIds.length ? true : selCount > 0 ? "indeterminate" : false;
+   742→                                      return (
+   743→                                        <Checkbox
+   744→                                          checked={checked}
+   745→                                          onCheckedChange={() => selectMany(groupIds, selCount !== groupIds.length)}
+   746→                                          aria-label={`Select all ${groupIds.length} items in group ${g.key}`}
+   747→                                        />
+   748→                                      );
+   749→                                    })()}
+   750→                                  </TableCell>
+   751→                                  <TableCell className="font-mono text-xs text-foreground">
+   752→                                    <div className="flex items-center gap-2">
+   753→                                      <button
+   754→                                        onClick={(e) => { e.stopPropagation(); toggleGroup(g.key); }}
+   755→                                        className="text-muted-foreground hover:text-foreground shrink-0"
+   756→                                        aria-label={expanded ? "Collapse group" : "Expand group"}
+   757→                                      >
+   758→                                        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+   759→                                      </button>
+   760→                                      <Files className="h-3.5 w-3.5 text-primary shrink-0" />
+   761→                                      <span className="truncate">{g.key}</span>
+   762→                                      <CustomBadge className="border-0 bg-primary/15 text-primary">{g.items.length} items</CustomBadge>
+   763→                                    </div>
+   764→                                  </TableCell>
+   765→                                  <TableCell>
+   766→                                    {g.commonFileNumber ? (
+   767→                                      <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
+   768→                                        <Hash className="h-3 w-3" />
+   769→                                        {g.commonFileNumber}
+   770→                                      </span>
+   771→                                    ) : (
+   772→                                      <span className="text-muted-foreground">—</span>
+   773→                                    )}
+   774→                                  </TableCell>
+   775→                                  <TableCell className="text-xs text-muted-foreground italic">multiple</TableCell>
+   776→                                  <TableCell className="text-foreground text-xs">
+   777→                                    {g.items[0]!.itemName}
+   778→                                    {g.items.length > 1 && (
+   779→                                      <span className="text-muted-foreground"> +{g.items.length - 1} more</span>
+   780→                                    )}
+   781→                                  </TableCell>
+   782→                                  <TableCell className="text-right text-xs">{g.totalQty} {g.commonUnit || ""}</TableCell>
+   783→                                  <TableCell className="text-right text-xs text-muted-foreground italic">varies</TableCell>
+   784→                                  <TableCell className="text-right text-xs text-muted-foreground italic">varies</TableCell>
+   785→                                  <TableCell className="text-right font-bold text-foreground">{formatCurrency(g.totalCost)}</TableCell>
+   786→                                  <TableCell className="text-xs">
+   787→                                    {g.commonSupplier ? (
+   788→                                      g.commonSupplier
+   789→                                    ) : (
+   790→                                      <span className="text-muted-foreground italic">multiple</span>
+   791→                                    )}
+   792→                                  </TableCell>
+   793→                                  <TableCell>
+   794→                                    <div className="flex flex-col gap-0.5">
+   795→                                      {g.commonPosition ? (
+   796→                                        <PositionBadge position={g.commonPosition} />
+   797→                                      ) : (
+   798→                                        <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">mixed</CustomBadge>
+   799→                                      )}
+   800→                                      {g.commonResponsiblePerson && (
+   801→                                        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+   802→                                          <User className="h-2.5 w-2.5" />
+   803→                                          {g.commonResponsiblePerson}
+   804→                                        </span>
+   805→                                      )}
+   806→                                    </div>
+   807→                                  </TableCell>
+   808→                                  <TableCell>
+   809→                                    {g.commonCategory ? (
+   810→                                      <CategoryBadge category={g.commonCategory} />
+   811→                                    ) : (
+   812→                                      <span className="text-xs text-muted-foreground italic">multiple</span>
+   813→                                    )}
+   814→                                  </TableCell>
+   815→                                  <TableCell className="text-right">
+   816→                                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+   817→                                      <QuickUpdatePopover
+   818→                                        files={g.items}
+   819→                                        projectId={project.id}
+   820→                                        onSaved={() => { refresh(); onChanged(); }}
+   821→                                        isGroup
+   822→                                      />
+   823→                                      <Button
+   824→                                        variant="ghost"
+   825→                                        size="icon"
+   826→                                        className="h-7 w-7"
+   827→                                        onClick={() => toggleGroup(g.key)}
+   828→                                        title={expanded ? "Collapse items" : "Expand items"}
+   829→                                      >
+   830→                                        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+   831→                                      </Button>
+   832→                                    </div>
+   833→                                  </TableCell>
+   834→                                </TableRow>
+   835→                                {/* Expanded child rows */}
+   836→                                {expanded && g.items.map((f) => {
+   837→                                  const childSelected = selectedIds.has(f.id);
+   838→                                  const childCost = (f.unitPrice || 0) * (f.qty || 0);
+   839→                                  return (
+   840→                                  <TableRow
+   841→                                    key={f.id}
+   842→                                    className={cn(
+   843→                                      "border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30",
+   844→                                      childSelected && "bg-primary/[0.06]"
+   845→                                    )}
+   846→                                    onClick={() => setLogFile(f)}
+   847→                                  >
+   848→                                    <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+   849→                                      <Checkbox
+   850→                                        checked={childSelected}
+   851→                                        onCheckedChange={() => toggleSelect(f.id)}
+   852→                                        aria-label={`Select ${f.prNumber}`}
+   853→                                      />
+   854→                                    </TableCell>
+   855→                                    <TableCell className="pl-8 font-mono text-xs text-muted-foreground">
+   856→                                      <span className="inline-flex items-center gap-1.5">
+   857→                                        <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
+   858→                                        {f.prNumber}
+   859→                                      </span>
+   860→                                    </TableCell>
+   861→                                    <TableCell>
+   862→                                      {f.fileNumber && f.fileNumber.trim() ? (
+   863→                                        <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
+   864→                                          <Hash className="h-3 w-3" />
+   865→                                          {f.fileNumber}
+   866→                                        </span>
+   867→                                      ) : (
+   868→                                        <span className="text-muted-foreground">—</span>
+   869→                                      )}
+   870→                                    </TableCell>
+   871→                                    <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
+   872→                                    <TableCell className="text-foreground text-xs">{f.itemName}</TableCell>
+   873→                                    <TableCell className="text-right text-xs">{f.qty} {f.unit}</TableCell>
+   874→                                    <TableCell className="text-right text-xs">{formatCurrency(f.unitPrice)}</TableCell>
+   875→                                    <TableCell className="text-right text-xs">{formatCurrency(childCost)}</TableCell>
+   876→                                    <TableCell className="text-right text-xs font-medium">{formatCurrency(f.fileCost)}</TableCell>
+   877→                                    <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
+   878→                                    <TableCell>
+   879→                                      <div className="flex flex-col gap-0.5">
+   880→                                        <PositionBadge position={f.presentPosition} />
+   881→                                        {f.responsiblePerson && (
+   882→                                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+   883→                                            <User className="h-2.5 w-2.5" />
+   884→                                            {f.responsiblePerson}
+   885→                                          </span>
+   886→                                        )}
+   887→                                      </div>
+   888→                                    </TableCell>
+   889→                                    <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
+   890→                                    <TableCell className="text-right">
+   891→                                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+   892→                                        <QuickUpdatePopover
+   893→                                          files={[f]}
+   894→                                          projectId={project.id}
+   895→                                          onSaved={() => { refresh(); onChanged(); }}
+   896→                                        />
+   897→                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
+   898→                                      </div>
+   899→                                    </TableCell>
+   900→                                  </TableRow>
+   901→                                  );
+   902→                                })}
+   903→                              </Fragment>
+   904→                            );
+   905→                          })}
+   906→                          {/* Single-item rows (groups with only 1 item fall back to a normal row) */}
+   907→                          {groupedView.singles.map((f) => renderSingleFileRow(f))}
+   908→                        </>
+   909→                      ) : (
+   910→                        filteredFiles.map((f) => renderSingleFileRow(f))
+   911→                      )}
+   912→                    </TableBody>
+   913→                  </Table>
+   914→                </div>
+   915→              </div>
+   916→              <p className="text-xs text-muted-foreground">
+   917→                {groupByFile && groupedView.groups.length > 0
+   918→                  ? `${groupedView.groups.length} grouped file(s) + ${groupedView.singles.length} single file(s) · Click a group row to expand its items · Click any row to view full log`
+   919→                  : `${filteredFiles.length} file(s) · Click any row to view full log · Use the pencil to open the full edit dialog`}
+   920→              </p>
+   921→            </>
+   922→          ) : (
+   923→            /* PR from Estimate tab */
+   924→            <>
+   925→              <div className="bg-secondary/40 rounded-lg p-3 flex items-center gap-2 flex-wrap">
+   926→                <FileSignature className="h-4 w-4 text-amber-400" />
+   927→                <p className="text-sm text-foreground">
+   928→                  Items pending PR initiation from processed estimates. Click <span className="font-medium text-primary">Initiate File</span> to raise a PR — it will be forwarded to the &quot;PR Raised Files&quot; tab.
+   929→                </p>
+   930→              </div>
+   931→              {estimates && estimates.length > 0 ? (
+   932→                <div className="space-y-4">
+   933→                  {/* estimate selector */}
+   934→                  {estimates.length > 1 && (
+   935→                    <div className="flex items-center gap-2 flex-wrap">
+   936→                      <span className="text-xs text-muted-foreground">Estimate:</span>
+   937→                      {estimates.map((e) => (
+   938→                        <button
+   939→                          key={e.id}
+   940→                          onClick={() => setActiveEstimateId(e.id)}
+   941→                          className={cn(
+   942→                            "px-2.5 py-1 rounded-md text-xs border transition-colors",
+   943→                            (activeEstimateId || estimateForTab?.id) === e.id
+   944→                              ? "border-primary bg-primary/10 text-primary"
+   945→                              : "border-border text-muted-foreground hover:text-foreground"
+   946→                          )}
+   947→                        >
+   948→                          {e.name} <CustomBadge className={cn("border-0 ml-1", estimateStatusColor(e.status))}>{e.status}</CustomBadge>
+   949→                        </button>
+   950→                      ))}
+   951→                    </div>
+   952→                  )}
+   953→                  <EstimateItemsTable
+   954→                    estimateId={activeEstimateId || estimateForTab?.id || estimates[0].id}
+   955→                    showProcessButton
+   956→                    onChanged={() => { refreshEst(); refresh(); onChanged(); }}
+   957→                  />
+   958→                </div>
+   959→              ) : (
+   960→                <EmptyState
+   961→                  icon={Sparkles}
+   962→                  title="No estimates for this project"
+   963→                  description="Create a new project via the Add Project wizard to generate a material estimate, or add files directly in the PR Raised Files tab."
+   964→                />
+   965→              )}
+   966→            </>
+   967→          )}
+   968→        </div>
+   969→      </div>
+   970→
+   971→      {/* Add File */}
+   972→      <FileFormDialog projectId={project.id} open={addOpen} onOpenChange={setAddOpen} onSaved={() => { setAddOpen(false); refresh(); onChanged(); }} />
+   973→      {/* Update Position popup (replaces simple Edit) */}
+   974→      {updateFile && (
+   975→        <UpdatePositionDialog
+   976→          file={updateFile}
+   977→          projectId={project.id}
+   978→          positionToResponsible={positionToResponsible}
+   979→          open={!!updateFile}
+   980→          onOpenChange={(o) => !o && setUpdateFile(null)}
+   981→          onSaved={() => { setUpdateFile(null); refresh(); onChanged(); }}
+   982→        />
+   983→      )}
+   984→      {/* File Log */}
+   985→      <FileLogDialog file={logFile} open={!!logFile} onOpenChange={(o) => !o && setLogFile(null)} />
+   986→      {/* Allocation History */}
+   987→      <AllocationHistoryDialog project={project} open={allocOpen} onOpenChange={setAllocOpen} onChanged={onChanged} />
+   988→      {/* Bulk Initiate dialog — picks the target position then bulk-updates selected files.
+   989→          The `key` forces a fresh mount whenever the user opens the dialog with a
+   990→          different set of selections, so the suggested-next-position default refreshes. */}
+   991→      {bulkInitiateOpen && (
+   992→        <BulkInitiateDialog
+   993→          key={`bulk-${selectedIds.size}-${suggestedNextPosition}`}
+   994→          open={bulkInitiateOpen}
+   995→          onOpenChange={setBulkInitiateOpen}
+   996→          selectedCount={selectedIds.size}
+   997→          defaultPosition={suggestedNextPosition}
+   998→          onConfirm={handleBulkInitiate}
+   999→        />
+  1000→      )}
+  1001→    </div>
+  1002→  );
+  1003→}
+  1004→
+  1005→function TabButton({ active, onClick, icon, label, count, tone }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count: number; tone?: "amber" }) {
+  1006→  return (
+  1007→    <button
+  1008→      onClick={onClick}
+  1009→      className={cn(
+  1010→        "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+  1011→        active
+  1012→          ? "border-primary text-primary"
+  1013→          : "border-transparent text-muted-foreground hover:text-foreground"
+  1014→      )}
+  1015→    >
+  1016→      {icon}
+  1017→      {label}
+  1018→      <span className={cn(
+  1019→        "px-1.5 py-0.5 rounded text-[10px] font-semibold",
+  1020→        active ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground",
+  1021→        tone === "amber" && count > 0 && "bg-amber-500/15 text-amber-400"
+  1022→      )}>
+  1023→        {count}
+  1024→      </span>
+  1025→    </button>
+  1026→  );
+  1027→}
+  1028→
+  1029→function FinBox({ label, value, tone }: { label: string; value: string; tone: string }) {
+  1030→  return (
+  1031→    <div className="bg-secondary/40 rounded-lg p-3">
+  1032→      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+  1033→      <p className={`text-sm font-semibold ${tone}`}>{value}</p>
+  1034→    </div>
+  1035→  );
+  1036→}
+  1037→
+  1038→function MiniStat({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: string }) {
+  1039→  return (
+  1040→    <div className="bg-secondary/40 rounded-lg p-3">
+  1041→      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+  1042→      <p className={`text-lg font-semibold ${tone}`}>{value}</p>
+  1043→      <p className="text-[10px] text-muted-foreground">{sub}</p>
+  1044→    </div>
+  1045→  );
+  1046→}
+  1047→
+  1048→function FilterPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  1049→  return (
+  1050→    <button
+  1051→      onClick={onClick}
+  1052→      className={cn(
+  1053→        "px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap",
+  1054→        active
+  1055→          ? "bg-primary text-primary-foreground"
+  1056→          : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+  1057→      )}
+  1058→    >
+  1059→      {label}
+  1060→    </button>
+  1061→  );
+  1062→}
+  1063→
+  1064→function SortTh({ label, onClick, active, dir, align = "left" }: { label: string; onClick: () => void; active: boolean; dir: "asc" | "desc"; align?: "left" | "right" }) {
+  1065→  return (
+  1066→    <TableHead className={align === "right" ? "text-muted-foreground text-right" : "text-muted-foreground"}>
+  1067→      <button onClick={onClick} className="inline-flex items-center gap-1 hover:text-foreground">
+  1068→        {label}
+  1069→        {active && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+  1070→      </button>
+  1071→    </TableHead>
+  1072→  );
+  1073→}
+  1074→
+  1075→// ─── File Form (Add only — Edit handled by UpdatePositionDialog) ───
+  1076→function FileFormDialog({ projectId, file, open, onOpenChange, onSaved }: { projectId: string; file?: ProjectFile; open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
+  1077→  const isEdit = !!file;
+  1078→  const [saving, setSaving] = useState(false);
+  1079→  const [form, setForm] = useState({
+  1080→    prNumber: file?.prNumber || "",
+  1081→    itemCode: file?.itemCode || "",
+  1082→    itemName: file?.itemName || "",
+  1083→    unit: file?.unit || "NOS",
+  1084→    qty: String(file?.qty ?? ""),
+  1085→    unitPrice: String(file?.unitPrice ?? ""),
+  1086→    fileCost: String(file?.fileCost ?? ""),
+  1087→    supplier: file?.supplier || "",
+  1088→    fileNumber: file?.fileNumber || "",
+  1089→    presentPosition: file?.presentPosition || "PR Raised",
+  1090→    fileCategory: file?.fileCategory || "General",
+  1091→    changedBy: "",
+  1092→    comment: "",
+  1093→  });
+  1094→  const { toast } = useToast();
+  1095→
+  1096→  const submit = async () => {
+  1097→    if (!form.prNumber || !form.itemCode || !form.itemName) {
+  1098→      toast({ title: "PR Number, Item Code and Item Name are required", variant: "destructive" });
+  1099→      return;
+  1100→    }
+  1101→    setSaving(true);
+  1102→    const url = isEdit ? `/api/projects/${projectId}/files/${file!.id}` : `/api/projects/${projectId}/files`;
+  1103→    const method = isEdit ? "PUT" : "POST";
+  1104→    const res = await apiRequest(url, method, form);
+  1105→    setSaving(false);
+  1106→    if (res.ok) {
+  1107→      toast({ title: isEdit ? "File updated" : "File added" });
+  1108→      onSaved();
+  1109→    } else {
+  1110→      toast({ title: "Failed", description: res.error, variant: "destructive" });
+  1111→    }
+  1112→  };
+  1113→
+  1114→  return (
+  1115→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1116→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1117→        <DialogHeader>
+  1118→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1119→            <FileText className="h-5 w-5 text-primary" />
+  1120→            {isEdit ? `Edit File — ${file!.prNumber}` : "Add Processing File"}
+  1121→          </DialogTitle>
+  1122→        </DialogHeader>
+  1123→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+  1124→          <Field label="PR Number *"><Input value={form.prNumber} onChange={(e) => setForm({ ...form, prNumber: e.target.value })} className="bg-background border-border" /></Field>
+  1125→          <Field label="File Number (optional)"><Input value={form.fileNumber} onChange={(e) => setForm({ ...form, fileNumber: e.target.value })} placeholder="e.g. FILE/2025/001" className="bg-background border-border" /></Field>
+  1126→          <Field label="Item Code *"><Input value={form.itemCode} onChange={(e) => setForm({ ...form, itemCode: e.target.value })} className="bg-background border-border" /></Field>
+  1127→          <div className="sm:col-span-2"><Field label="Item Name *"><Input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} className="bg-background border-border" /></Field></div>
+  1128→          <Field label="Unit"><Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="bg-background border-border" /></Field>
+  1129→          <Field label="Qty"><Input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} className="bg-background border-border" /></Field>
+  1130→          <Field label="Unit Price (Rs.)"><Input type="number" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} className="bg-background border-border" /></Field>
+  1131→          <Field label="File Cost (Rs.) — auto if empty"><Input type="number" value={form.fileCost} onChange={(e) => setForm({ ...form, fileCost: e.target.value })} placeholder="auto" className="bg-background border-border" /></Field>
+  1132→          <Field label="Supplier"><Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="bg-background border-border" /></Field>
+  1133→          <Field label="Present Position">
+  1134→            <Select value={form.presentPosition} onValueChange={(v) => setForm({ ...form, presentPosition: v })}>
+  1135→              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+  1136→              <SelectContent>{PRESENT_POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+  1137→            </Select>
+  1138→          </Field>
+  1139→          <Field label="File Category">
+  1140→            <Select value={form.fileCategory} onValueChange={(v) => setForm({ ...form, fileCategory: v })}>
+  1141→              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+  1142→              <SelectContent>{FILE_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+  1143→            </Select>
+  1144→          </Field>
+  1145→          {isEdit && (
+  1146→            <>
+  1147→              <Field label="Changed By"><Input value={form.changedBy} onChange={(e) => setForm({ ...form, changedBy: e.target.value })} placeholder="Your name" className="bg-background border-border" /></Field>
+  1148→              <div className="sm:col-span-2"><Field label="Comment (for log)"><Input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} placeholder="Optional note" className="bg-background border-border" /></Field></div>
+  1149→            </>
+  1150→          )}
+  1151→        </div>
+  1152→        <DialogFooter>
+  1153→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+  1154→          <Button onClick={submit} disabled={saving} className="gap-1.5">{saving && <Loader2 className="h-4 w-4 animate-spin" />}{isEdit ? "Update File" : "Add File"}</Button>
+  1155→        </DialogFooter>
+  1156→      </DialogContent>
+  1157→    </Dialog>
+  1158→  );
+  1159→}
+  1160→
+  1161→// ─── Update Position Dialog (dedicated edit popup with next-position + responsible person) ───
+  1162→function UpdatePositionDialog({
+  1163→  file,
+  1164→  projectId,
+  1165→  positionToResponsible,
+  1166→  open,
+  1167→  onOpenChange,
+  1168→  onSaved,
+  1169→}: {
+  1170→  file: ProjectFile;
+  1171→  projectId: string;
+  1172→  positionToResponsible: Map<string, string>;
+  1173→  open: boolean;
+  1174→  onOpenChange: (o: boolean) => void;
+  1175→  onSaved: () => void;
+  1176→}) {
+  1177→  const currentPosition = file.presentPosition;
+  1178→  const [nextPosition, setNextPosition] = useState(currentPosition);
+  1179→  const [responsiblePerson, setResponsiblePerson] = useState(file.responsiblePerson || "");
+  1180→  const [fileNumber, setFileNumber] = useState(file.fileNumber || "");
+  1181→  const [supplier, setSupplier] = useState(file.supplier || "");
+  1182→  const [changedBy, setChangedBy] = useState("");
+  1183→  const [comment, setComment] = useState("");
+  1184→  const [saving, setSaving] = useState(false);
+  1185→  const { toast } = useToast();
+  1186→
+  1187→  // When the user picks a different next position, prefill the responsible person
+  1188→  // from the process-flow defaults — but only if the user hasn't manually overridden.
+  1189→  const defaultForCurrent = positionToResponsible.get(currentPosition) || "";
+  1190→  const defaultForNext = positionToResponsible.get(nextPosition) || "";
+  1191→
+  1192→  const handleNextPositionChange = (v: string) => {
+  1193→    setNextPosition(v);
+  1194→    // Auto-fill responsible person from the new position's default — only if user hasn't overridden
+  1195→    const isUsingDefault = responsiblePerson === defaultForCurrent || responsiblePerson === "";
+  1196→    if (isUsingDefault) {
+  1197→      const newDefault = positionToResponsible.get(v) || "";
+  1198→      setResponsiblePerson(newDefault);
+  1199→    }
+  1200→  };
+  1201→
+  1202→  const positionChanged = nextPosition !== currentPosition;
+  1203→
+  1204→  const submit = async () => {
+  1205→    if (positionChanged && !changedBy.trim()) {
+  1206→      toast({ title: "Changed By is required when updating position", variant: "destructive" });
+  1207→      return;
+  1208→    }
+  1209→    setSaving(true);
+  1210→    const body: Record<string, unknown> = {
+  1211→      // Always allow file number + supplier updates
+  1212→      fileNumber: fileNumber.trim() || null,
+  1213→      supplier: supplier.trim() || null,
+  1214→      // Position update
+  1215→      presentPosition: nextPosition,
+  1216→      responsiblePerson: responsiblePerson.trim() || null,
+  1217→      changedBy: changedBy.trim() || "Officer",
+  1218→      comment: comment.trim() || (positionChanged ? `Position changed: ${currentPosition} → ${nextPosition}` : "File metadata updated"),
+  1219→    };
+  1220→    const res = await apiRequest(`/api/projects/${projectId}/files/${file.id}`, "PUT", body);
+  1221→    setSaving(false);
+  1222→    if (res.ok) {
+  1223→      toast({
+  1224→        title: positionChanged ? "Position updated" : "File updated",
+  1225→        description: positionChanged ? `${currentPosition} → ${nextPosition}` : undefined,
+  1226→      });
+  1227→      onSaved();
+  1228→    } else {
+  1229→      toast({ title: "Failed to update", description: res.error, variant: "destructive" });
+  1230→    }
+  1231→  };
+  1232→
+  1233→  return (
+  1234→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1235→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1236→        <DialogHeader>
+  1237→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1238→            <Pencil className="h-5 w-5 text-primary" />
+  1239→            Update Position — {file.prNumber}
+  1240→          </DialogTitle>
+  1241→          <DialogDescription className="text-muted-foreground">
+  1242→            {file.itemName} · {file.itemCode}
+  1243→          </DialogDescription>
+  1244→        </DialogHeader>
+  1245→
+  1246→        <div className="space-y-5">
+  1247→          {/* Current → Next position display */}
+  1248→          <div className="bg-secondary/40 rounded-lg p-4">
+  1249→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+  1250→              <ArrowRight className="h-3.5 w-3.5" /> Position Transition
+  1251→            </h4>
+  1252→            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-center">
+  1253→              {/* Current */}
+  1254→              <div className="space-y-1.5">
+  1255→                <Label className="text-xs text-muted-foreground">Current Position</Label>
+  1256→                <div className={cn("rounded-lg border px-3 py-2 text-sm font-medium", positionColor(currentPosition))}>
+  1257→                  {currentPosition}
+  1258→                </div>
+  1259→                <p className="text-[11px] text-muted-foreground">
+  1260→                  Default officer: <span className="text-foreground">{defaultForCurrent || "—"}</span>
+  1261→                </p>
+  1262→              </div>
+  1263→              {/* Arrow */}
+  1264→              <div className="flex items-center justify-center">
+  1265→                <ArrowRight className="h-5 w-5 text-primary rotate-90 sm:rotate-0" />
+  1266→              </div>
+  1267→              {/* Next */}
+  1268→              <div className="space-y-1.5">
+  1269→                <Label className="text-xs text-muted-foreground">Next Position *</Label>
+  1270→                <Select value={nextPosition} onValueChange={handleNextPositionChange}>
+  1271→                  <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+  1272→                  <SelectContent>
+  1273→                    {PRESENT_POSITIONS.map((p) => (
+  1274→                      <SelectItem key={p} value={p}>{p}</SelectItem>
+  1275→                    ))}
+  1276→                  </SelectContent>
+  1277→                </Select>
+  1278→                <p className="text-[11px] text-muted-foreground">
+  1279→                  Default officer: <span className="text-foreground">{defaultForNext || "—"}</span>
+  1280→                </p>
+  1281→              </div>
+  1282→            </div>
+  1283→            {!positionChanged && (
+  1284→              <p className="text-[11px] text-amber-400 mt-3 flex items-center gap-1">
+  1285→                <ArrowRight className="h-3 w-3" />
+  1286→                Pick a different next position to log a position change.
+  1287→              </p>
+  1288→            )}
+  1289→          </div>
+  1290→
+  1291→          {/* Responsible Person (auto-filled, editable) */}
+  1292→          <div className="bg-secondary/40 rounded-lg p-4 space-y-3">
+  1293→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+  1294→              <UserCheck className="h-3.5 w-3.5" /> Responsible Person
+  1295→            </h4>
+  1296→            <Field label="Responsible Person (editable — defaults from Process Flow)">
+  1297→              <Input
+  1298→                value={responsiblePerson}
+  1299→                onChange={(e) => setResponsiblePerson(e.target.value)}
+  1300→                placeholder={defaultForNext || "e.g. Cdr. R. Perera"}
+  1301→                className="bg-background border-border"
+  1302→              />
+  1303→            </Field>
+  1304→            <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+  1305→              <User className="h-3 w-3 mt-0.5 shrink-0" />
+  1306→              Auto-filled from the Process Flow defaults for the selected next position. Override if a different person is responsible.
+  1307→            </p>
+  1308→          </div>
+  1309→
+  1310→          {/* File Number + Supplier */}
+  1311→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1312→            <Field label="File Number (received after initial RL)">
+  1313→              <Input
+  1314→                value={fileNumber}
+  1315→                onChange={(e) => setFileNumber(e.target.value)}
+  1316→                placeholder="e.g. FILE/2025/001"
+  1317→                className="bg-background border-border"
+  1318→              />
+  1319→            </Field>
+  1320→            <Field label="Supplier">
+  1321→              <Input
+  1322→                value={supplier}
+  1323→                onChange={(e) => setSupplier(e.target.value)}
+  1324→                placeholder="Supplier name"
+  1325→                className="bg-background border-border"
+  1326→              />
+  1327→            </Field>
+  1328→          </div>
+  1329→
+  1330→          {/* Change log fields */}
+  1331→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1332→            <Field label={`Changed By ${positionChanged ? "*" : ""}`}>
+  1333→              <Input
+  1334→                value={changedBy}
+  1335→                onChange={(e) => setChangedBy(e.target.value)}
+  1336→                placeholder="Your name / rank"
+  1337→                className="bg-background border-border"
+  1338→              />
+  1339→            </Field>
+  1340→            <Field label="Comment (for log)">
+  1341→              <Input
+  1342→                value={comment}
+  1343→                onChange={(e) => setComment(e.target.value)}
+  1344→                placeholder={positionChanged ? `Position changed: ${currentPosition} → ${nextPosition}` : "Optional note"}
+  1345→                className="bg-background border-border"
+  1346→              />
+  1347→            </Field>
+  1348→          </div>
+  1349→        </div>
+  1350→
+  1351→        <DialogFooter>
+  1352→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+  1353→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+  1354→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1355→            <ArrowRight className="h-4 w-4" />
+  1356→            {positionChanged ? "Update Position" : "Save Changes"}
+  1357→          </Button>
+  1358→        </DialogFooter>
+  1359→      </DialogContent>
+  1360→    </Dialog>
+  1361→  );
+  1362→}
+  1363→
+  1364→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  1365→  return (
+  1366→    <div className="space-y-1.5">
+  1367→      <Label className="text-xs">{label}</Label>
+  1368→      {children}
+  1369→    </div>
+  1370→  );
+  1371→}
+  1372→
+  1373→// ─── Quick Update Position Popover (inline, lightweight) ───
+  1374→// Used on every file row + every merged-group row. For groups, prompts the
+  1375→// user to confirm updating all N items at once (since they share a position).
+  1376→function QuickUpdatePopover({
+  1377→  files,
+  1378→  projectId,
+  1379→  onSaved,
+  1380→  isGroup,
+  1381→}: {
+  1382→  files: ProjectFile[];
+  1383→  projectId: string;
+  1384→  onSaved: () => void;
+  1385→  isGroup?: boolean;
+  1386→}) {
+  1387→  const [open, setOpen] = useState(false);
+  1388→  const [newPosition, setNewPosition] = useState<string>(files[0]?.presentPosition || "PR Raised");
+  1389→  const [comment, setComment] = useState("");
+  1390→  const [changedBy, setChangedBy] = useState("Officer");
+  1391→  const [saving, setSaving] = useState(false);
+  1392→  const { toast } = useToast();
+  1393→
+  1394→  const currentPosition = files[0]?.presentPosition || "";
+  1395→  const positionChanged = newPosition !== currentPosition;
+  1396→  const isMultiFile = isGroup && files.length > 1;
+  1397→
+  1398→  const submit = async () => {
+  1399→    if (!newPosition) {
+  1400→      toast({ title: "Select a new position", variant: "destructive" });
+  1401→      return;
+  1402→    }
+  1403→    if (isMultiFile) {
+  1404→      const ok = window.confirm(`Update position for all ${files.length} items in this file?`);
+  1405→      if (!ok) return;
+  1406→    }
+  1407→    setSaving(true);
+  1408→    const defaultComment = positionChanged
+  1409→      ? `Position changed: ${currentPosition} → ${newPosition}`
+  1410→      : "Position updated";
+  1411→    const results = await Promise.all(
+  1412→      files.map((f) =>
+  1413→        apiRequest(`/api/projects/${projectId}/files/${f.id}`, "PUT", {
+  1414→          presentPosition: newPosition,
+  1415→          comment: comment.trim() || defaultComment,
+  1416→          changedBy: changedBy.trim() || "Officer",
+  1417→        })
+  1418→      )
+  1419→    );
+  1420→    setSaving(false);
+  1421→    const failed = results.filter((r) => !r.ok);
+  1422→    if (failed.length === 0) {
+  1423→      toast({
+  1424→        title: isMultiFile ? `Position updated for ${files.length} items` : "Position updated",
+  1425→        description: positionChanged ? `${currentPosition} → ${newPosition}` : undefined,
+  1426→      });
+  1427→      setOpen(false);
+  1428→      setComment("");
+  1429→      setChangedBy("Officer");
+  1430→      onSaved();
+  1431→    } else {
+  1432→      toast({
+  1433→        title: `${failed.length} of ${files.length} update(s) failed`,
+  1434→        description: failed[0]?.error,
+  1435→        variant: "destructive",
+  1436→      });
+  1437→    }
+  1438→  };
+  1439→
+  1440→  return (
+  1441→    <Popover open={open} onOpenChange={setOpen}>
+  1442→      <PopoverTrigger asChild>
+  1443→        <Button
+  1444→          variant="ghost"
+  1445→          size="icon"
+  1446→          className="h-7 w-7"
+  1447→          title={isMultiFile ? `Quick Update Position (all ${files.length} items)` : "Quick Update Position"}
+  1448→          onClick={(e) => e.stopPropagation()}
+  1449→        >
+  1450→          <RefreshCw className="h-3.5 w-3.5" />
+  1451→        </Button>
+  1452→      </PopoverTrigger>
+  1453→      <PopoverContent
+  1454→        className="w-80 bg-popover text-popover-foreground border-border"
+  1455→        align="end"
+  1456→        onClick={(e) => e.stopPropagation()}
+  1457→      >
+  1458→        <div className="space-y-3">
+  1459→          <div className="flex items-center gap-2">
+  1460→            <RefreshCw className="h-4 w-4 text-primary" />
+  1461→            <h4 className="text-sm font-semibold text-foreground">Quick Update Position</h4>
+  1462→          </div>
+  1463→          <div className="bg-secondary/40 rounded-md p-2.5 text-xs space-y-1.5">
+  1464→            <div className="flex items-center gap-1.5 flex-wrap">
+  1465→              <span className="text-muted-foreground">Current:</span>
+  1466→              <PositionBadge position={currentPosition} />
+  1467→            </div>
+  1468→            <div className="text-[11px] text-muted-foreground">
+  1469→              {files[0]?.prNumber} · {files[0]?.itemName}
+  1470→              {isMultiFile && (
+  1471→                <span className="text-foreground"> · {files.length} items in this file</span>
+  1472→              )}
+  1473→            </div>
+  1474→            {isMultiFile && (
+  1475→              <p className="text-amber-400 flex items-center gap-1 pt-0.5">
+  1476→                <Files className="h-3 w-3" />
+  1477→                Applies the new position to all {files.length} items in this file.
+  1478→              </p>
+  1479→            )}
+  1480→          </div>
+  1481→          <div className="space-y-1.5">
+  1482→            <Label className="text-xs text-muted-foreground">New Position</Label>
+  1483→            <Select value={newPosition} onValueChange={setNewPosition}>
+  1484→              <SelectTrigger className="bg-background border-border h-9">
+  1485→                <SelectValue />
+  1486→              </SelectTrigger>
+  1487→              <SelectContent>
+  1488→                {PRESENT_POSITIONS.map((p) => (
+  1489→                  <SelectItem key={p} value={p}>{p}</SelectItem>
+  1490→                ))}
+  1491→              </SelectContent>
+  1492→            </Select>
+  1493→          </div>
+  1494→          <div className="space-y-1.5">
+  1495→            <Label className="text-xs text-muted-foreground">Changed By</Label>
+  1496→            <Input
+  1497→              value={changedBy}
+  1498→              onChange={(e) => setChangedBy(e.target.value)}
+  1499→              placeholder="Your name / rank"
+  1500→              className="bg-background border-border h-9 text-sm"
+  1501→            />
+  1502→          </div>
+  1503→          <div className="space-y-1.5">
+  1504→            <Label className="text-xs text-muted-foreground">Comment (optional)</Label>
+  1505→            <Input
+  1506→              value={comment}
+  1507→              onChange={(e) => setComment(e.target.value)}
+  1508→              placeholder={positionChanged ? `Position changed: ${currentPosition} → ${newPosition}` : "Optional note for log"}
+  1509→              className="bg-background border-border h-9 text-sm"
+  1510→            />
+  1511→          </div>
+  1512→          <div className="flex items-center justify-end gap-2 pt-1">
+  1513→            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+  1514→            <Button size="sm" onClick={submit} disabled={saving} className="gap-1.5">
+  1515→              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+  1516→              Save
+  1517→            </Button>
+  1518→          </div>
+  1519→        </div>
+  1520→      </PopoverContent>
+  1521→    </Popover>
+  1522→  );
+  1523→}
+  1524→
+  1525→// ─── Bulk Initiate Dialog (multi-select → pick target position → bulk PUT) ───
+  1526→function BulkInitiateDialog({
+  1527→  open,
+  1528→  onOpenChange,
+  1529→  selectedCount,
+  1530→  defaultPosition,
+  1531→  onConfirm,
+  1532→}: {
+  1533→  open: boolean;
+  1534→  onOpenChange: (o: boolean) => void;
+  1535→  selectedCount: number;
+  1536→  defaultPosition: string;
+  1537→  onConfirm: (input: { newPosition: string; changedBy: string; comment: string }) => Promise<void>;
+  1538→}) {
+  1539→  const [newPosition, setNewPosition] = useState(defaultPosition);
+  1540→  const [changedBy, setChangedBy] = useState("Officer");
+  1541→  const [comment, setComment] = useState("");
+  1542→  const [saving, setSaving] = useState(false);
+  1543→  const { toast } = useToast();
+  1544→
+  1545→  // The parent uses a `key` based on the selected count + suggested position to
+  1546→  // remount this dialog whenever the user opens it with a fresh set of selections,
+  1547→  // so `useState(defaultPosition)` always picks up the latest suggested position.
+  1548→
+  1549→  const submit = async () => {
+  1550→    if (!newPosition) {
+  1551→      toast({ title: "Select a new position", variant: "destructive" });
+  1552→      return;
+  1553→    }
+  1554→    if (selectedCount === 0) {
+  1555→      toast({ title: "No files selected", variant: "destructive" });
+  1556→      return;
+  1557→    }
+  1558→    setSaving(true);
+  1559→    await onConfirm({ newPosition, changedBy, comment });
+  1560→    setSaving(false);
+  1561→    // Reset form after submit (parent closes the dialog)
+  1562→    setComment("");
+  1563→    setChangedBy("Officer");
+  1564→  };
+  1565→
+  1566→  return (
+  1567→    <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+  1568→      <DialogContent className="max-w-md bg-card border-border">
+  1569→        <DialogHeader>
+  1570→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1571→            <CheckSquare className="h-5 w-5 text-primary" />
+  1572→            Initiate Selected Files
+  1573→          </DialogTitle>
+  1574→          <DialogDescription className="text-muted-foreground">
+  1575→            Move <span className="font-medium text-foreground">{selectedCount}</span> selected file{selectedCount === 1 ? "" : "s"} to a new present position. A log entry is created for each file.
+  1576→          </DialogDescription>
+  1577→        </DialogHeader>
+  1578→
+  1579→        <div className="space-y-4 py-2">
+  1580→          <div className="space-y-1.5">
+  1581→            <Label className="text-xs text-muted-foreground">New Position</Label>
+  1582→            <Select value={newPosition} onValueChange={setNewPosition}>
+  1583→              <SelectTrigger className="bg-background border-border">
+  1584→                <SelectValue />
+  1585→              </SelectTrigger>
+  1586→              <SelectContent>
+  1587→                {PRESENT_POSITIONS.map((p) => (
+  1588→                  <SelectItem key={p} value={p}>{p}</SelectItem>
+  1589→                ))}
+  1590→              </SelectContent>
+  1591→            </Select>
+  1592→            {defaultPosition && (
+  1593→              <p className="text-[11px] text-muted-foreground">
+  1594→                Suggested next position: <span className="text-foreground">{defaultPosition}</span>
+  1595→              </p>
+  1596→            )}
+  1597→          </div>
+  1598→
+  1599→          <div className="space-y-1.5">
+  1600→            <Label className="text-xs text-muted-foreground">Changed By</Label>
+  1601→            <Input
+  1602→              value={changedBy}
+  1603→              onChange={(e) => setChangedBy(e.target.value)}
+  1604→              placeholder="Your name / rank"
+  1605→              className="bg-background border-border"
+  1606→            />
+  1607→          </div>
+  1608→
+  1609→          <div className="space-y-1.5">
+  1610→            <Label className="text-xs text-muted-foreground">Comment (optional)</Label>
+  1611→            <Input
+  1612→              value={comment}
+  1613→              onChange={(e) => setComment(e.target.value)}
+  1614→              placeholder={`Bulk initiated → ${newPosition}`}
+  1615→              className="bg-background border-border"
+  1616→            />
+  1617→          </div>
+  1618→        </div>
+  1619→
+  1620→        <DialogFooter>
+  1621→          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+  1622→          <Button onClick={submit} disabled={saving || selectedCount === 0} className="gap-1.5">
+  1623→            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+  1624→            Initiate {selectedCount} File{selectedCount === 1 ? "" : "s"}
+  1625→          </Button>
+  1626→        </DialogFooter>
+  1627→      </DialogContent>
+  1628→    </Dialog>
+  1629→  );
+  1630→}
+  1631→
+  1632→// ─── Allocation History ───
+  1633→function AllocationHistoryDialog({ project, open, onOpenChange, onChanged }: { project: Project; open: boolean; onOpenChange: (o: boolean) => void; onChanged: () => void }) {
+  1634→  const { data: allocations, refresh } = useFetch<Allocation[]>(`/api/projects/${project.id}/allocations`);
+  1635→  const [saving, setSaving] = useState(false);
+  1636→  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", type: "Commitment", authorizedBy: "" });
+  1637→  const { toast } = useToast();
+  1638→
+  1639→  const totalAllocated = allocations?.reduce((s, a) => s + a.amount, 0) ?? 0;
+  1640→  const committed = allocations?.filter((a) => a.type === "Commitment").reduce((s, a) => s + a.amount, 0) ?? 0;
+  1641→  const actual = allocations?.filter((a) => a.type === "Actual").reduce((s, a) => s + a.amount, 0) ?? 0;
+  1642→
+  1643→  const submit = async () => {
+  1644→    if (!form.description || !form.amount) {
+  1645→      toast({ title: "Description and amount required", variant: "destructive" });
+  1646→      return;
+  1647→    }
+  1648→    setSaving(true);
+  1649→    const res = await apiRequest(`/api/projects/${project.id}/allocations`, "POST", form);
+  1650→    setSaving(false);
+  1651→    if (res.ok) {
+  1652→      toast({ title: "Allocation added" });
+  1653→      setForm({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", type: "Commitment", authorizedBy: "" });
+  1654→      refresh();
+  1655→      onChanged();
+  1656→    } else {
+  1657→      toast({ title: "Failed", description: res.error, variant: "destructive" });
+  1658→    }
+  1659→  };
+  1660→
+  1661→  return (
+  1662→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1663→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1664→        <DialogHeader>
+  1665→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1666→            <History className="h-5 w-5 text-primary" />
+  1667→            Allocation History — {project.name}
+  1668→          </DialogTitle>
+  1669→        </DialogHeader>
+  1670→        <div className="grid grid-cols-3 gap-3 mb-4">
+  1671→          <FinBox label="Total Allocated" value={formatCurrency(totalAllocated)} tone="text-blue-400" />
+  1672→          <FinBox label="Committed" value={formatCurrency(committed)} tone="text-amber-400" />
+  1673→          <FinBox label="Actual" value={formatCurrency(actual)} tone="text-red-400" />
+  1674→        </div>
+  1675→        <div className="bg-secondary/40 rounded-lg p-4 mb-4">
+  1676→          <h4 className="text-sm font-semibold text-foreground mb-3">Add Allocation</h4>
+  1677→          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+  1678→            <Field label="Date"><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="bg-background border-border" /></Field>
+  1679→            <Field label="Description"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="bg-background border-border" /></Field>
+  1680→            <Field label="Amount (Rs.)"><Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="bg-background border-border" /></Field>
+  1681→            <Field label="Type">
+  1682→              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+  1683→                <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+  1684→                <SelectContent>
+  1685→                  <SelectItem value="Commitment">Commitment</SelectItem>
+  1686→                  <SelectItem value="Actual">Actual</SelectItem>
+  1687→                  <SelectItem value="Release">Release</SelectItem>
+  1688→                </SelectContent>
+  1689→              </Select>
+  1690→            </Field>
+  1691→            <div className="flex items-end"><Button onClick={submit} disabled={saving} className="w-full gap-1.5">{saving && <Loader2 className="h-4 w-4 animate-spin" />} Add</Button></div>
+  1692→          </div>
+  1693→        </div>
+  1694→        <div className="border border-border rounded-lg overflow-hidden">
+  1695→          <Table>
+  1696→            <TableHeader>
+  1697→              <TableRow className="hover:bg-transparent border-border">
+  1698→                <TableHead className="text-muted-foreground">Date</TableHead>
+  1699→                <TableHead className="text-muted-foreground">Description</TableHead>
+  1700→                <TableHead className="text-muted-foreground text-right">Amount</TableHead>
+  1701→                <TableHead className="text-muted-foreground">Type</TableHead>
+  1702→                <TableHead className="text-muted-foreground">Authorized By</TableHead>
+  1703→              </TableRow>
+  1704→            </TableHeader>
+  1705→            <TableBody>
+  1706→              {!allocations || allocations.length === 0 ? (
+  1707→                <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No allocations recorded.</TableCell></TableRow>
+  1708→              ) : (
+  1709→                allocations.map((a) => (
+  1710→                  <TableRow key={a.id} className="border-border">
+  1711→                    <TableCell className="text-xs">{new Date(a.date).toLocaleDateString("en-GB")}</TableCell>
+  1712→                    <TableCell className="text-foreground">{a.description}</TableCell>
+  1713→                    <TableCell className="text-right font-medium">{formatCurrency(a.amount)}</TableCell>
+  1714→                    <TableCell>
+  1715→                      <CustomBadge className={a.type === "Actual" ? "border-0 bg-red-500/15 text-red-400" : a.type === "Commitment" ? "border-0 bg-amber-500/15 text-amber-400" : "border-0 bg-blue-500/15 text-blue-400"}>{a.type}</CustomBadge>
+  1716→                    </TableCell>
+  1717→                    <TableCell className="text-xs">{a.authorizedBy || "—"}</TableCell>
+  1718→                  </TableRow>
+  1719→                ))
+  1720→              )}
+  1721→            </TableBody>
+  1722→          </Table>
+  1723→        </div>
+  1724→      </DialogContent>
+  1725→    </Dialog>
+  1726→  );
+  1727→}
+  1728→

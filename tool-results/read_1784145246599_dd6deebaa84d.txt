@@ -1,0 +1,702 @@
+  1000→      return;
+  1001→    }
+  1002→    const data = res.data as { syncedCount?: number };
+  1003→    const count = data?.syncedCount ?? 0;
+  1004→    toast({
+  1005→      title: count > 0 ? `Synced ${count} file(s)` : "Nothing to sync",
+  1006→      description:
+  1007→        count > 0
+  1008→          ? `${count} PO Placed file(s) moved to "In Collection".`
+  1009→          : "No PO Placed files pending sync.",
+  1010→    });
+  1011→    allFiles.refresh();
+  1012→  }
+  1013→
+  1014→  async function handleTransferToZone(file: ProjectFile) {
+  1015→    setZoneTransferId(file.id);
+  1016→    const res = await updateFileCollectionStatus(file, "Transferred to Zone", {
+  1017→      changedBy: "Collection Officer",
+  1018→    });
+  1019→    setZoneTransferId(null);
+  1020→    if (!res.ok) {
+  1021→      toast({
+  1022→        title: "Transfer to Zone failed",
+  1023→        description: res.error,
+  1024→        variant: "destructive",
+  1025→      });
+  1026→      return;
+  1027→    }
+  1028→    toast({
+  1029→      title: "Transferred to Zone",
+  1030→      description: `${file.itemName} moved to Zone store. Stock updated.`,
+  1031→    });
+  1032→    allFiles.refresh();
+  1033→  }
+  1034→
+  1035→  if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
+  1036→  if (itemsError) return <ErrorState message={itemsError} />;
+  1037→
+  1038→  const filtersActive =
+  1039→    projectFilter !== "all" ||
+  1040→    voteFilter !== "all" ||
+  1041→    typeFilter !== "all";
+  1042→
+  1043→  function clearFilters() {
+  1044→    setProjectFilter("all");
+  1045→    setVoteFilter("all");
+  1046→    setTypeFilter("all");
+  1047→  }
+  1048→
+  1049→  return (
+  1050→    <div className="space-y-5">
+  1051→      {/* Filter bar */}
+  1052→      <div className="bg-card border border-border rounded-xl p-4">
+  1053→        <div className="flex items-center justify-between gap-2 mb-3">
+  1054→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1055→            <Filter className="h-4 w-4" /> Filters
+  1056→          </div>
+  1057→          {filtersActive && (
+  1058→            <Button
+  1059→              size="sm"
+  1060→              variant="ghost"
+  1061→              className="h-7 text-xs gap-1.5"
+  1062→              onClick={clearFilters}
+  1063→            >
+  1064→              <X className="h-3.5 w-3.5" /> Clear
+  1065→            </Button>
+  1066→          )}
+  1067→        </div>
+  1068→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+  1069→          <div className="space-y-1.5">
+  1070→            <Label className="text-xs text-muted-foreground">By Project</Label>
+  1071→            <Select value={projectFilter} onValueChange={setProjectFilter}>
+  1072→              <SelectTrigger className="w-full">
+  1073→                <SelectValue placeholder="All Projects" />
+  1074→              </SelectTrigger>
+  1075→              <SelectContent>
+  1076→                <SelectItem value="all">All Projects</SelectItem>
+  1077→                {(projects ?? []).map((p) => (
+  1078→                  <SelectItem key={p.id} value={p.id}>
+  1079→                    {p.name}
+  1080→                  </SelectItem>
+  1081→                ))}
+  1082→              </SelectContent>
+  1083→            </Select>
+  1084→          </div>
+  1085→          <div className="space-y-1.5">
+  1086→            <Label className="text-xs text-muted-foreground">By Vote</Label>
+  1087→            <Select value={voteFilter} onValueChange={setVoteFilter}>
+  1088→              <SelectTrigger className="w-full">
+  1089→                <SelectValue placeholder="All Votes" />
+  1090→              </SelectTrigger>
+  1091→              <SelectContent>
+  1092→                <SelectItem value="all">All Votes</SelectItem>
+  1093→                {votes.map((v) => (
+  1094→                  <SelectItem key={v} value={v}>
+  1095→                    {v}
+  1096→                  </SelectItem>
+  1097→                ))}
+  1098→              </SelectContent>
+  1099→            </Select>
+  1100→          </div>
+  1101→          <div className="space-y-1.5">
+  1102→            <Label className="text-xs text-muted-foreground">By Type</Label>
+  1103→            <Select value={typeFilter} onValueChange={setTypeFilter}>
+  1104→              <SelectTrigger className="w-full">
+  1105→                <SelectValue placeholder="All Types" />
+  1106→              </SelectTrigger>
+  1107→              <SelectContent>
+  1108→                <SelectItem value="all">All Types</SelectItem>
+  1109→                {FILE_CATEGORIES.filter((c) => c !== "GEN").map((c) => (
+  1110→                  <SelectItem key={c} value={c}>
+  1111→                    {c}
+  1112→                  </SelectItem>
+  1113→                ))}
+  1114→              </SelectContent>
+  1115→            </Select>
+  1116→          </div>
+  1117→          <div className="space-y-1.5">
+  1118→            <Label className="text-xs text-muted-foreground">View</Label>
+  1119→            <div className="flex rounded-md border border-border overflow-hidden h-9">
+  1120→              <button
+  1121→                type="button"
+  1122→                onClick={() => setViewMode("numbers")}
+  1123→                className={cn(
+  1124→                  "flex-1 text-xs font-medium transition-colors px-3",
+  1125→                  viewMode === "numbers"
+  1126→                    ? "bg-primary text-primary-foreground"
+  1127→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+  1128→                )}
+  1129→              >
+  1130→                By Numbers
+  1131→              </button>
+  1132→              <button
+  1133→                type="button"
+  1134→                onClick={() => setViewMode("value")}
+  1135→                className={cn(
+  1136→                  "flex-1 text-xs font-medium transition-colors px-3 border-l border-border",
+  1137→                  viewMode === "value"
+  1138→                    ? "bg-primary text-primary-foreground"
+  1139→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+  1140→                )}
+  1141→              >
+  1142→                By Value
+  1143→              </button>
+  1144→            </div>
+  1145→          </div>
+  1146→        </div>
+  1147→      </div>
+  1148→
+  1149→      {/* Collection Pipeline — workflow stages with counts + Sync button */}
+  1150→      <div className="bg-card border border-border rounded-xl p-4">
+  1151→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+  1152→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1153→            <Workflow className="h-4 w-4" /> Collection Pipeline
+  1154→          </div>
+  1155→          <div className="flex items-center gap-2 flex-wrap">
+  1156→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1157→              {pipelineCounts["Pending"]} pending sync
+  1158→            </CustomBadge>
+  1159→            <Button
+  1160→              size="sm"
+  1161→              variant="outline"
+  1162→              onClick={handleSyncPoToCollection}
+  1163→              disabled={syncing}
+  1164→              className="gap-1.5 h-8"
+  1165→            >
+  1166→              {syncing ? (
+  1167→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1168→              ) : (
+  1169→                <RefreshCw className="h-3.5 w-3.5" />
+  1170→              )}
+  1171→              Sync PO → Collection
+  1172→            </Button>
+  1173→          </div>
+  1174→        </div>
+  1175→        <p className="text-xs text-muted-foreground mb-3">
+  1176→          Files appear here automatically after a Purchasing Order (PO) is
+  1177→          published. Click a stage to filter the file list below.
+  1178→        </p>
+  1179→        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2">
+  1180→          {FILE_COLLECTION_STATUSES.map((stage) => {
+  1181→            const count = pipelineCounts[stage] || 0;
+  1182→            const active = pipelineFilter === stage;
+  1183→            return (
+  1184→              <button
+  1185→                key={stage}
+  1186→                type="button"
+  1187→                onClick={() =>
+  1188→                  setPipelineFilter((cur) => (cur === stage ? "all" : stage))
+  1189→                }
+  1190→                className={cn(
+  1191→                  "text-left rounded-lg border p-2.5 transition-all hover:border-primary/60 hover:shadow-sm",
+  1192→                  active
+  1193→                    ? "border-primary bg-primary/10 ring-1 ring-primary/40"
+  1194→                    : "border-border bg-secondary/20"
+  1195→                )}
+  1196→                aria-pressed={active}
+  1197→              >
+  1198→                <div className="flex items-center justify-between gap-1">
+  1199→                  <span
+  1200→                    className={cn(
+  1201→                      "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
+  1202→                      fileCollectionStatusColor(stage)
+  1203→                    )}
+  1204→                  >
+  1205→                    {stage}
+  1206→                  </span>
+  1207→                </div>
+  1208→                <p className="mt-1 text-xl font-bold text-foreground leading-tight">
+  1209→                  {count}
+  1210→                </p>
+  1211→                <p className="text-[10px] text-muted-foreground">
+  1212→                  file{count !== 1 ? "s" : ""}
+  1213→                </p>
+  1214→              </button>
+  1215→            );
+  1216→          })}
+  1217→        </div>
+  1218→      </div>
+  1219→
+  1220→      {/* Pipeline-filtered file list */}
+  1221→      <div className="bg-card border border-border rounded-xl p-4">
+  1222→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+  1223→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+  1224→            <FileText className="h-4 w-4" />
+  1225→            Files in Pipeline
+  1226→            <CustomBadge className="bg-secondary border-border text-muted-foreground ml-1">
+  1227→              {pipelineFilter === "all"
+  1228→                ? "All active"
+  1229→                : pipelineFilter}
+  1230→              {" · "}
+  1231→              {pipelineFiles.length}
+  1232→            </CustomBadge>
+  1233→          </div>
+  1234→          {pipelineFilter !== "all" && (
+  1235→            <Button
+  1236→              size="sm"
+  1237→              variant="ghost"
+  1238→              className="h-7 text-xs gap-1.5"
+  1239→              onClick={() => setPipelineFilter("all")}
+  1240→            >
+  1241→              <X className="h-3.5 w-3.5" /> Clear stage filter
+  1242→            </Button>
+  1243→          )}
+  1244→        </div>
+  1245→        {allFiles.loading ? (
+  1246→          <LoadingState label="Loading project files..." />
+  1247→        ) : pipelineFiles.length === 0 ? (
+  1248→          <EmptyState
+  1249→            icon={FileText}
+  1250→            title="No files at this stage"
+  1251→            description={
+  1252→              pipelineFilter === "all"
+  1253→                ? "Files will appear here once a PO is placed and synced to collection."
+  1254→                : `No files currently in "${pipelineFilter}" status.`
+  1255→            }
+  1256→          />
+  1257→        ) : (
+  1258→          <div className="max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1259→            <ul className="divide-y divide-border">
+  1260→              {pipelineFiles.map((f) => {
+  1261→                const project = projectById.get(f.projectId);
+  1262→                const isAtAreaStore =
+  1263→                  f.collectionStatus === "Transferred to Area Store";
+  1264→                const isTransferring = zoneTransferId === f.id;
+  1265→                return (
+  1266→                  <li
+  1267→                    key={f.id}
+  1268→                    className="px-2 py-3 flex items-start gap-3 hover:bg-secondary/20 transition-colors"
+  1269→                  >
+  1270→                    <div
+  1271→                      className={cn(
+  1272→                        "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+  1273→                        fileCollectionStatusColor(f.collectionStatus)
+  1274→                      )}
+  1275→                    >
+  1276→                      <PackageCheck className="h-4 w-4" />
+  1277→                    </div>
+  1278→                    <div className="min-w-0 flex-1">
+  1279→                      <div className="flex flex-wrap items-center gap-2">
+  1280→                        <p className="text-sm font-medium text-foreground truncate">
+  1281→                          {f.itemName}
+  1282→                        </p>
+  1283→                        <CustomBadge className="bg-secondary text-muted-foreground border-border font-mono">
+  1284→                          {f.prNumber}
+  1285→                        </CustomBadge>
+  1286→                        {f.purchaseOrderNumber && (
+  1287→                          <CustomBadge className="bg-amber-500/15 text-amber-500 dark:text-amber-400 border-amber-500/30 font-mono">
+  1288→                            <ShoppingCart className="h-3 w-3 mr-1" />
+  1289→                            {f.purchaseOrderNumber}
+  1290→                          </CustomBadge>
+  1291→                        )}
+  1292→                      </div>
+  1293→                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+  1294→                        {project?.name || "—"} ·{" "}
+  1295→                        {formatNumber(f.qty)} {f.unit} ·{" "}
+  1296→                        {f.supplier || "—"} · {f.presentPosition}
+  1297→                      </p>
+  1298→                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+  1299→                        <CustomBadge
+  1300→                          className={cn(
+  1301→                            "border",
+  1302→                            fileCollectionStatusColor(f.collectionStatus)
+  1303→                          )}
+  1304→                        >
+  1305→                          {f.collectionStatus}
+  1306→                        </CustomBadge>
+  1307→                        {f.collectionSyncedAt && (
+  1308→                          <span className="text-[10px] text-muted-foreground">
+  1309→                            Synced {formatDateTime(f.collectionSyncedAt)}
+  1310→                          </span>
+  1311→                        )}
+  1312→                      </div>
+  1313→                    </div>
+  1314→                    {isAtAreaStore && (
+  1315→                      <Button
+  1316→                        size="sm"
+  1317→                        variant="outline"
+  1318→                        className="gap-1.5 h-7 text-xs shrink-0 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+  1319→                        onClick={() => handleTransferToZone(f)}
+  1320→                        disabled={isTransferring}
+  1321→                      >
+  1322→                        {isTransferring ? (
+  1323→                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1324→                        ) : (
+  1325→                          <ArrowRight className="h-3.5 w-3.5" />
+  1326→                        )}
+  1327→                        Transfer to Zone
+  1328→                      </Button>
+  1329→                    )}
+  1330→                  </li>
+  1331→                );
+  1332→              })}
+  1333→            </ul>
+  1334→          </div>
+  1335→        )}
+  1336→      </div>
+  1337→
+  1338→      {/* Stat cards */}
+  1339→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  1340→        <StatCard
+  1341→          label="Items to be Received"
+  1342→          value={
+  1343→            viewMode === "value"
+  1344→              ? formatCurrency(pendingValue)
+  1345→              : pendingItems.length
+  1346→          }
+  1347→          icon={PackageX}
+  1348→          accent="blue"
+  1349→          sub={
+  1350→            viewMode === "value"
+  1351→              ? `${formatCurrency(pendingValue)} expected value`
+  1352→              : `${formatNumber(pendingQty)} qty expected`
+  1353→          }
+  1354→        />
+  1355→        <StatCard
+  1356→          label="Part Supply Items"
+  1357→          value={
+  1358→            viewMode === "value"
+  1359→              ? formatCurrency(activePartSupplyValue)
+  1360→              : activePartSupplyCount
+  1361→          }
+  1362→          icon={Layers}
+  1363→          accent="amber"
+  1364→          sub={
+  1365→            viewMode === "value"
+  1366→              ? `${formatCurrency(activePartSupplyValue)} received value`
+  1367→              : "Active part-supply orders"
+  1368→          }
+  1369→        />
+  1370→        <StatCard
+  1371→          label="Collected Items"
+  1372→          value={
+  1373→            viewMode === "value"
+  1374→              ? formatCurrency(todayDailyValue)
+  1375→              : collectedItems.length
+  1376→          }
+  1377→          icon={PackageCheck}
+  1378→          accent="green"
+  1379→          sub={
+  1380→            viewMode === "value"
+  1381→              ? `${formatCurrency(todayDailyValue)} collected today`
+  1382→              : `${todayDailyCount} collected today`
+  1383→          }
+  1384→        />
+  1385→      </div>
+  1386→
+  1387→      {/* Charts */}
+  1388→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  1389→        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
+  1390→          <div className="flex items-center justify-between mb-4">
+  1391→            <h3 className="text-sm font-semibold text-foreground">
+  1392→              Collection Trend — Last 7 Days
+  1393→            </h3>
+  1394→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1395→              {viewMode === "value" ? "By Value" : "By Numbers"}
+  1396→            </CustomBadge>
+  1397→          </div>
+  1398→          {trendData.length > 0 ? (
+  1399→            <ResponsiveContainer width="100%" height={280}>
+  1400→              <LineChart
+  1401→                data={trendData}
+  1402→                margin={{ top: 5, right: 16, left: 0, bottom: 5 }}
+  1403→              >
+  1404→                <CartesianGrid
+  1405→                  strokeDasharray="3 3"
+  1406→                  stroke="#2d3548"
+  1407→                  vertical={false}
+  1408→                />
+  1409→                <XAxis
+  1410→                  dataKey="name"
+  1411→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1412→                  axisLine={{ stroke: "#2d3548" }}
+  1413→                  tickLine={{ stroke: "#2d3548" }}
+  1414→                />
+  1415→                <YAxis
+  1416→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1417→                  axisLine={{ stroke: "#2d3548" }}
+  1418→                  tickLine={{ stroke: "#2d3548" }}
+  1419→                  tickFormatter={(v: number) =>
+  1420→                    viewMode === "value"
+  1421→                      ? v >= 1000
+  1422→                        ? `${(v / 1000).toFixed(0)}k`
+  1423→                        : String(v)
+  1424→                      : formatNumber(v)
+  1425→                  }
+  1426→                  width={48}
+  1427→                />
+  1428→                <Tooltip
+  1429→                  contentStyle={{
+  1430→                    background: "#1a1f2e",
+  1431→                    border: "1px solid #2d3548",
+  1432→                    borderRadius: 8,
+  1433→                    fontSize: 12,
+  1434→                  }}
+  1435→                  formatter={(value: number) => [
+  1436→                    viewMode === "value"
+  1437→                      ? formatCurrency(value)
+  1438→                      : formatNumber(value),
+  1439→                    viewMode === "value" ? "Value" : "Qty",
+  1440→                  ]}
+  1441→                />
+  1442→                <Line
+  1443→                  type="monotone"
+  1444→                  dataKey="qty"
+  1445→                  name={viewMode === "value" ? "Value Collected" : "Qty Collected"}
+  1446→                  stroke="#3b82f6"
+  1447→                  strokeWidth={2}
+  1448→                  dot={{ fill: "#3b82f6", r: 3 }}
+  1449→                  activeDot={{ r: 5 }}
+  1450→                />
+  1451→              </LineChart>
+  1452→            </ResponsiveContainer>
+  1453→          ) : (
+  1454→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1455→              No collection data
+  1456→            </p>
+  1457→          )}
+  1458→        </div>
+  1459→
+  1460→        <div className="bg-card border border-border rounded-xl p-5">
+  1461→          <div className="flex items-center justify-between mb-4">
+  1462→            <h3 className="text-sm font-semibold text-foreground">
+  1463→              Items by Status
+  1464→            </h3>
+  1465→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1466→              {viewMode === "value" ? "Value" : "Count"}
+  1467→            </CustomBadge>
+  1468→          </div>
+  1469→          {statusBreakdown.length > 0 ? (
+  1470→            <ResponsiveContainer width="100%" height={280}>
+  1471→              <PieChart>
+  1472→                <Pie
+  1473→                  data={statusBreakdown}
+  1474→                  dataKey="value"
+  1475→                  nameKey="name"
+  1476→                  cx="50%"
+  1477→                  cy="50%"
+  1478→                  outerRadius={90}
+  1479→                  innerRadius={45}
+  1480→                  paddingAngle={2}
+  1481→                >
+  1482→                  {statusBreakdown.map((entry, i) => (
+  1483→                    <Cell
+  1484→                      key={i}
+  1485→                      fill={
+  1486→                        PIE_STATUS_COLORS[entry.name] || DEFAULT_PIE_COLOR
+  1487→                      }
+  1488→                    />
+  1489→                  ))}
+  1490→                </Pie>
+  1491→                <Tooltip
+  1492→                  contentStyle={{
+  1493→                    background: "#1a1f2e",
+  1494→                    border: "1px solid #2d3548",
+  1495→                    borderRadius: 8,
+  1496→                    fontSize: 12,
+  1497→                  }}
+  1498→                  formatter={(value: number) =>
+  1499→                    viewMode === "value"
+  1500→                      ? formatCurrency(value)
+  1501→                      : formatNumber(value)
+  1502→                  }
+  1503→                />
+  1504→                <Legend wrapperStyle={{ fontSize: 10 }} />
+  1505→              </PieChart>
+  1506→            </ResponsiveContainer>
+  1507→          ) : (
+  1508→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1509→              No items
+  1510→            </p>
+  1511→          )}
+  1512→        </div>
+  1513→      </div>
+  1514→
+  1515→      {/* Recent activity */}
+  1516→      <div className="bg-card border border-border rounded-xl p-5">
+  1517→        <div className="flex items-center justify-between mb-4">
+  1518→          <h3 className="text-sm font-semibold text-foreground">
+  1519→            Recent Collection Activity
+  1520→          </h3>
+  1521→          <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1522→            Last {recentDaily.length || 0}
+  1523→          </CustomBadge>
+  1524→        </div>
+  1525→        {recentDaily.length === 0 ? (
+  1526→          <EmptyState
+  1527→            icon={CalendarDays}
+  1528→            title="No recent collections"
+  1529→            description={
+  1530→              filtersActive
+  1531→                ? "No collections match the current filters."
+  1532→                : "Daily collections will appear here once recorded."
+  1533→            }
+  1534→          />
+  1535→        ) : (
+  1536→          <ul className="space-y-3">
+  1537→            {recentDaily.map((d) => (
+  1538→              <li
+  1539→                key={d.id}
+  1540→                className="flex items-start gap-3 pb-3 border-b border-border last:border-0 last:pb-0"
+  1541→              >
+  1542→                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+  1543→                  <PackageCheck className="h-4 w-4" />
+  1544→                </div>
+  1545→                <div className="min-w-0 flex-1">
+  1546→                  <p className="text-sm font-medium text-foreground truncate">
+  1547→                    {d.itemName}
+  1548→                  </p>
+  1549→                  <p className="text-xs text-muted-foreground">
+  1550→                    {viewMode === "value"
+  1551→                      ? `${formatCurrency(valueFor(d.qty, d.itemName, storeByName))} value`
+  1552→                      : `${formatNumber(d.qty)} qty`}{" "}
+  1553→                    · {d.receivedFrom || "—"} · {formatFullDate(d.date)}
+  1554→                  </p>
+  1555→                </div>
+  1556→                <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+  1557→                  {formatDateTime(d.recordedAt)}
+  1558→                </span>
+  1559→              </li>
+  1560→            ))}
+  1561→          </ul>
+  1562→        )}
+  1563→      </div>
+  1564→    </div>
+  1565→  );
+  1566→}
+  1567→
+  1568→// ─────────────────────────────────────────────────────────
+  1569→// Part Supply Tab
+  1570→// ─────────────────────────────────────────────────────────
+  1571→function PartSupplyTab() {
+  1572→  const { data: orders, loading, error, refresh } = useFetch<
+  1573→    PartSupplyOrder[]
+  1574→  >("/api/collection/part-supply");
+  1575→  const [expandedId, setExpandedId] = useState<string | null>(null);
+  1576→  const [addOpen, setAddOpen] = useState(false);
+  1577→  const [entryDialogOrder, setEntryDialogOrder] =
+  1578→    useState<PartSupplyOrder | null>(null);
+  1579→  const [printOrder, setPrintOrder] = useState<PartSupplyOrder | null>(null);
+  1580→  const { toast } = useToast();
+  1581→
+  1582→  function toggle(id: string) {
+  1583→    setExpandedId((cur) => (cur === id ? null : id));
+  1584→  }
+  1585→
+  1586→  if (loading) return <LoadingState label="Loading part-supply orders..." />;
+  1587→  if (error) return <ErrorState message={error} />;
+  1588→
+  1589→  return (
+  1590→    <div className="space-y-4">
+  1591→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+  1592→        <p className="text-sm text-muted-foreground">
+  1593→          Track multi-day deliveries (Ready-mix concrete, Quarry items, TMT
+  1594→          bars, etc.)
+  1595→        </p>
+  1596→        <Button
+  1597→          onClick={() => setAddOpen(true)}
+  1598→          size="sm"
+  1599→          className="gap-1.5 shrink-0"
+  1600→        >
+  1601→          <Plus className="h-4 w-4" /> Add Part Supply Order
+  1602→        </Button>
+  1603→      </div>
+  1604→
+  1605→      {!orders || orders.length === 0 ? (
+  1606→        <EmptyState
+  1607→          icon={Layers}
+  1608→          title="No part-supply orders"
+  1609→          description="Create an order to start tracking multi-day deliveries."
+  1610→          action={
+  1611→            <Button
+  1612→              onClick={() => setAddOpen(true)}
+  1613→              size="sm"
+  1614→              className="gap-1.5"
+  1615→            >
+  1616→              <Plus className="h-4 w-4" /> Add Part Supply Order
+  1617→            </Button>
+  1618→          }
+  1619→        />
+  1620→      ) : (
+  1621→        <div className="space-y-3">
+  1622→          {orders.map((order) => {
+  1623→            const pct =
+  1624→              order.orderedQty > 0
+  1625→                ? Math.min(
+  1626→                    (order.receivedQty / order.orderedQty) * 100,
+  1627→                    100
+  1628→                  )
+  1629→                : 0;
+  1630→            const expanded = expandedId === order.id;
+  1631→            const isCompleted =
+  1632→              order.status === "Completed" || order.balance <= 0;
+  1633→            return (
+  1634→              <div
+  1635→                key={order.id}
+  1636→                className={cn(
+  1637→                  "bg-card border border-border rounded-xl overflow-hidden transition-all",
+  1638→                  isCompleted && "opacity-70"
+  1639→                )}
+  1640→              >
+  1641→                {/* Header (always visible) */}
+  1642→                <button
+  1643→                  onClick={() => toggle(order.id)}
+  1644→                  className="w-full p-4 text-left hover:bg-secondary/30 transition-colors"
+  1645→                  aria-expanded={expanded}
+  1646→                >
+  1647→                  <div className="flex items-start gap-3">
+  1648→                    <div className="shrink-0 text-muted-foreground mt-0.5">
+  1649→                      {expanded ? (
+  1650→                        <ChevronDown className="h-4 w-4" />
+  1651→                      ) : (
+  1652→                        <ChevronRight className="h-4 w-4" />
+  1653→                      )}
+  1654→                    </div>
+  1655→                    <div className="min-w-0 flex-1">
+  1656→                      <div className="flex items-start justify-between gap-2">
+  1657→                        <div className="min-w-0">
+  1658→                          <p className="font-semibold text-foreground truncate">
+  1659→                            {order.itemName}
+  1660→                          </p>
+  1661→                          <p className="text-xs text-muted-foreground truncate">
+  1662→                            {parseSupplierWithPos(order.supplier).supplier || "—"} · Started{" "}
+  1663→                            {formatFullDate(order.startDate)}
+  1664→                          </p>
+  1665→                          {parseSupplierWithPos(order.supplier).pos.length > 0 && (
+  1666→                            <div className="flex flex-wrap gap-1 mt-1">
+  1667→                              {parseSupplierWithPos(order.supplier).pos.map((po) => (
+  1668→                                <CustomBadge
+  1669→                                  key={po}
+  1670→                                  className="bg-amber-500/15 text-amber-500 dark:text-amber-400 border-amber-500/30 font-mono"
+  1671→                                >
+  1672→                                  <Link2 className="h-3 w-3 mr-1" />
+  1673→                                  {po}
+  1674→                                </CustomBadge>
+  1675→                              ))}
+  1676→                            </div>
+  1677→                          )}
+  1678→                        </div>
+  1679→                        <CustomBadge
+  1680→                          className={cn(
+  1681→                            "border-0 shrink-0",
+  1682→                            statusColor(order.status)
+  1683→                          )}
+  1684→                        >
+  1685→                          {order.status}
+  1686→                        </CustomBadge>
+  1687→                      </div>
+  1688→                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+  1689→                        <MiniStat
+  1690→                          label="Ordered"
+  1691→                          value={formatNumber(order.orderedQty)}
+  1692→                        />
+  1693→                        <MiniStat
+  1694→                          label="Received"
+  1695→                          value={formatNumber(order.receivedQty)}
+  1696→                          valueClass="text-emerald-400"
+  1697→                        />
+  1698→                        <MiniStat
+  1699→                          label="Balance"
+
+[showing lines 1000-1699 of 5002; use offset=1700 with limit to continue reading]

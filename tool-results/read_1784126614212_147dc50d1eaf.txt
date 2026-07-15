@@ -1,0 +1,994 @@
+     1→"use client";
+     2→import { useState, useRef } from "react";
+     3→import { apiRequest, useFetch } from "@/lib/use-fetch";
+     4→import { Button } from "@/components/ui/button";
+     5→import { Input } from "@/components/ui/input";
+     6→import { Label } from "@/components/ui/label";
+     7→import { Textarea } from "@/components/ui/textarea";
+     8→import { Checkbox } from "@/components/ui/checkbox";
+     9→import {
+    10→  Select,
+    11→  SelectContent,
+    12→  SelectItem,
+    13→  SelectTrigger,
+    14→  SelectValue,
+    15→} from "@/components/ui/select";
+    16→import {
+    17→  Dialog,
+    18→  DialogContent,
+    19→  DialogHeader,
+    20→  DialogTitle,
+    21→  DialogFooter,
+    22→} from "@/components/ui/dialog";
+    23→import { CustomBadge } from "@/components/erp/badges";
+    24→import { useToast } from "@/hooks/use-toast";
+    25→import {
+    26→  PROJECT_STATUSES,
+    27→  PROJECT_TYPES,
+    28→  projectTypeColor,
+    29→  financialMeanColor,
+    30→  voteTypeColor,
+    31→  formatCurrency,
+    32→} from "@/lib/constants";
+    33→import { EstimateItemsTable } from "./estimate-items";
+    34→import {
+    35→  Loader2,
+    36→  X,
+    37→  ArrowLeft,
+    38→  ArrowRight,
+    39→  Plus,
+    40→  Trash2,
+    41→  FileSpreadsheet,
+    42→  Sparkles,
+    43→  Check,
+    44→  ClipboardList,
+    45→  Download,
+    46→  Upload,
+    47→  AlertCircle,
+    48→  Info,
+    49→  Vote,
+    50→  Pencil,
+    51→  ChevronLeft,
+    52→  Landmark,
+    53→  Wallet,
+    54→  Layers,
+    55→} from "lucide-react";
+    56→import { cn } from "@/lib/utils";
+    57→
+    58→// Fund options available when the "Funds" checkbox is ticked (non-vote funding).
+    59→const FUND_OPTIONS = ["Malima Fund", "Non-Public Fund", "Contractual"] as const;
+    60→
+    61→interface Vote {
+    62→  id: string;
+    63→  voteNumber: string;
+    64→  description: string;
+    65→  voteType: string;
+    66→  allocation: number;
+    67→  financialYear: string | null;
+    68→  active: boolean;
+    69→}
+    70→
+    71→interface EstimateRow {
+    72→  itemName: string;
+    73→  qty: string;
+    74→  unit: string;
+    75→  /** Per-unit cost (renamed from "estimateCost" in earlier versions).
+    76→   *  The CSV column header is `UnitCost`; the parser also accepts the legacy
+    77→   *  `EstimateCost` header for backward compatibility. The API field name stays
+    78→   *  `estimateCost` but it represents the per-unit cost. */
+    79→  estimateCost: string;
+    80→  /** Total cost for the row — from CSV's TotalCost column when present,
+    81→   *  otherwise computed as Qty × UnitCost. Stored on the row so the
+    82→   *  CSV-supplied value is preserved until the user edits Qty/UnitCost
+    83→   *  (which auto-recomputes the total). Used for display only — the API still
+    84→   *  stores estimateCost as the per-unit cost. */
+    85→  totalCost: string;
+    86→}
+    87→
+    88→interface Props {
+    89→  open: boolean;
+    90→  onClose: () => void;
+    91→  onCreated: (project: { id: string; name: string; nameAbbreviation: string | null; voteNumber: string; voteAllocation: number; committed: number; actualSpent: number; benefactor: string | null; reference: string | null; endDate: string | null; startDate: string | null; projectType: string; financialMean: string | null; requirementGroup: string | null }) => void;
+    92→}
+    93→
+    94→const UNITS = ["NOS", "KG", "MTR", "LTR", "SHT", "SET", "BAG", "PR"];
+    95→
+    96→export function AddProjectWizard({ open, onClose, onCreated }: Props) {
+    97→  const [step, setStep] = useState<1 | 2>(1);
+    98→  const [saving, setSaving] = useState(false);
+    99→  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
+   100→  const [createdEstimateId, setCreatedEstimateId] = useState<string | null>(null);
+   101→  const { toast } = useToast();
+   102→  const fileInputRef = useRef<HTMLInputElement>(null);
+   103→  const [previewRows, setPreviewRows] = useState<EstimateRow[] | null>(null);
+   104→  const [customVoteNumber, setCustomVoteNumber] = useState(false);
+   105→  const [selectedVoteId, setSelectedVoteId] = useState("");
+   106→  // "Funds" checkbox state — when ticked, the project is funded via a non-vote fund
+   107→  // (Malima/Non-Public/Contractual) and the Vote Number is NOT mandatory.
+   108→  const [fundsChecked, setFundsChecked] = useState(false);
+   109→  const { data: votes } = useFetch<Vote[]>("/api/votes");
+   110→
+   111→  const [form, setForm] = useState({
+   112→    name: "",
+   113→    nameAbbreviation: "",
+   114→    voteNumber: "",
+   115→    voteAllocation: "",
+   116→    committed: "0",
+   117→    actualSpent: "0",
+   118→    startDate: "",
+   119→    endDate: "", // EDC
+   120→    benefactor: "", // replaces Department
+   121→    reference: "", // manual text — how vote allocated
+   122→    projectType: "New Construction",
+   123→    financialMean: "Vote/Funds",
+   124→    requirementGroup: "", // for Maintenance projects — groups sub-requirements
+   125→    projectOfficer: "",
+   126→    status: "Active",
+   127→    description: "",
+   128→  });
+   129→  const [estimateRows, setEstimateRows] = useState<EstimateRow[]>([
+   130→    { itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" },
+   131→  ]);
+   132→
+   133→  const selectedVote = votes?.find((v) => v.id === selectedVoteId);
+   134→
+   135→  // Tracks whether the user has manually edited the abbreviation field. When
+   136→  // false, the abbreviation auto-suggests from the project name. Once the user
+   137→  // touches the field, we stop auto-suggesting so their override sticks.
+   138→  const [abbrevTouched, setAbbrevTouched] = useState(false);
+   139→
+   140→  // Suggest an abbreviation from a project name by taking the first letter of
+   141→  // each significant word (skipping common stop-words / numbers / symbols).
+   142→  // Example: "No.03 Slipway Hangar" → "NSH", "Engine Fire Suppression" → "EFS".
+   143→  const suggestAbbreviation = (name: string): string => {
+   144→    const stop = new Set(["of", "for", "and", "the", "in", "on", "at", "to", "no", "a", "an"]);
+   145→    const tokens = name
+   146→      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+   147→      .split(/[\s-]+/)
+   148→      .map((t) => t.trim())
+   149→      .filter(Boolean);
+   150→    const letters = tokens
+   151→      .filter((t) => !stop.has(t.toLowerCase()))
+   152→      .map((t) => t[0]!.toUpperCase());
+   153→    return letters.slice(0, 5).join("");
+   154→  };
+   155→
+   156→  const handleNameChange = (value: string) => {
+   157→    setForm((prev) => ({
+   158→      ...prev,
+   159→      name: value,
+   160→      // keep auto-suggesting the abbreviation until the user edits it manually
+   161→      nameAbbreviation: abbrevTouched ? prev.nameAbbreviation : suggestAbbreviation(value),
+   162→    }));
+   163→  };
+   164→
+   165→  const handleAbbrevChange = (value: string) => {
+   166→    setAbbrevTouched(true);
+   167→    // Force uppercase, strip non-alphanumeric (keep letters + digits)
+   168→    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+   169→    setForm((prev) => ({ ...prev, nameAbbreviation: cleaned }));
+   170→  };
+   171→
+   172→  const handleVoteSelect = (id: string) => {
+   173→    setSelectedVoteId(id);
+   174→    const v = votes?.find((vt) => vt.id === id);
+   175→    if (v) {
+   176→      setForm((prev) => ({
+   177→        ...prev,
+   178→        voteNumber: v.voteNumber,
+   179→        voteAllocation: v.allocation ? String(v.allocation) : prev.voteAllocation,
+   180→      }));
+   181→    }
+   182→  };
+   183→
+   184→  // Toggle the "Funds" checkbox. When checked, the project is funded via a non-vote
+   185→  // fund (default Malima Fund) and the Vote Number becomes optional. When unchecked,
+   186→  // the project is funded via Vote and the Vote Number is mandatory.
+   187→  const handleFundsToggle = (checked: boolean) => {
+   188→    setFundsChecked(checked);
+   189→    setCustomVoteNumber(false);
+   190→    setSelectedVoteId("");
+   191→    if (checked) {
+   192→      setForm((prev) => ({
+   193→        ...prev,
+   194→        financialMean: "Malima Fund",
+   195→        voteNumber: "",
+   196→        voteAllocation: "",
+   197→      }));
+   198→    } else {
+   199→      setForm((prev) => ({
+   200→        ...prev,
+   201→        financialMean: "Vote/Funds",
+   202→        voteNumber: "",
+   203→      }));
+   204→    }
+   205→  };
+   206→
+   207→  const handleFundSelect = (fund: string) => {
+   208→    setForm((prev) => ({ ...prev, financialMean: fund }));
+   209→  };
+   210→
+   211→  const nonVotePlaceholder =
+   212→    form.financialMean === "Contractual" ? "CONTRACTUAL" : "NON-NAVAL";
+   213→  const nonVoteHint =
+   214→    form.financialMean === "Contractual"
+   215→      ? "Contractual funding — Vote Number can be 'CONTRACTUAL' or the ARO reference."
+   216→      : form.financialMean === "Malima Fund"
+   217→      ? "Malima Fund — Vote Number can be 'NON-NAVAL' or the Malima reference number."
+   218→      : "Non-Public Fund — Vote Number can be 'NON-NAVAL' or the fund reference.";
+   219→
+   220→  const addRow = () =>
+   221→    setEstimateRows([
+   222→      ...estimateRows,
+   223→      { itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" },
+   224→    ]);
+   225→  const removeRow = (idx: number) =>
+   226→    setEstimateRows(estimateRows.filter((_, i) => i !== idx));
+   227→
+   228→  // Update a single field on a row. When Qty or UnitCost changes,
+   229→  // recompute the row's TotalCost automatically (= Qty × UnitCost) so the
+   230→  // editable grid always shows a live total. Manual edits to TotalCost itself
+   231→  // (or other fields) leave the total as-is.
+   232→  const updateRow = (idx: number, field: keyof EstimateRow, value: string) =>
+   233→    setEstimateRows(
+   234→      estimateRows.map((r, i) => {
+   235→        if (i !== idx) return r;
+   236→        const next = { ...r, [field]: value };
+   237→        if (field === "qty" || field === "estimateCost") {
+   238→          const q = Number(next.qty);
+   239→          const c = Number(next.estimateCost);
+   240→          next.totalCost =
+   241→            !isNaN(q) && !isNaN(c) && q > 0 && c > 0 ? String(q * c) : "";
+   242→        }
+   243→        return next;
+   244→      })
+   245→    );
+   246→
+   247→  // Valid (filled) estimate rows — at least one is required to enable Step 2
+   248→  const validEstimateRows = estimateRows.filter(
+   249→    (r) => r.itemName.trim() && (Number(r.qty) > 0 || Number(r.estimateCost) > 0)
+   250→  );
+   251→  const hasValidEstimate = validEstimateRows.length > 0;
+   252→
+   253→  const downloadTemplate = () => {
+   254→    // Template now uses `UnitCost` as the column header (renamed from `EstimateCost`).
+   255→    // The sample row demonstrates the relationship TotalCost = Qty × UnitCost (2 × 185000 = 370000).
+   256→    const header = "ItemName,Qty,Unit,UnitCost,TotalCost";
+   257→    const sample = "Centrifugal Pump 15kW,2,NOS,185000,370000";
+   258→    const sample2 = ",,NOS,,";
+   259→    const csv = `${header}\n${sample}\n${sample2}\n`;
+   260→    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+   261→    const url = URL.createObjectURL(blob);
+   262→    const a = document.createElement("a");
+   263→    a.href = url;
+   264→    a.download = "material-estimate-template.csv";
+   265→    a.click();
+   266→    URL.revokeObjectURL(url);
+   267→    toast({
+   268→      title: "Template downloaded",
+   269→      description:
+   270→        "Columns: ItemName, Qty, Unit, UnitCost (per unit), TotalCost (= Qty × UnitCost — leave blank to auto-compute).",
+   271→    });
+   272→  };
+   273→
+   274→  // Simple CSV parser — handles quoted fields with commas
+   275→  const parseCsv = (text: string): string[][] => {
+   276→    const rows: string[][] = [];
+   277→    let cur: string[] = [];
+   278→    let field = "";
+   279→    let inQuotes = false;
+   280→    for (let i = 0; i < text.length; i++) {
+   281→      const ch = text[i];
+   282→      if (inQuotes) {
+   283→        if (ch === '"' && text[i + 1] === '"') {
+   284→          field += '"';
+   285→          i++;
+   286→        } else if (ch === '"') {
+   287→          inQuotes = false;
+   288→        } else {
+   289→          field += ch;
+   290→        }
+   291→      } else {
+   292→        if (ch === '"') inQuotes = true;
+   293→        else if (ch === ",") {
+   294→          cur.push(field);
+   295→          field = "";
+   296→        } else if (ch === "\n" || ch === "\r") {
+   297→          if (ch === "\r" && text[i + 1] === "\n") i++;
+   298→          cur.push(field);
+   299→          rows.push(cur);
+   300→          cur = [];
+   301→          field = "";
+   302→        } else {
+   303→          field += ch;
+   304→        }
+   305→      }
+   306→    }
+   307→    if (field.length > 0 || cur.length > 0) {
+   308→      cur.push(field);
+   309→      rows.push(cur);
+   310→    }
+   311→    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+   312→  };
+   313→
+   314→  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   315→    const file = e.target.files?.[0];
+   316→    if (!file) return;
+   317→    if (!file.name.toLowerCase().endsWith(".csv")) {
+   318→      toast({ title: "Please upload a CSV file", variant: "destructive" });
+   319→      e.target.value = "";
+   320→      return;
+   321→    }
+   322→    try {
+   323→      const text = await file.text();
+   324→      const rows = parseCsv(text);
+   325→      if (rows.length === 0) {
+   326→        toast({ title: "CSV file is empty", variant: "destructive" });
+   327→        e.target.value = "";
+   328→        return;
+   329→      }
+   330→      const header = rows[0].map((c) => c.trim().toLowerCase());
+   331→      const idxName = header.findIndex((h) => h.includes("item") || h.includes("name"));
+   332→      const idxQty = header.findIndex((h) => h.includes("qty"));
+   333→      const idxUnit = header.findIndex((h) => h.includes("unit") || h.includes("deno"));
+   334→      // Find the per-unit cost column. Prefer `UnitCost` (new name); fall back to
+   335→      // the legacy `EstimateCost` header for backward compatibility. Also matches
+   336→      // any column with "cost"/"price" but without "total".
+   337→      const idxCost = header.findIndex(
+   338→        (h) =>
+   339→          (h === "unitcost" || h.includes("unit cost") || h.includes("unitcost")) ||
+   340→          ((h.includes("estimate") && (h.includes("cost") || h.includes("price"))) ||
+   341→           ((h.includes("cost") || h.includes("price")) && !h.includes("total")))
+   342→      );
+   343→      const idxTotal = header.findIndex(
+   344→        (h) => h.includes("total") && (h.includes("cost") || h.includes("price"))
+   345→      );
+   346→      const dataRows = idxName >= 0 ? rows.slice(1) : rows;
+   347→      const parsed: EstimateRow[] = dataRows
+   348→        .map((r) => {
+   349→          const itemName = idxName >= 0 ? (r[idxName] || "").trim() : (r[0] || "").trim();
+   350→          const qty = idxQty >= 0 ? (r[idxQty] || "").trim() : (r[1] || "").trim();
+   351→          const unit = (idxUnit >= 0 ? (r[idxUnit] || "").trim() : (r[2] || "").trim()) || "NOS";
+   352→          // Per-unit cost — read from the UnitCost (or legacy EstimateCost) column.
+   353→          const estimateCost = idxCost >= 0 ? (r[idxCost] || "").trim() : (r[3] || "").trim();
+   354→          // TotalCost: prefer the CSV's TotalCost column when present & non-blank,
+   355→          // otherwise compute it as Qty × UnitCost (per the task spec).
+   356→          const totalRaw =
+   357→            idxTotal >= 0 ? (r[idxTotal] || "").trim() : "";
+   358→          let totalCost = "";
+   359→          if (totalRaw && !isNaN(Number(totalRaw))) {
+   360→            totalCost = totalRaw;
+   361→          } else {
+   362→            const q = Number(qty);
+   363→            const c = Number(estimateCost);
+   364→            if (!isNaN(q) && !isNaN(c) && q > 0 && c > 0) {
+   365→              totalCost = String(q * c);
+   366→            }
+   367→          }
+   368→          return { itemName, qty, unit, estimateCost, totalCost };
+   369→        })
+   370→        .filter((r) => r.itemName);
+   371→      if (parsed.length === 0) {
+   372→        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+   373→        e.target.value = "";
+   374→        return;
+   375→      }
+   376→      setPreviewRows(parsed);
+   377→    } catch {
+   378→      toast({ title: "Failed to read CSV file", variant: "destructive" });
+   379→    }
+   380→    e.target.value = "";
+   381→  };
+   382→
+   383→  const confirmImport = () => {
+   384→    if (!previewRows) return;
+   385→    setEstimateRows(previewRows);
+   386→    toast({ title: `Imported ${previewRows.length} estimate rows` });
+   387→    setPreviewRows(null);
+   388→  };
+   389→
+   390→  const handleSaveAndProcess = async () => {
+   391→    if (!form.name) {
+   392→      toast({ title: "Project Name is required", variant: "destructive" });
+   393→      return;
+   394→    }
+   395→    // Vote Number is mandatory UNLESS the Funds checkbox is ticked (non-vote funding).
+   396→    if (!fundsChecked && !form.voteNumber.trim()) {
+   397→      toast({
+   398→        title: "Vote Number is required",
+   399→        description: "Tick the Funds checkbox for non-vote funding (Malima/Non-Public/Contractual).",
+   400→        variant: "destructive",
+   401→      });
+   402→      return;
+   403→    }
+   404→    const validRows = estimateRows.filter((r) => r.itemName.trim());
+   405→    if (validRows.length === 0) {
+   406→      toast({ title: "Add at least one material estimate item", variant: "destructive" });
+   407→      return;
+   408→    }
+   409→    setSaving(true);
+   410→    // 1. Create project
+   411→    const projRes = await apiRequest("/api/projects", "POST", form);
+   412→    if (!projRes.ok) {
+   413→      setSaving(false);
+   414→      toast({ title: "Failed to create project", description: projRes.error, variant: "destructive" });
+   415→      return;
+   416→    }
+   417→    const project = projRes.data as { id: string };
+   418→    // 2. Export Estimate into DB
+   419→    const estRes = await apiRequest("/api/estimates", "POST", {
+   420→      projectId: project.id,
+   421→      name: `${form.name} — Material Estimate`,
+   422→      items: validRows.map((r) => ({
+   423→        itemName: r.itemName,
+   424→        qty: Number(r.qty) || 0,
+   425→        unit: r.unit,
+   426→        estimateCost: Number(r.estimateCost) || 0,
+   427→      })),
+   428→    });
+   429→    setSaving(false);
+   430→    if (estRes.ok) {
+   431→      const est = estRes.data as { id: string };
+   432→      setCreatedProjectId(project.id);
+   433→      setCreatedEstimateId(est.id);
+   434→      setStep(2);
+   435→      toast({ title: "Project & estimate saved", description: "Now process the estimate with AI (Step 2)" });
+   436→    } else {
+   437→      toast({ title: "Estimate save failed", description: estRes.error, variant: "destructive" });
+   438→    }
+   439→  };
+   440→
+   441→  const handleGoToProject = () => {
+   442→    if (createdProjectId) {
+   443→      onCreated({
+   444→        id: createdProjectId,
+   445→        name: form.name,
+   446→        nameAbbreviation: form.nameAbbreviation || null,
+   447→        voteNumber: form.voteNumber,
+   448→        voteAllocation: Number(form.voteAllocation) || 0,
+   449→        committed: Number(form.committed) || 0,
+   450→        actualSpent: Number(form.actualSpent) || 0,
+   451→        benefactor: form.benefactor || null,
+   452→        reference: form.reference || null,
+   453→        endDate: form.endDate || null,
+   454→        startDate: form.startDate || null,
+   455→        projectType: form.projectType,
+   456→        financialMean: form.financialMean,
+   457→        requirementGroup: form.projectType === "Maintenance" ? (form.requirementGroup.trim() || null) : null,
+   458→      });
+   459→      // reset
+   460→      setStep(1);
+   461→      setCreatedProjectId(null);
+   462→      setCreatedEstimateId(null);
+   463→      setFundsChecked(false);
+   464→      setAbbrevTouched(false);
+   465→      setForm({
+   466→        name: "", nameAbbreviation: "", voteNumber: "", voteAllocation: "", committed: "0", actualSpent: "0",
+   467→        startDate: "", endDate: "", benefactor: "", reference: "",
+   468→        projectType: "New Construction", financialMean: "Vote/Funds",
+   469→        requirementGroup: "",
+   470→        projectOfficer: "", status: "Active", description: "",
+   471→      });
+   472→      setEstimateRows([{ itemName: "", qty: "", unit: "NOS", estimateCost: "", totalCost: "" }]);
+   473→      setCustomVoteNumber(false);
+   474→      setSelectedVoteId("");
+   475→    }
+   476→  };
+   477→
+   478→  if (!open) return null;
+   479→
+   480→  return (
+   481→    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+   482→      {/* Header */}
+   483→      <div className="h-14 border-b border-border bg-card flex items-center justify-between px-4 sm:px-6 shrink-0">
+   484→        <div className="flex items-center gap-3">
+   485→          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+   486→            <X className="h-5 w-5" />
+   487→          </button>
+   488→          <h2 className="font-semibold text-foreground text-sm sm:text-base">
+   489→            Add New Project — {step === 1 ? "Step 1: Details & Material Estimate" : "Step 2: Processed Estimate (AI)"}
+   490→          </h2>
+   491→        </div>
+   492→        {/* Stepper */}
+   493→        <div className="hidden sm:flex items-center gap-2 text-xs">
+   494→          <StepBadge n={1} active={step === 1} done={step > 1} label="Details + Estimate" />
+   495→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   496→          <StepBadge n={2} active={step === 2} done={false} label="AI Processing" />
+   497→          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+   498→          <StepBadge n={3} active={false} done={false} label="Project Window" />
+   499→        </div>
+   500→      </div>
+   501→
+   502→      <div className="flex-1 overflow-y-auto scrollbar-thin">
+   503→        {step === 1 && (
+   504→          <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
+   505→            {/* Project details */}
+   506→            <section className="bg-card border border-border rounded-xl p-5">
+   507→              <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+   508→                <ClipboardList className="h-4 w-4 text-primary" /> Project Details
+   509→              </h3>
+   510→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   511→                <div className="sm:col-span-2 space-y-1.5">
+   512→                  <Label>Project Name *</Label>
+   513→                  <Input value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g. Dockyard Refit 2025" className="bg-background border-border" />
+   514→                </div>
+   515→
+   516→                {/* Project Name Abbreviation — used as the file group key prefix */}
+   517→                <div className="space-y-1.5">
+   518→                  <Label className="flex items-center gap-1.5">
+   519→                    <Layers className="h-3.5 w-3.5 text-primary" />
+   520→                    Project Name Abbreviation
+   521→                    <span className="text-[10px] font-normal text-muted-foreground ml-1">(for file group key prefix)</span>
+   522→                  </Label>
+   523→                  <Input
+   524→                    value={form.nameAbbreviation}
+   525→                    onChange={(e) => handleAbbrevChange(e.target.value)}
+   526→                    placeholder="e.g. NSH"
+   527→                    className="bg-background border-border font-mono uppercase tracking-wider"
+   528→                    maxLength={8}
+   529→                  />
+   530→                  <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+   531→                    <Info className="h-3 w-3 mt-0.5 shrink-0" />
+   532→                    Used as prefix for auto-generated file group keys (e.g.
+   533→                    <span className="font-mono text-foreground mx-1">{form.nameAbbreviation || "NSH"}-001</span>,
+   534→                    <span className="font-mono text-foreground ml-1">{form.nameAbbreviation || "NSH"}-002</span>).
+   535→                    Auto-suggested from the project name — override if needed.
+   536→                  </p>
+   537→                </div>
+   538→
+   539→                {/* Vote Number — conditional UI based on Funds checkbox state */}
+   540→                <div className="space-y-1.5">
+   541→                  <Label className="flex items-center gap-1.5">
+   542→                    <Vote className="h-3.5 w-3.5 text-primary" />
+   543→                    Vote Number{!fundsChecked && " *"}
+   544→                    {fundsChecked && (
+   545→                      <span className="text-[10px] font-normal text-muted-foreground ml-1">(optional)</span>
+   546→                    )}
+   547→                  </Label>
+   548→                  {!fundsChecked && !customVoteNumber ? (
+   549→                    <>
+   550→                      <Select value={selectedVoteId} onValueChange={handleVoteSelect}>
+   551→                        <SelectTrigger className="bg-background border-border">
+   552→                          <SelectValue placeholder="Select a vote from the list…" />
+   553→                        </SelectTrigger>
+   554→                        <SelectContent>
+   555→                          {votes && votes.length > 0 ? (
+   556→                            votes.map((v) => (
+   557→                              <SelectItem key={v.id} value={v.id}>
+   558→                                <span className="font-mono">{v.voteNumber}</span> — {v.description} ({v.voteType})
+   559→                              </SelectItem>
+   560→                            ))
+   561→                          ) : (
+   562→                            <SelectItem value="_none" disabled>No votes available</SelectItem>
+   563→                          )}
+   564→                        </SelectContent>
+   565→                      </Select>
+   566→                      {selectedVote ? (
+   567→                        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+   568→                          <CustomBadge className={cn("border", voteTypeColor(selectedVote.voteType))}>
+   569→                            {selectedVote.voteType}
+   570→                          </CustomBadge>
+   571→                          {selectedVote.allocation > 0 && (
+   572→                            <span className="text-[11px] text-muted-foreground">
+   573→                              Allocation: {formatCurrency(selectedVote.allocation)}
+   574→                            </span>
+   575→                          )}
+   576→                          {selectedVote.financialYear && (
+   577→                            <span className="text-[11px] text-muted-foreground">
+   578→                              · FY: {selectedVote.financialYear}
+   579→                            </span>
+   580→                          )}
+   581→                          {!selectedVote.active && (
+   582→                            <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">Inactive</CustomBadge>
+   583→                          )}
+   584→                        </div>
+   585→                      ) : (
+   586→                        <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+   587→                          <Info className="h-3 w-3 mt-0.5 shrink-0" />
+   588→                          Capital votes fund one-time construction. Recurring votes fund annual maintenance.
+   589→                        </p>
+   590→                      )}
+   591→                      <button
+   592→                        type="button"
+   593→                        onClick={() => {
+   594→                          setCustomVoteNumber(true);
+   595→                          setSelectedVoteId("");
+   596→                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+   597→                        }}
+   598→                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+   599→                      >
+   600→                        <Pencil className="h-3 w-3" /> Enter custom vote number
+   601→                      </button>
+   602→                    </>
+   603→                  ) : !fundsChecked && customVoteNumber ? (
+   604→                    <>
+   605→                      <Input
+   606→                        value={form.voteNumber}
+   607→                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+   608→                        placeholder="e.g. 223-1-01-2104"
+   609→                        className="bg-background border-border"
+   610→                      />
+   611→                      <button
+   612→                        type="button"
+   613→                        onClick={() => {
+   614→                          setCustomVoteNumber(false);
+   615→                          setForm((prev) => ({ ...prev, voteNumber: "" }));
+   616→                        }}
+   617→                        className="text-[11px] text-primary hover:underline flex items-center gap-1 self-start"
+   618→                      >
+   619→                        <ChevronLeft className="h-3 w-3" /> Back to vote list
+   620→                      </button>
+   621→                    </>
+   622→                  ) : (
+   623→                    <>
+   624→                      <Input
+   625→                        value={form.voteNumber}
+   626→                        onChange={(e) => setForm({ ...form, voteNumber: e.target.value })}
+   627→                        placeholder={nonVotePlaceholder}
+   628→                        className="bg-background border-border"
+   629→                      />
+   630→                      <p className="text-[11px] text-amber-400 flex items-start gap-1">
+   631→                        <Landmark className="h-3 w-3 mt-0.5 shrink-0" />
+   632→                        {nonVoteHint}
+   633→                      </p>
+   634→                    </>
+   635→                  )}
+   636→                </div>
+   637→
+   638→                {/* Project Type */}
+   639→                <div className="space-y-1.5">
+   640→                  <Label>Project Type *</Label>
+   641→                  <Select value={form.projectType} onValueChange={(v) => setForm({ ...form, projectType: v })}>
+   642→                    <SelectTrigger className="bg-background border-border">
+   643→                      <SelectValue />
+   644→                    </SelectTrigger>
+   645→                    <SelectContent>
+   646→                      {PROJECT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   647→                    </SelectContent>
+   648→                  </Select>
+   649→                  {form.projectType && (
+   650→                    <div className="pt-0.5">
+   651→                      <CustomBadge className={cn("border", projectTypeColor(form.projectType))}>
+   652→                        {form.projectType}
+   653→                      </CustomBadge>
+   654→                    </div>
+   655→                  )}
+   656→                </div>
+   657→
+   658→                {/* Requirement Group — only visible when projectType === "Maintenance".
+   659→                    Maintenance (recurring vote) projects don't have a single
+   660→                    dedicated project — they have a variety of recurring
+   661→                    requirements (e.g. "ENA Maintenance", "Water Purification").
+   662→                    This field groups them into sub-tiles on the Projects list. */}
+   663→                {form.projectType === "Maintenance" && (
+   664→                  <div className="space-y-1.5">
+   665→                    <Label className="flex items-center gap-1.5">
+   666→                      <Layers className="h-3.5 w-3.5 text-primary" />
+   667→                      Requirement Group
+   668→                      <span className="text-[10px] font-normal text-muted-foreground ml-1">(for maintenance sub-grouping)</span>
+   669→                    </Label>
+   670→                    <Input
+   671→                      value={form.requirementGroup}
+   672→                      onChange={(e) => setForm({ ...form, requirementGroup: e.target.value })}
+   673→                      placeholder="e.g. ENA Maintenance, Water Purification, Hull Preservation"
+   674→                      className="bg-background border-border"
+   675→                    />
+   676→                    <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+   677→                      <Info className="h-3 w-3 mt-0.5 shrink-0" />
+   678→                      Maintenance projects are grouped on the Projects list by this value (each
+   679→                      group renders as its own sub-tile). Leave blank to file under
+   680→                      <span className="font-mono text-foreground mx-1">General Maintenance</span>.
+   681→                    </p>
+   682→                  </div>
+   683→                )}
+   684→
+   685→                {/* Funding Source — Funds checkbox (non-vote funding). NOT mandatory. */}
+   686→                <div className="space-y-1.5">
+   687→                  <Label className="flex items-center gap-1.5">
+   688→                    <Wallet className="h-3.5 w-3.5 text-primary" />
+   689→                    Funding Source
+   690→                  </Label>
+   691→                  <div className="flex items-start gap-2 pt-1">
+   692→                    <Checkbox
+   693→                      id="funds-checkbox"
+   694→                      checked={fundsChecked}
+   695→                      onCheckedChange={(v) => handleFundsToggle(!!v)}
+   696→                      className="mt-0.5"
+   697→                    />
+   698→                    <Label
+   699→                      htmlFor="funds-checkbox"
+   700→                      className="text-sm font-normal cursor-pointer leading-tight"
+   701→                    >
+   702→                      <span className="font-medium">Funds</span>
+   703→                      <span className="block text-[11px] text-muted-foreground">
+   704→                        Tick if funded via Malima / Non-Public / Contractual fund
+   705→                      </span>
+   706→                    </Label>
+   707→                  </div>
+   708→                  {fundsChecked && (
+   709→                    <Select value={form.financialMean} onValueChange={handleFundSelect}>
+   710→                      <SelectTrigger className="bg-background border-border">
+   711→                        <SelectValue />
+   712→                      </SelectTrigger>
+   713→                      <SelectContent>
+   714→                        {FUND_OPTIONS.map((f) => (
+   715→                          <SelectItem key={f} value={f}>{f}</SelectItem>
+   716→                        ))}
+   717→                      </SelectContent>
+   718→                    </Select>
+   719→                  )}
+   720→                  <div className="pt-0.5">
+   721→                    <CustomBadge className={cn("border", financialMeanColor(form.financialMean))}>
+   722→                      {form.financialMean}
+   723→                    </CustomBadge>
+   724→                  </div>
+   725→                </div>
+   726→
+   727→                {/* Reference — manual text entry (how vote allocated) */}
+   728→                <div className="space-y-1.5">
+   729→                  <Label>Reference (how vote allocated)</Label>
+   730→                  <Input
+   731→                    value={form.reference}
+   732→                    onChange={(e) => setForm({ ...form, reference: e.target.value })}
+   733→                    placeholder="e.g. Vote 2104 - Allocation 2025"
+   734→                    className="bg-background border-border"
+   735→                  />
+   736→                </div>
+   737→
+   738→                <div className="space-y-1.5">
+   739→                  <Label>Vote Allocation (Rs.)</Label>
+   740→                  <Input type="number" value={form.voteAllocation} onChange={(e) => setForm({ ...form, voteAllocation: e.target.value })} placeholder="0" className="bg-background border-border" />
+   741→                </div>
+   742→                <div className="space-y-1.5">
+   743→                  <Label>Benefactor</Label>
+   744→                  <Input value={form.benefactor} onChange={(e) => setForm({ ...form, benefactor: e.target.value })} placeholder="e.g. Engineering Dept" className="bg-background border-border" />
+   745→                </div>
+   746→                <div className="space-y-1.5">
+   747→                  <Label>Start Date</Label>
+   748→                  <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="bg-background border-border" />
+   749→                </div>
+   750→                <div className="space-y-1.5">
+   751→                  <Label>EDC (Estimated Date of Completion)</Label>
+   752→                  <Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="bg-background border-border" />
+   753→                </div>
+   754→                <div className="space-y-1.5">
+   755→                  <Label>Project Officer</Label>
+   756→                  <Input value={form.projectOfficer} onChange={(e) => setForm({ ...form, projectOfficer: e.target.value })} placeholder="e.g. Cdr. R. Perera" className="bg-background border-border" />
+   757→                </div>
+   758→                <div className="space-y-1.5">
+   759→                  <Label>Status</Label>
+   760→                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+   761→                    <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+   762→                    <SelectContent>
+   763→                      {PROJECT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   764→                    </SelectContent>
+   765→                  </Select>
+   766→                </div>
+   767→                <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
+   768→                  <Label>Description</Label>
+   769→                  <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Brief description..." className="bg-background border-border" />
+   770→                </div>
+   771→              </div>
+   772→            </section>
+   773→
+   774→            {/* Material Estimate — MANDATORY */}
+   775→            <section className="bg-card border border-border rounded-xl p-5">
+   776→              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+   777→                <div className="min-w-0">
+   778→                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   779→                    <FileSpreadsheet className="h-4 w-4 text-primary" />
+   780→                    Material Estimate
+   781→                    <span className="text-[11px] font-normal text-amber-400 flex items-center gap-1">
+   782→                      <AlertCircle className="h-3 w-3" />
+   783→                      Mandatory — required to create project material list
+   784→                    </span>
+   785→                  </h3>
+   786→                </div>
+   787→                <div className="flex items-center gap-2 flex-wrap">
+   788→                  <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+   789→                    <Download className="h-4 w-4" /> Download Template
+   790→                  </Button>
+   791→                  <Button
+   792→                    onClick={() => fileInputRef.current?.click()}
+   793→                    size="sm"
+   794→                    variant="outline"
+   795→                    className="gap-1.5"
+   796→                  >
+   797→                    <Upload className="h-4 w-4" /> Upload Estimate
+   798→                  </Button>
+   799→                  <input
+   800→                    ref={fileInputRef}
+   801→                    type="file"
+   802→                    accept=".csv"
+   803→                    className="hidden"
+   804→                    onChange={handleFileUpload}
+   805→                  />
+   806→                  <Button onClick={addRow} size="sm" variant="outline" className="gap-1.5">
+   807→                    <Plus className="h-4 w-4" /> Add Row
+   808→                  </Button>
+   809→                </div>
+   810→              </div>
+   811→
+   812→              <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+   813→                <div className="min-w-[640px]">
+   814→                  <div className="grid grid-cols-[1fr_70px_80px_120px_130px_40px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   815→                    <span>Item Name</span>
+   816→                    <span className="text-right">Qty</span>
+   817→                    <span>Deno</span>
+   818→                    <span className="text-right">Unit Cost (Rs.)</span>
+   819→                    <span className="text-right">Total Cost (Rs.)</span>
+   820→                    <span></span>
+   821→                  </div>
+   822→                  <div className="divide-y divide-border">
+   823→                    {estimateRows.map((row, idx) => (
+   824→                      <div key={idx} className="grid grid-cols-[1fr_70px_80px_120px_130px_40px] gap-2 px-3 py-2 items-center">
+   825→                        <Input value={row.itemName} onChange={(e) => updateRow(idx, "itemName", e.target.value)} placeholder="e.g. Centrifugal Pump 15kW" className="bg-background border-border h-8 text-sm" />
+   826→                        <Input type="number" value={row.qty} onChange={(e) => updateRow(idx, "qty", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   827→                        <Select value={row.unit} onValueChange={(v) => updateRow(idx, "unit", v)}>
+   828→                          <SelectTrigger className="bg-background border-border h-8 text-sm"><SelectValue /></SelectTrigger>
+   829→                          <SelectContent>
+   830→                            {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+   831→                          </SelectContent>
+   832→                        </Select>
+   833→                        <Input type="number" value={row.estimateCost} onChange={(e) => updateRow(idx, "estimateCost", e.target.value)} placeholder="0" className="bg-background border-border h-8 text-sm text-right" />
+   834→                        <Input
+   835→                          type="number"
+   836→                          value={row.totalCost}
+   837→                          onChange={(e) => updateRow(idx, "totalCost", e.target.value)}
+   838→                          placeholder="0"
+   839→                          readOnly
+   840→                          tabIndex={-1}
+   841→                          className="bg-secondary/40 border-border h-8 text-sm text-right font-medium text-emerald-500 dark:text-emerald-400 cursor-not-allowed focus-visible:ring-0"
+   842→                          title="Total Cost = Qty × Unit Cost (auto-computed)"
+   843→                        />
+   844→                        <button onClick={() => removeRow(idx)} className="text-muted-foreground hover:text-red-400 flex items-center justify-center">
+   845→                          <Trash2 className="h-4 w-4" />
+   846→                        </button>
+   847→                      </div>
+   848→                    ))}
+   849→                  </div>
+   850→                </div>
+   851→              </div>
+   852→              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+   853→                <Info className="h-3 w-3" />
+   854→                Tip: Unit Cost is per-unit; Total Cost auto-computes as Qty × Unit Cost (or use the CSV TotalCost column). After saving, Step 2 will process these items with AI to match RC list &amp; inventory.
+   855→                {!hasValidEstimate && (
+   856→                  <span className="text-amber-400 ml-2 font-medium">· Add estimate items to continue</span>
+   857→                )}
+   858→              </p>
+   859→              {estimateRows.some((r) => r.totalCost && Number(r.totalCost) > 0) && (
+   860→                <div className="mt-2 flex items-center justify-end gap-2 text-sm">
+   861→                  <span className="text-muted-foreground">Grand Total (Total Cost):</span>
+   862→                  <span className="font-semibold text-emerald-500 dark:text-emerald-400 font-mono">
+   863→                    Rs.{" "}
+   864→                    {estimateRows
+   865→                      .reduce(
+   866→                        (sum, r) => sum + (Number(r.totalCost) || 0),
+   867→                        0
+   868→                      )
+   869→                      .toLocaleString("en-IN")}
+   870→                  </span>
+   871→                </div>
+   872→              )}
+   873→            </section>
+   874→
+   875→            {/* Actions */}
+   876→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   877→              <Button variant="outline" onClick={onClose}>Cancel</Button>
+   878→              <div className="flex items-center gap-2">
+   879→                {!hasValidEstimate && (
+   880→                  <span className="text-xs text-amber-400 hidden sm:flex items-center gap-1">
+   881→                    <AlertCircle className="h-3.5 w-3.5" />
+   882→                    Add estimate items to continue
+   883→                  </span>
+   884→                )}
+   885→                <Button
+   886→                  onClick={handleSaveAndProcess}
+   887→                  disabled={saving || !hasValidEstimate}
+   888→                  className="gap-1.5"
+   889→                  title={!hasValidEstimate ? "Add at least one estimate item with item name + qty/cost" : undefined}
+   890→                >
+   891→                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   892→                  Export Estimate &amp; Process (Step 2)
+   893→                </Button>
+   894→              </div>
+   895→            </div>
+   896→          </div>
+   897→        )}
+   898→
+   899→        {step === 2 && createdEstimateId && (
+   900→          <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
+   901→            <div className="bg-card border border-border rounded-xl p-5">
+   902→              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+   903→                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+   904→                  <Sparkles className="h-4 w-4 text-primary" /> Processed Estimate — AI Matched Items
+   905→                </h3>
+   906→                <p className="text-xs text-muted-foreground">
+   907→                  Review matched items, then &quot;Initiate File&quot; to raise PRs. Initiated files forward to the Project Window.
+   908→                </p>
+   909→              </div>
+   910→              <EstimateItemsTable
+   911→                estimateId={createdEstimateId}
+   912→                showProcessButton
+   913→              />
+   914→            </div>
+   915→
+   916→            <div className="flex items-center justify-between gap-3 sticky bottom-0 bg-background/80 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-t border-border">
+   917→              <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5">
+   918→                <ArrowLeft className="h-4 w-4" /> Back to Details
+   919→              </Button>
+   920→              <Button onClick={handleGoToProject} className="gap-1.5">
+   921→                Go to Project Window (Step 3) <ArrowRight className="h-4 w-4" />
+   922→              </Button>
+   923→            </div>
+   924→          </div>
+   925→        )}
+   926→      </div>
+   927→
+   928→      {/* CSV Import Preview Dialog */}
+   929→      <Dialog open={!!previewRows} onOpenChange={(o) => !o && setPreviewRows(null)}>
+   930→        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   931→          <DialogHeader>
+   932→            <DialogTitle className="text-foreground flex items-center gap-2">
+   933→              <Upload className="h-5 w-5 text-primary" />
+   934→              Preview Imported Estimate ({previewRows?.length || 0} rows)
+   935→            </DialogTitle>
+   936→          </DialogHeader>
+   937→          <p className="text-xs text-muted-foreground -mt-1">
+   938→            Review the parsed CSV rows below. Confirming will <span className="font-medium text-foreground">replace</span> the current estimate rows.
+   939→          </p>
+   940→          {previewRows && previewRows.length > 0 && (
+   941→            <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+   942→              <div className="min-w-[560px]">
+   943→                <div className="grid grid-cols-[1fr_70px_70px_100px_120px] gap-2 px-3 py-2 bg-secondary/40 text-xs text-muted-foreground uppercase">
+   944→                  <span>Item Name</span>
+   945→                  <span className="text-right">Qty</span>
+   946→                  <span>Unit</span>
+   947→                  <span className="text-right">Unit Cost</span>
+   948→                  <span className="text-right">Total Cost</span>
+   949→                </div>
+   950→                <div className="divide-y divide-border max-h-[50vh] overflow-y-auto scrollbar-thin">
+   951→                  {previewRows.map((r, i) => (
+   952→                    <div key={i} className="grid grid-cols-[1fr_70px_70px_100px_120px] gap-2 px-3 py-1.5 text-sm items-center">
+   953→                      <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
+   954→                      <span className="text-right">{r.qty || "—"}</span>
+   955→                      <span className="text-xs">{r.unit || "NOS"}</span>
+   956→                      <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+   957→                      <span className="text-right font-medium text-emerald-500 dark:text-emerald-400">
+   958→                        {r.totalCost ? Number(r.totalCost).toLocaleString("en-IN") : "—"}
+   959→                      </span>
+   960→                    </div>
+   961→                  ))}
+   962→                </div>
+   963→              </div>
+   964→            </div>
+   965→          )}
+   966→          <DialogFooter>
+   967→            <Button variant="outline" onClick={() => setPreviewRows(null)}>Cancel</Button>
+   968→            <Button onClick={confirmImport} disabled={!previewRows || previewRows.length === 0} className="gap-1.5">
+   969→              <Check className="h-4 w-4" /> Confirm Import ({previewRows?.length || 0} rows)
+   970→            </Button>
+   971→          </DialogFooter>
+   972→        </DialogContent>
+   973→      </Dialog>
+   974→    </div>
+   975→  );
+   976→}
+   977→
+   978→function StepBadge({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
+   979→  return (
+   980→    <div className={cn(
+   981→      "flex items-center gap-1.5 px-2.5 py-1 rounded-md",
+   982→      active ? "bg-primary text-primary-foreground" : done ? "bg-emerald-500/15 text-emerald-400" : "bg-secondary text-muted-foreground"
+   983→    )}>
+   984→      <span className={cn(
+   985→        "h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold",
+   986→        active ? "bg-primary-foreground text-primary" : done ? "bg-emerald-500 text-white" : "bg-muted-foreground/30"
+   987→      )}>
+   988→        {done ? <Check className="h-2.5 w-2.5" /> : n}
+   989→      </span>
+   990→      <span className="font-medium">{label}</span>
+   991→    </div>
+   992→  );
+   993→}
+   994→

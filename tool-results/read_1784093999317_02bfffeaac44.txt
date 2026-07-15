@@ -1,0 +1,2002 @@
+     1→     1→"use client";
+     2→     2→import { useMemo, useState } from "react";
+     3→     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→     4→import { PageHeader } from "@/components/erp/page-header";
+     5→     5→import { StatCard } from "@/components/erp/stat-card";
+     6→     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→     7→import { CustomBadge } from "@/components/erp/badges";
+     8→     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→     9→import {
+    10→    10→  Dialog,
+    11→    11→  DialogContent,
+    12→    12→  DialogHeader,
+    13→    13→  DialogTitle,
+    14→    14→  DialogDescription,
+    15→    15→  DialogFooter,
+    16→    16→} from "@/components/ui/dialog";
+    17→    17→import {
+    18→    18→  AlertDialog,
+    19→    19→  AlertDialogContent,
+    20→    20→  AlertDialogHeader,
+    21→    21→  AlertDialogFooter,
+    22→    22→  AlertDialogTitle,
+    23→    23→  AlertDialogDescription,
+    24→    24→  AlertDialogAction,
+    25→    25→  AlertDialogCancel,
+    26→    26→} from "@/components/ui/alert-dialog";
+    27→    27→import { Button } from "@/components/ui/button";
+    28→    28→import { Input } from "@/components/ui/input";
+    29→    29→import { Label } from "@/components/ui/label";
+    30→    30→import { Textarea } from "@/components/ui/textarea";
+    31→    31→import { Checkbox } from "@/components/ui/checkbox";
+    32→    32→import {
+    33→    33→  Select,
+    34→    34→  SelectContent,
+    35→    35→  SelectItem,
+    36→    36→  SelectTrigger,
+    37→    37→  SelectValue,
+    38→    38→} from "@/components/ui/select";
+    39→    39→import {
+    40→    40→  Table,
+    41→    41→  TableHeader,
+    42→    42→  TableBody,
+    43→    43→  TableHead,
+    44→    44→  TableRow,
+    45→    45→  TableCell,
+    46→    46→} from "@/components/ui/table";
+    47→    47→import { ScrollArea } from "@/components/ui/scroll-area";
+    48→    48→import { useToast } from "@/hooks/use-toast";
+    49→    49→import {
+    50→    50→  USER_ROLES,
+    51→    51→  userRoleColor,
+    52→    52→  ROLE_PERMISSIONS,
+    53→    53→  permissionColor,
+    54→    54→  VOTE_TYPES,
+    55→    55→  voteTypeColor,
+    56→    56→  PROCESS_FLOW_TYPES,
+    57→    57→  processFlowColor,
+    58→    58→  NUMBER_PREFIX_TYPES,
+    59→    59→  THEME_PROFILE_PRESETS,
+    60→    60→  type ThemeProfilePreset,
+    61→    61→  formatCurrency,
+    62→    62→} from "@/lib/constants";
+    63→    63→import {
+    64→    64→  useThemeProfile,
+    65→    65→} from "@/lib/use-theme-profile";
+    66→    66→import type { LucideIcon } from "lucide-react";
+    67→    67→import { cn } from "@/lib/utils";
+    68→    68→import {
+    69→    69→  Settings,
+    70→    70→  Users,
+    71→    71→  Warehouse,
+    72→    72→  GitBranch,
+    73→    73→  Plus,
+    74→    74→  Pencil,
+    75→    75→  Trash2,
+    76→    76→  Shield,
+    77→    77→  Award,
+    78→    78→  TrendingUp,
+    79→    79→  Loader2,
+    80→    80→  Search,
+    81→    81→  X,
+    82→    82→  UserCircle2,
+    83→    83→  Mail,
+    84→    84→  Building2,
+    85→    85→  CheckCircle2,
+    86→    86→  XCircle,
+    87→    87→  Layers,
+    88→    88→  Gavel,
+    89→    89→  ClipboardCheck,
+    90→    90→  Banknote,
+    91→    91→  ArrowRight,
+    92→    92→  ListTree,
+    93→    93→  KeyRound,
+    94→    94→  Vote,
+    95→    95→  Lock,
+    96→    96→  Unlock,
+    97→    97→  AlertCircle,
+    98→    98→  LogIn,
+    99→    99→  LogOut,
+   100→   100→  Info,
+   101→   101→  Coins,
+   102→   102→  Calendar,
+   103→   103→  Crown,
+   104→   104→  UserCog,
+   105→   105→  Activity,
+   106→   106→  Landmark,
+   107→   107→  Fingerprint,
+   108→   108→  Eye,
+   109→   109→  EyeOff,
+   110→   110→  Hash,
+   111→   111→  Palette,
+   112→   112→  Check,
+   113→   113→  Type,
+   114→   114→  Sparkles,
+   115→   115→  Star,
+   116→   116→  RefreshCw,
+   117→   117→  PlusCircle,
+   118→   118→} from "lucide-react";
+   119→   119→
+   120→   120→// ─────────────────────────────────────────────────────────
+   121→   121→// Types
+   122→   122→// ─────────────────────────────────────────────────────────
+   123→   123→interface UserProfile {
+   124→   124→  id: string;
+   125→   125→  username: string;
+   126→   126→  displayName: string;
+   127→   127→  email: string | null;
+   128→   128→  role: string;
+   129→   129→  stakeholderId: string | null;
+   130→   130→  department: string | null;
+   131→   131→  active: boolean;
+   132→   132→  passwordHash?: string | null;
+   133→   133→  createdAt: string;
+   134→   134→  updatedAt?: string;
+   135→   135→}
+   136→   136→
+   137→   137→interface StoreConfig {
+   138→   138→  id: string;
+   139→   139→  storeName: string;
+   140→   140→  storeType: string;
+   141→   141→  responsiblePerson: string | null;
+   142→   142→  location: string | null;
+   143→   143→  active: boolean;
+   144→   144→  createdAt: string;
+   145→   145→  updatedAt?: string;
+   146→   146→}
+   147→   147→
+   148→   148→interface ProcessStep {
+   149→   149→  id: string;
+   150→   150→  flowId: string;
+   151→   151→  stepOrder: number;
+   152→   152→  positionName: string;
+   153→   153→  description: string | null;
+   154→   154→  defaultResponsiblePerson: string | null;
+   155→   155→  financialDelegationLevel: string | null;
+   156→   156→  isTenderStage: boolean;
+   157→   157→  isEvaluationStage: boolean;
+   158→   158→  createdAt: string;
+   159→   159→}
+   160→   160→
+   161→   161→interface ProcessFlow {
+   162→   162→  id: string;
+   163→   163→  name: string;
+   164→   164→  description: string | null;
+   165→   165→  createdAt: string;
+   166→   166→  steps: ProcessStep[];
+   167→   167→}
+   168→   168→
+   169→   169→interface Vote {
+   170→   170→  id: string;
+   171→   171→  voteNumber: string;
+   172→   172→  description: string;
+   173→   173→  voteType: string;
+   174→   174→  allocation: number;
+   175→   175→  financialYear: string | null;
+   176→   176→  active: boolean;
+   177→   177→  createdAt: string;
+   178→   178→  updatedAt?: string;
+   179→   179→}
+   180→   180→
+   181→   181→interface SessionUser {
+   182→   182→  id: string;
+   183→   183→  username: string;
+   184→   184→  displayName: string;
+   185→   185→  role: string;
+   186→   186→  department: string | null;
+   187→   187→}
+   188→   188→
+   189→   189→interface SessionResponse {
+   190→   190→  user: SessionUser | null;
+   191→   191→  authenticated: boolean;
+   192→   192→}
+   193→   193→
+   194→   194→interface NumberPrefix {
+   195→   195→  id: string;
+   196→   196→  docType: string;
+   197→   197→  prefix: string;
+   198→   198→  suffix: string | null;
+   199→   199→  nextNumber: number;
+   200→   200→  description: string | null;
+   201→   201→  createdAt?: string;
+   202→   202→  updatedAt?: string;
+   203→   203→}
+   204→   204→
+   205→   205→interface ThemeProfileRecord {
+   206→   206→  id: string;
+   207→   207→  name: string;
+   208→   208→  mode: string;
+   209→   209→  primary: string;
+   210→   210→  accent: string;
+   211→   211→  isDefault: boolean;
+   212→   212→  createdAt?: string;
+   213→   213→  updatedAt?: string;
+   214→   214→}
+   215→   215→
+   216→   216→// ─────────────────────────────────────────────────────────
+   217→   217→// Constants — local to settings module
+   218→   218→// ─────────────────────────────────────────────────────────
+   219→   219→const STORE_TYPES = ["Zone", "AreaStore", "Ready-Use", "Balance", "Project"] as const;
+   220→   220→
+   221→   221→const DEPARTMENTS = ["CSLOG", "CE", "Finance", "Administration", "Operations"] as const;
+   222→   222→
+   223→   223→function storeTypeColor(type: string): string {
+   224→   224→  switch (type) {
+   225→   225→    case "Zone":
+   226→   226→      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   227→   227→    case "AreaStore":
+   228→   228→      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+   229→   229→    case "Ready-Use":
+   230→   230→      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   231→   231→    case "Balance":
+   232→   232→      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   233→   233→    case "Project":
+   234→   234→      return "bg-pink-500/15 text-pink-400 border-pink-500/30";
+   235→   235→    default:
+   236→   236→      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+   237→   237→  }
+   238→   238→}
+   239→   239→
+   240→   240→function storeTypeLabel(type: string): string {
+   241→   241→  switch (type) {
+   242→   242→    case "AreaStore":
+   243→   243→      return "Area Store";
+   244→   244→    case "Ready-Use":
+   245→   245→      return "Ready-Use";
+   246→   246→    default:
+   247→   247→      return type;
+   248→   248→  }
+   249→   249→}
+   250→   250→
+   251→   251→function activeBadgeClass(active: boolean): string {
+   252→   252→  return active
+   253→   253→    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+   254→   254→    : "bg-red-500/15 text-red-400 border-red-500/30";
+   255→   255→}
+   256→   256→
+   257→   257→function formatDate(value: string | null | undefined): string {
+   258→   258→  if (!value) return "—";
+   259→   259→  const d = new Date(value);
+   260→   260→  if (isNaN(d.getTime())) return "—";
+   261→   261→  return d.toLocaleString("en-GB", {
+   262→   262→    day: "2-digit",
+   263→   263→    month: "short",
+   264→   264→    year: "numeric",
+   265→   265→  });
+   266→   266→}
+   267→   267→
+   268→   268→/** Returns the accent stripe / pill color classes for a flow name. */
+   269→   269→function flowAccent(name: string): {
+   270→   270→  badge: string;
+   271→   271→  dot: string;
+   272→   272→  ring: string;
+   273→   273→  headerBg: string;
+   274→   274→  border: string;
+   275→   275→  text: string;
+   276→   276→  stepDot: string;
+   277→   277→} {
+   278→   278→  switch (name) {
+   279→   279→    case "RC":
+   280→   280→      return {
+   281→   281→        badge: processFlowColor("RC"),
+   282→   282→        dot: "bg-emerald-500",
+   283→   283→        ring: "ring-emerald-500/30",
+   284→   284→        headerBg: "bg-emerald-500/10",
+   285→   285→        border: "border-emerald-500/30",
+   286→   286→        text: "text-emerald-400",
+   287→   287→        stepDot: "bg-emerald-500",
+   288→   288→      };
+   289→   289→    case "Non-Rate":
+   290→   290→      return {
+   291→   291→        badge: processFlowColor("Non-Rate"),
+   292→   292→        dot: "bg-amber-500",
+   293→   293→        ring: "ring-amber-500/30",
+   294→   294→        headerBg: "bg-amber-500/10",
+   295→   295→        border: "border-amber-500/30",
+   296→   296→        text: "text-amber-400",
+   297→   297→        stepDot: "bg-amber-500",
+   298→   298→      };
+   299→   299→    case "ARO (Contractual)":
+   300→   300→      return {
+   301→   301→        badge: processFlowColor("ARO (Contractual)"),
+   302→   302→        dot: "bg-violet-500",
+   303→   303→        ring: "ring-violet-500/30",
+   304→   304→        headerBg: "bg-violet-500/10",
+   305→   305→        border: "border-violet-500/30",
+   306→   306→        text: "text-violet-400",
+   307→   307→        stepDot: "bg-violet-500",
+   308→   308→      };
+   309→   309→    default:
+   310→   310→      return {
+   311→   311→        badge: processFlowColor(name),
+   312→   312→        dot: "bg-slate-500",
+   313→   313→        ring: "ring-slate-500/30",
+   314→   314→        headerBg: "bg-slate-500/10",
+   315→   315→        border: "border-slate-500/30",
+   316→   316→        text: "text-slate-300",
+   317→   317→        stepDot: "bg-slate-500",
+   318→   318→      };
+   319→   319→  }
+   320→   320→}
+   321→   321→
+   322→   322→// ─────────────────────────────────────────────────────────
+   323→   323→// Main Module
+   324→   324→// ─────────────────────────────────────────────────────────
+   325→   325→type SettingsTab =
+   326→   326→  | "users"
+   327→   327→  | "roles"
+   328→   328→  | "auth"
+   329→   329→  | "votes"
+   330→   330→  | "stores"
+   331→   331→  | "process"
+   332→   332→  | "prefixes"
+   333→   333→  | "theme";
+   334→   334→
+   335→   335→export function SettingsModule() {
+   336→   336→  const [tab, setTab] = useState<SettingsTab>("users");
+   337→   337→
+   338→   338→  const tabs: {
+   339→   339→    value: SettingsTab;
+   340→   340→    label: string;
+   341→   341→    short: string;
+   342→   342→    icon: LucideIcon;
+   343→   343→    iconClass: string;
+   344→   344→  }[] = [
+   345→   345→    {
+   346→   346→      value: "users",
+   347→   347→      label: "User Profiles",
+   348→   348→      short: "Users",
+   349→   349→      icon: Users,
+   350→   350→      iconClass: "bg-blue-500/15 text-blue-400",
+   351→   351→    },
+   352→   352→    {
+   353→   353→      value: "roles",
+   354→   354→      label: "Roles & Access",
+   355→   355→      short: "Roles",
+   356→   356→      icon: Shield,
+   357→   357→      iconClass: "bg-violet-500/15 text-violet-400",
+   358→   358→    },
+   359→   359→    {
+   360→   360→      value: "auth",
+   361→   361→      label: "Authentication",
+   362→   362→      short: "Auth",
+   363→   363→      icon: KeyRound,
+   364→   364→      iconClass: "bg-emerald-500/15 text-emerald-400",
+   365→   365→    },
+   366→   366→    {
+   367→   367→      value: "votes",
+   368→   368→      label: "Vote Management",
+   369→   369→      short: "Votes",
+   370→   370→      icon: Vote,
+   371→   371→      iconClass: "bg-amber-500/15 text-amber-400",
+   372→   372→    },
+   373→   373→    {
+   374→   374→      value: "stores",
+   375→   375→      label: "Store Management",
+   376→   376→      short: "Stores",
+   377→   377→      icon: Warehouse,
+   378→   378→      iconClass: "bg-pink-500/15 text-pink-400",
+   379→   379→    },
+   380→   380→    {
+   381→   381→      value: "process",
+   382→   382→      label: "Process",
+   383→   383→      short: "Process",
+   384→   384→      icon: GitBranch,
+   385→   385→      iconClass: "bg-sky-500/15 text-sky-400",
+   386→   386→    },
+   387→   387→    {
+   388→   388→      value: "prefixes",
+   389→   389→      label: "Number Prefixes",
+   390→   390→      short: "Prefixes",
+   391→   391→      icon: Hash,
+   392→   392→      iconClass: "bg-cyan-500/15 text-cyan-400",
+   393→   393→    },
+   394→   394→    {
+   395→   395→      value: "theme",
+   396→   396→      label: "Theme & Colors",
+   397→   397→      short: "Theme",
+   398→   398→      icon: Palette,
+   399→   399→      iconClass: "bg-fuchsia-500/15 text-fuchsia-400",
+   400→   400→    },
+   401→   401→  ];
+   402→   402→
+   403→   403→  return (
+   404→   404→    <div className="space-y-6">
+   405→   405→      <PageHeader
+   406→   406→        title="Settings"
+   407→   407→        description="Manage users, roles, authentication, votes, stores & procurement process flows"
+   408→   408→        icon={Settings}
+   409→   409→      />
+   410→   410→      <Tabs
+   411→   411→        value={tab}
+   412→   412→        onValueChange={(v) => setTab(v as SettingsTab)}
+   413→   413→      >
+   414→   414→        <div className="bg-gradient-to-r from-blue-500/5 via-violet-500/5 to-transparent border border-border rounded-xl p-1.5 overflow-x-auto">
+   415→   415→          <TabsList className="bg-transparent border-0 p-0 h-auto flex gap-1 w-max min-w-full">
+   416→   416→            {tabs.map((t) => {
+   417→   417→              const Icon = t.icon;
+   418→   418→              return (
+   419→   419→                <TabsTrigger
+   420→   420→                  key={t.value}
+   421→   421→                  value={t.value}
+   422→   422→                  className="flex-none h-auto py-1.5 px-3 gap-2 data-[state=active]:bg-card data-[state=active]:border-border data-[state=active]:shadow-sm border border-transparent text-muted-foreground hover:text-foreground hover:bg-card/50 transition-all"
+   423→   423→                >
+   424→   424→                  <span
+   425→   425→                    className={cn(
+   426→   426→                      "h-5 w-5 rounded flex items-center justify-center",
+   427→   427→                      t.iconClass
+   428→   428→                    )}
+   429→   429→                  >
+   430→   430→                    <Icon className="h-3 w-3" />
+   431→   431→                  </span>
+   432→   432→                  <span className="hidden sm:inline">{t.label}</span>
+   433→   433→                  <span className="sm:hidden">{t.short}</span>
+   434→   434→                </TabsTrigger>
+   435→   435→              );
+   436→   436→            })}
+   437→   437→          </TabsList>
+   438→   438→        </div>
+   439→   439→
+   440→   440→        <TabsContent value="users" className="mt-4">
+   441→   441→          <UserProfilesTab />
+   442→   442→        </TabsContent>
+   443→   443→        <TabsContent value="roles" className="mt-4">
+   444→   444→          <RolesAccessTab />
+   445→   445→        </TabsContent>
+   446→   446→        <TabsContent value="auth" className="mt-4">
+   447→   447→          <AuthenticationTab />
+   448→   448→        </TabsContent>
+   449→   449→        <TabsContent value="votes" className="mt-4">
+   450→   450→          <VoteManagementTab />
+   451→   451→        </TabsContent>
+   452→   452→        <TabsContent value="stores" className="mt-4">
+   453→   453→          <StoreManagementTab />
+   454→   454→        </TabsContent>
+   455→   455→        <TabsContent value="process" className="mt-4">
+   456→   456→          <ProcessFlowsTab />
+   457→   457→        </TabsContent>
+   458→   458→        <TabsContent value="prefixes" className="mt-4">
+   459→   459→          <NumberPrefixesTab />
+   460→   460→        </TabsContent>
+   461→   461→        <TabsContent value="theme" className="mt-4">
+   462→   462→          <ThemeColorsTab />
+   463→   463→        </TabsContent>
+   464→   464→      </Tabs>
+   465→   465→    </div>
+   466→   466→  );
+   467→   467→}
+   468→   468→
+   469→   469→// ═════════════════════════════════════════════════════════
+   470→   470→// TAB 1 — User Profiles
+   471→   471→// ═════════════════════════════════════════════════════════
+   472→   472→function UserProfilesTab() {
+   473→   473→  const { data: list, loading, error, refresh } = useFetch<UserProfile[]>(
+   474→   474→    "/api/settings/users"
+   475→   475→  );
+   476→   476→  const { toast } = useToast();
+   477→   477→
+   478→   478→  const [search, setSearch] = useState("");
+   479→   479→  const [roleFilter, setRoleFilter] = useState("all");
+   480→   480→  const [deptFilter, setDeptFilter] = useState("all");
+   481→   481→  const [activeFilter, setActiveFilter] = useState("all");
+   482→   482→
+   483→   483→  const [addOpen, setAddOpen] = useState(false);
+   484→   484→  const [editTarget, setEditTarget] = useState<UserProfile | null>(null);
+   485→   485→  const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
+   486→   486→  const [deleting, setDeleting] = useState(false);
+   487→   487→  const [passwordTarget, setPasswordTarget] = useState<UserProfile | null>(
+   488→   488→    null
+   489→   489→  );
+   490→   490→
+   491→   491→  const filtered = useMemo(() => {
+   492→   492→    if (!list) return [];
+   493→   493→    const s = search.trim().toLowerCase();
+   494→   494→    return list.filter((u) => {
+   495→   495→      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+   496→   496→      if (deptFilter !== "all" && (u.department ?? "—") !== deptFilter) return false;
+   497→   497→      if (activeFilter === "active" && !u.active) return false;
+   498→   498→      if (activeFilter === "inactive" && u.active) return false;
+   499→   499→      if (s) {
+   500→   500→        const hay =
+   501→   501→          `${u.username} ${u.displayName} ${u.email ?? ""} ${u.department ?? ""}`.toLowerCase();
+   502→   502→        if (!hay.includes(s)) return false;
+   503→   503→      }
+   504→   504→      return true;
+   505→   505→    });
+   506→   506→  }, [list, search, roleFilter, deptFilter, activeFilter]);
+   507→   507→
+   508→   508→  const filtersActive =
+   509→   509→    search !== "" ||
+   510→   510→    roleFilter !== "all" ||
+   511→   511→    deptFilter !== "all" ||
+   512→   512→    activeFilter !== "all";
+   513→   513→
+   514→   514→  function clearFilters() {
+   515→   515→    setSearch("");
+   516→   516→    setRoleFilter("all");
+   517→   517→    setDeptFilter("all");
+   518→   518→    setActiveFilter("all");
+   519→   519→  }
+   520→   520→
+   521→   521→  const activeCount = useMemo(
+   522→   522→    () => list?.filter((u) => u.active).length ?? 0,
+   523→   523→    [list]
+   524→   524→  );
+   525→   525→  const adminCount = useMemo(
+   526→   526→    () => list?.filter((u) => u.role === "Admin").length ?? 0,
+   527→   527→    [list]
+   528→   528→  );
+   529→   529→
+   530→   530→  async function handleDelete() {
+   531→   531→    if (!deleteTarget) return;
+   532→   532→    setDeleting(true);
+   533→   533→    const res = await apiRequest(
+   534→   534→      `/api/settings/users/${deleteTarget.id}`,
+   535→   535→      "DELETE"
+   536→   536→    );
+   537→   537→    setDeleting(false);
+   538→   538→    if (res.ok) {
+   539→   539→      toast({
+   540→   540→        title: "User deleted",
+   541→   541→        description: deleteTarget.displayName,
+   542→   542→      });
+   543→   543→      setDeleteTarget(null);
+   544→   544→      refresh();
+   545→   545→    } else {
+   546→   546→      toast({
+   547→   547→        title: "Failed to delete",
+   548→   548→        description: res.error,
+   549→   549→        variant: "destructive",
+   550→   550→      });
+   551→   551→    }
+   552→   552→  }
+   553→   553→
+   554→   554→  if (loading) return <LoadingState label="Loading users..." />;
+   555→   555→  if (error) return <ErrorState message={error} />;
+   556→   556→
+   557→   557→  return (
+   558→   558→    <div className="space-y-4">
+   559→   559→      <div className="bg-gradient-to-r from-blue-500/10 via-cyan-500/5 to-transparent border border-blue-500/20 rounded-xl p-4 flex items-center gap-3">
+   560→   560→        <div className="h-10 w-10 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0">
+   561→   561→          <Users className="h-5 w-5" />
+   562→   562→        </div>
+   563→   563→        <div>
+   564→   564→          <h3 className="text-sm font-semibold text-foreground">
+   565→   565→            User Profiles
+   566→   566→          </h3>
+   567→   567→          <p className="text-xs text-muted-foreground">
+   568→   568→            Manage login identities, roles, departments and passwords
+   569→   569→          </p>
+   570→   570→        </div>
+   571→   571→      </div>
+   572→   572→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   573→   573→        <StatCard
+   574→   574→          label="Total Users"
+   575→   575→          value={list?.length ?? 0}
+   576→   576→          icon={Users}
+   577→   577→          accent="blue"
+   578→   578→          sub="All profiles"
+   579→   579→        />
+   580→   580→        <StatCard
+   581→   581→          label="Active"
+   582→   582→          value={activeCount}
+   583→   583→          icon={CheckCircle2}
+   584→   584→          accent="green"
+   585→   585→          sub="Can sign in"
+   586→   586→        />
+   587→   587→        <StatCard
+   588→   588→          label="Administrators"
+   589→   589→          value={adminCount}
+   590→   590→          icon={Shield}
+   591→   591→          accent="red"
+   592→   592→          sub="Full access"
+   593→   593→        />
+   594→   594→        <StatCard
+   595→   595→          label="With Password"
+   596→   596→          value={list?.filter((u) => u.passwordHash).length ?? 0}
+   597→   597→          icon={KeyRound}
+   598→   598→          accent="purple"
+   599→   599→          sub="Can authenticate"
+   600→   600→        />
+   601→   601→      </div>
+   602→   602→
+   603→   603→      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+   604→   604→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+   605→   605→          <div className="flex-1 min-w-0">
+   606→   606→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+   607→   607→              Search (Username / Name / Email)
+   608→   608→            </Label>
+   609→   609→            <div className="relative">
+   610→   610→              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   611→   611→              <Input
+   612→   612→                placeholder="Search users..."
+   613→   613→                value={search}
+   614→   614→                onChange={(e) => setSearch(e.target.value)}
+   615→   615→                className="pl-9 bg-background"
+   616→   616→              />
+   617→   617→            </div>
+   618→   618→          </div>
+   619→   619→          <div className="grid grid-cols-3 gap-2 lg:gap-3">
+   620→   620→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+   621→   621→              <SelectTrigger className="bg-background w-full">
+   622→   622→                <SelectValue placeholder="Role" />
+   623→   623→              </SelectTrigger>
+   624→   624→              <SelectContent>
+   625→   625→                <SelectItem value="all">All Roles</SelectItem>
+   626→   626→                {USER_ROLES.map((r) => (
+   627→   627→                  <SelectItem key={r} value={r}>
+   628→   628→                    {r}
+   629→   629→                  </SelectItem>
+   630→   630→                ))}
+   631→   631→              </SelectContent>
+   632→   632→            </Select>
+   633→   633→            <Select value={deptFilter} onValueChange={setDeptFilter}>
+   634→   634→              <SelectTrigger className="bg-background w-full">
+   635→   635→                <SelectValue placeholder="Dept" />
+   636→   636→              </SelectTrigger>
+   637→   637→              <SelectContent>
+   638→   638→                <SelectItem value="all">All Departments</SelectItem>
+   639→   639→                {DEPARTMENTS.map((d) => (
+   640→   640→                  <SelectItem key={d} value={d}>
+   641→   641→                    {d}
+   642→   642→                  </SelectItem>
+   643→   643→                ))}
+   644→   644→              </SelectContent>
+   645→   645→            </Select>
+   646→   646→            <Select value={activeFilter} onValueChange={setActiveFilter}>
+   647→   647→              <SelectTrigger className="bg-background w-full">
+   648→   648→                <SelectValue placeholder="Status" />
+   649→   649→              </SelectTrigger>
+   650→   650→              <SelectContent>
+   651→   651→                <SelectItem value="all">All Status</SelectItem>
+   652→   652→                <SelectItem value="active">Active only</SelectItem>
+   653→   653→                <SelectItem value="inactive">Inactive only</SelectItem>
+   654→   654→              </SelectContent>
+   655→   655→            </Select>
+   656→   656→          </div>
+   657→   657→          <div className="flex items-center gap-2">
+   658→   658→            {filtersActive && (
+   659→   659→              <Button
+   660→   660→                type="button"
+   661→   661→                variant="ghost"
+   662→   662→                size="sm"
+   663→   663→                onClick={clearFilters}
+   664→   664→              >
+   665→   665→                <X className="h-4 w-4 mr-1" />
+   666→   666→                Clear
+   667→   667→              </Button>
+   668→   668→            )}
+   669→   669→            <Button type="button" onClick={() => setAddOpen(true)}>
+   670→   670→              <Plus className="h-4 w-4 mr-1" />
+   671→   671→              Add User
+   672→   672→            </Button>
+   673→   673→          </div>
+   674→   674→        </div>
+   675→   675→      </div>
+   676→   676→
+   677→   677→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+   678→   678→        {filtered.length === 0 ? (
+   679→   679→          <EmptyState
+   680→   680→            icon={Users}
+   681→   681→            title={
+   682→   682→              filtersActive ? "No matching users" : "No users configured"
+   683→   683→            }
+   684→   684→            description={
+   685→   685→              filtersActive
+   686→   686→                ? "Try adjusting your search or filters."
+   687→   687→                : "Add your first user profile to get started."
+   688→   688→            }
+   689→   689→            action={
+   690→   690→              filtersActive ? (
+   691→   691→                <Button variant="outline" size="sm" onClick={clearFilters}>
+   692→   692→                  Clear Filters
+   693→   693→                </Button>
+   694→   694→              ) : (
+   695→   695→                <Button size="sm" onClick={() => setAddOpen(true)}>
+   696→   696→                  <Plus className="h-4 w-4 mr-1" />
+   697→   697→                  Add User
+   698→   698→                </Button>
+   699→   699→              )
+   700→   700→            }
+   701→   701→          />
+   702→   702→        ) : (
+   703→   703→          <ScrollArea className="max-h-[60vh]">
+   704→   704→            <Table>
+   705→   705→              <TableHeader className="sticky top-0 bg-card z-10">
+   706→   706→                <TableRow className="border-border hover:bg-transparent">
+   707→   707→                  <TableHead className="w-[40px]">Sr</TableHead>
+   708→   708→                  <TableHead>Username</TableHead>
+   709→   709→                  <TableHead>Display Name</TableHead>
+   710→   710→                  <TableHead>Email</TableHead>
+   711→   711→                  <TableHead>Role</TableHead>
+   712→   712→                  <TableHead>Department</TableHead>
+   713→   713→                  <TableHead>Password</TableHead>
+   714→   714→                  <TableHead>Status</TableHead>
+   715→   715→                  <TableHead>Created</TableHead>
+   716→   716→                  <TableHead className="text-right">Actions</TableHead>
+   717→   717→                </TableRow>
+   718→   718→              </TableHeader>
+   719→   719→              <TableBody>
+   720→   720→                {filtered.map((u, idx) => (
+   721→   721→                  <TableRow key={u.id} className="border-border">
+   722→   722→                    <TableCell className="text-xs text-muted-foreground">
+   723→   723→                      {idx + 1}
+   724→   724→                    </TableCell>
+   725→   725→                    <TableCell>
+   726→   726→                      <div className="flex items-center gap-2">
+   727→   727→                        <div className="h-7 w-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-semibold">
+   728→   728→                          {u.username.slice(0, 2).toUpperCase()}
+   729→   729→                        </div>
+   730→   730→                        <span className="font-medium text-foreground font-mono text-sm">
+   731→   731→                          {u.username}
+   732→   732→                        </span>
+   733→   733→                      </div>
+   734→   734→                    </TableCell>
+   735→   735→                    <TableCell className="font-medium text-foreground">
+   736→   736→                      {u.displayName}
+   737→   737→                    </TableCell>
+   738→   738→                    <TableCell>
+   739→   739→                      {u.email ? (
+   740→   740→                        <a
+   741→   741→                          href={`mailto:${u.email}`}
+   742→   742→                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+   743→   743→                        >
+   744→   744→                          <Mail className="h-3 w-3" />
+   745→   745→                          {u.email}
+   746→   746→                        </a>
+   747→   747→                      ) : (
+   748→   748→                        <span className="text-muted-foreground">—</span>
+   749→   749→                      )}
+   750→   750→                    </TableCell>
+   751→   751→                    <TableCell>
+   752→   752→                      <CustomBadge className={userRoleColor(u.role)}>
+   753→   753→                        <Shield className="h-3 w-3 mr-1" />
+   754→   754→                        {u.role}
+   755→   755→                      </CustomBadge>
+   756→   756→                    </TableCell>
+   757→   757→                    <TableCell>
+   758→   758→                      {u.department ? (
+   759→   759→                        <span className="text-sm text-foreground">
+   760→   760→                          {u.department}
+   761→   761→                        </span>
+   762→   762→                      ) : (
+   763→   763→                        <span className="text-muted-foreground">—</span>
+   764→   764→                      )}
+   765→   765→                    </TableCell>
+   766→   766→                    <TableCell>
+   767→   767→                      <CustomBadge
+   768→   768→                        className={
+   769→   769→                          u.passwordHash
+   770→   770→                            ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+   771→   771→                            : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+   772→   772→                        }
+   773→   773→                      >
+   774→   774→                        {u.passwordHash ? (
+   775→   775→                          <>
+   776→   776→                            <Lock className="h-3 w-3 mr-1" />
+   777→   777→                            Password Set
+   778→   778→                          </>
+   779→   779→                        ) : (
+   780→   780→                          <>
+   781→   781→                            <Unlock className="h-3 w-3 mr-1" />
+   782→   782→                            No Password
+   783→   783→                          </>
+   784→   784→                        )}
+   785→   785→                      </CustomBadge>
+   786→   786→                    </TableCell>
+   787→   787→                    <TableCell>
+   788→   788→                      <CustomBadge className={activeBadgeClass(u.active)}>
+   789→   789→                        {u.active ? (
+   790→   790→                          <>
+   791→   791→                            <CheckCircle2 className="h-3 w-3 mr-1" />
+   792→   792→                            Active
+   793→   793→                          </>
+   794→   794→                        ) : (
+   795→   795→                          <>
+   796→   796→                            <XCircle className="h-3 w-3 mr-1" />
+   797→   797→                            Inactive
+   798→   798→                          </>
+   799→   799→                        )}
+   800→   800→                      </CustomBadge>
+   801→   801→                    </TableCell>
+   802→   802→                    <TableCell className="text-xs text-muted-foreground">
+   803→   803→                      {formatDate(u.createdAt)}
+   804→   804→                    </TableCell>
+   805→   805→                    <TableCell className="text-right">
+   806→   806→                      <div className="flex items-center justify-end gap-1">
+   807→   807→                        <Button
+   808→   808→                          variant="ghost"
+   809→   809→                          size="sm"
+   810→   810→                          className="h-8 px-2 text-emerald-400 hover:text-emerald-500 hover:bg-emerald-500/10"
+   811→   811→                          onClick={() => setPasswordTarget(u)}
+   812→   812→                          title="Set or reset password"
+   813→   813→                        >
+   814→   814→                          <KeyRound className="h-3.5 w-3.5 mr-1" />
+   815→   815→                          <span className="text-xs">Password</span>
+   816→   816→                        </Button>
+   817→   817→                        <Button
+   818→   818→                          variant="ghost"
+   819→   819→                          size="sm"
+   820→   820→                          className="h-8 w-8 p-0"
+   821→   821→                          onClick={() => setEditTarget(u)}
+   822→   822→                          title="Edit user"
+   823→   823→                        >
+   824→   824→                          <Pencil className="h-4 w-4" />
+   825→   825→                        </Button>
+   826→   826→                        <Button
+   827→   827→                          variant="ghost"
+   828→   828→                          size="sm"
+   829→   829→                          className="h-8 w-8 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+   830→   830→                          onClick={() => setDeleteTarget(u)}
+   831→   831→                          title="Delete user"
+   832→   832→                        >
+   833→   833→                          <Trash2 className="h-4 w-4" />
+   834→   834→                        </Button>
+   835→   835→                      </div>
+   836→   836→                    </TableCell>
+   837→   837→                  </TableRow>
+   838→   838→                ))}
+   839→   839→              </TableBody>
+   840→   840→            </Table>
+   841→   841→          </ScrollArea>
+   842→   842→        )}
+   843→   843→      </div>
+   844→   844→
+   845→   845→      {/* Add dialog */}
+   846→   846→      {addOpen && (
+   847→   847→        <UserFormDialog
+   848→   848→          key="add-user"
+   849→   849→          open={addOpen}
+   850→   850→          onOpenChange={setAddOpen}
+   851→   851→          initial={null}
+   852→   852→          onSaved={() => {
+   853→   853→            setAddOpen(false);
+   854→   854→            refresh();
+   855→   855→          }}
+   856→   856→        />
+   857→   857→      )}
+   858→   858→
+   859→   859→      {/* Edit dialog (keyed remount ensures fresh form state) */}
+   860→   860→      {editTarget && (
+   861→   861→        <UserFormDialog
+   862→   862→          key={`edit-${editTarget.id}`}
+   863→   863→          open={!!editTarget}
+   864→   864→          onOpenChange={(o) => !o && setEditTarget(null)}
+   865→   865→          initial={editTarget}
+   866→   866→          onSaved={() => {
+   867→   867→            setEditTarget(null);
+   868→   868→            refresh();
+   869→   869→          }}
+   870→   870→        />
+   871→   871→      )}
+   872→   872→
+   873→   873→      {/* Delete confirm */}
+   874→   874→      <AlertDialog
+   875→   875→        open={!!deleteTarget}
+   876→   876→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+   877→   877→      >
+   878→   878→        <AlertDialogContent>
+   879→   879→          <AlertDialogHeader>
+   880→   880→            <AlertDialogTitle>Delete user profile?</AlertDialogTitle>
+   881→   881→            <AlertDialogDescription>
+   882→   882→              This will permanently delete{" "}
+   883→   883→              <span className="font-semibold text-foreground">
+   884→   884→                {deleteTarget?.displayName}
+   885→   885→              </span>{" "}
+   886→   886→              ({deleteTarget?.username}). This action cannot be undone.
+   887→   887→            </AlertDialogDescription>
+   888→   888→          </AlertDialogHeader>
+   889→   889→          <AlertDialogFooter>
+   890→   890→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+   891→   891→            <AlertDialogAction
+   892→   892→              onClick={handleDelete}
+   893→   893→              disabled={deleting}
+   894→   894→              className="bg-red-600 hover:bg-red-700 text-white"
+   895→   895→            >
+   896→   896→              {deleting ? (
+   897→   897→                <>
+   898→   898→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+   899→   899→                  Deleting...
+   900→   900→                </>
+   901→   901→              ) : (
+   902→   902→                "Delete User"
+   903→   903→              )}
+   904→   904→            </AlertDialogAction>
+   905→   905→          </AlertDialogFooter>
+   906→   906→        </AlertDialogContent>
+   907→   907→      </AlertDialog>
+   908→   908→
+   909→   909→      {passwordTarget && (
+   910→   910→        <SetPasswordDialog
+   911→   911→          key={`pwd-${passwordTarget.id}`}
+   912→   912→          user={passwordTarget}
+   913→   913→          open={!!passwordTarget}
+   914→   914→          onOpenChange={(o) => !o && setPasswordTarget(null)}
+   915→   915→          onSaved={() => {
+   916→   916→            setPasswordTarget(null);
+   917→   917→            refresh();
+   918→   918→          }}
+   919→   919→        />
+   920→   920→      )}
+   921→   921→    </div>
+   922→   922→  );
+   923→   923→}
+   924→   924→
+   925→   925→// ─────────────────────────────────────────────────────────
+   926→   926→// User Form Dialog (Add/Edit)
+   927→   927→// ─────────────────────────────────────────────────────────
+   928→   928→interface UserFormProps {
+   929→   929→  open: boolean;
+   930→   930→  onOpenChange: (o: boolean) => void;
+   931→   931→  initial: UserProfile | null;
+   932→   932→  onSaved: () => void;
+   933→   933→}
+   934→   934→
+   935→   935→function UserFormDialog({ open, onOpenChange, initial, onSaved }: UserFormProps) {
+   936→   936→  const isEdit = !!initial;
+   937→   937→  const { toast } = useToast();
+   938→   938→  const [saving, setSaving] = useState(false);
+   939→   939→
+   940→   940→  const [username, setUsername] = useState(initial?.username ?? "");
+   941→   941→  const [displayName, setDisplayName] = useState(initial?.displayName ?? "");
+   942→   942→  const [email, setEmail] = useState(initial?.email ?? "");
+   943→   943→  const [role, setRole] = useState<string>(initial?.role ?? "Officer");
+   944→   944→  const [department, setDepartment] = useState<string>(
+   945→   945→    initial?.department ?? "CSLOG"
+   946→   946→  );
+   947→   947→  const [active, setActive] = useState<boolean>(initial?.active ?? true);
+   948→   948→
+   949→   949→  async function handleSubmit(e: React.FormEvent) {
+   950→   950→    e.preventDefault();
+   951→   951→    if (!username.trim() || !displayName.trim()) {
+   952→   952→      toast({
+   953→   953→        title: "Username and Display Name are required",
+   954→   954→        variant: "destructive",
+   955→   955→      });
+   956→   956→      return;
+   957→   957→    }
+   958→   958→    setSaving(true);
+   959→   959→    const body = {
+   960→   960→      username: username.trim(),
+   961→   961→      displayName: displayName.trim(),
+   962→   962→      email: email.trim() || null,
+   963→   963→      role,
+   964→   964→      department,
+   965→   965→      active,
+   966→   966→    };
+   967→   967→    const res = isEdit
+   968→   968→      ? await apiRequest(`/api/settings/users/${initial!.id}`, "PUT", body)
+   969→   969→      : await apiRequest("/api/settings/users", "POST", body);
+   970→   970→    setSaving(false);
+   971→   971→    if (res.ok) {
+   972→   972→      toast({
+   973→   973→        title: isEdit ? "User updated" : "User created",
+   974→   974→        description: body.displayName,
+   975→   975→      });
+   976→   976→      onSaved();
+   977→   977→    } else {
+   978→   978→      toast({
+   979→   979→        title: "Failed to save",
+   980→   980→        description: res.error,
+   981→   981→        variant: "destructive",
+   982→   982→      });
+   983→   983→    }
+   984→   984→  }
+   985→   985→
+   986→   986→  return (
+   987→   987→    <Dialog open={open} onOpenChange={onOpenChange}>
+   988→   988→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   989→   989→        <DialogHeader>
+   990→   990→          <DialogTitle className="flex items-center gap-2">
+   991→   991→            <UserCircle2 className="h-5 w-5 text-primary" />
+   992→   992→            {isEdit ? "Edit User Profile" : "Add User Profile"}
+   993→   993→          </DialogTitle>
+   994→   994→          <DialogDescription>
+   995→   995→            Configure login identity, role permissions and department
+   996→   996→            assignment.
+   997→   997→          </DialogDescription>
+   998→   998→        </DialogHeader>
+   999→   999→        <form onSubmit={handleSubmit} className="space-y-4">
+  1000→  1000→          <Field label="Username" required>
+  1001→  1001→            <Input
+  1002→  1002→              value={username}
+  1003→  1003→              onChange={(e) => setUsername(e.target.value)}
+  1004→  1004→              placeholder="e.g. rperera"
+  1005→  1005→              className="bg-background font-mono"
+  1006→  1006→              required
+  1007→  1007→            />
+  1008→  1008→          </Field>
+  1009→  1009→          <Field label="Display Name" required>
+  1010→  1010→            <Input
+  1011→  1011→              value={displayName}
+  1012→  1012→              onChange={(e) => setDisplayName(e.target.value)}
+  1013→  1013→              placeholder="e.g. Cdr. R. Perera"
+  1014→  1014→              className="bg-background"
+  1015→  1015→              required
+  1016→  1016→            />
+  1017→  1017→          </Field>
+  1018→  1018→          <Field label="Email">
+  1019→  1019→            <Input
+  1020→  1020→              type="email"
+  1021→  1021→              value={email}
+  1022→  1022→              onChange={(e) => setEmail(e.target.value)}
+  1023→  1023→              placeholder="name@navy.lk"
+  1024→  1024→              className="bg-background"
+  1025→  1025→            />
+  1026→  1026→          </Field>
+  1027→  1027→          <div className="grid grid-cols-2 gap-4">
+  1028→  1028→            <Field label="Role">
+  1029→  1029→              <Select value={role} onValueChange={setRole}>
+  1030→  1030→                <SelectTrigger className="bg-background">
+  1031→  1031→                  <SelectValue placeholder="Select role" />
+  1032→  1032→                </SelectTrigger>
+  1033→  1033→                <SelectContent>
+  1034→  1034→                  {USER_ROLES.map((r) => (
+  1035→  1035→                    <SelectItem key={r} value={r}>
+  1036→  1036→                      {r}
+  1037→  1037→                    </SelectItem>
+  1038→  1038→                  ))}
+  1039→  1039→                </SelectContent>
+  1040→  1040→              </Select>
+  1041→  1041→            </Field>
+  1042→  1042→            <Field label="Department">
+  1043→  1043→              <Select value={department} onValueChange={setDepartment}>
+  1044→  1044→                <SelectTrigger className="bg-background">
+  1045→  1045→                  <SelectValue placeholder="Select department" />
+  1046→  1046→                </SelectTrigger>
+  1047→  1047→                <SelectContent>
+  1048→  1048→                  {DEPARTMENTS.map((d) => (
+  1049→  1049→                    <SelectItem key={d} value={d}>
+  1050→  1050→                      {d}
+  1051→  1051→                    </SelectItem>
+  1052→  1052→                  ))}
+  1053→  1053→                </SelectContent>
+  1054→  1054→              </Select>
+  1055→  1055→            </Field>
+  1056→  1056→          </div>
+  1057→  1057→          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+  1058→  1058→            <Checkbox
+  1059→  1059→              id="user-active"
+  1060→  1060→              checked={active}
+  1061→  1061→              onCheckedChange={(v) => setActive(v === true)}
+  1062→  1062→            />
+  1063→  1063→            <div className="flex-1">
+  1064→  1064→              <Label htmlFor="user-active" className="text-sm font-medium cursor-pointer">
+  1065→  1065→                Active user
+  1066→  1066→              </Label>
+  1067→  1067→              <p className="text-xs text-muted-foreground">
+  1068→  1068→                Inactive users cannot sign in or perform actions.
+  1069→  1069→              </p>
+  1070→  1070→            </div>
+  1071→  1071→            <CustomBadge className={activeBadgeClass(active)}>
+  1072→  1072→              {active ? "Active" : "Inactive"}
+  1073→  1073→            </CustomBadge>
+  1074→  1074→          </div>
+  1075→  1075→          <DialogFooter>
+  1076→  1076→            <Button
+  1077→  1077→              type="button"
+  1078→  1078→              variant="outline"
+  1079→  1079→              onClick={() => onOpenChange(false)}
+  1080→  1080→              disabled={saving}
+  1081→  1081→            >
+  1082→  1082→              Cancel
+  1083→  1083→            </Button>
+  1084→  1084→            <Button type="submit" disabled={saving}>
+  1085→  1085→              {saving ? (
+  1086→  1086→                <>
+  1087→  1087→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1088→  1088→                  Saving...
+  1089→  1089→                </>
+  1090→  1090→              ) : (
+  1091→  1091→                <>
+  1092→  1092→                  <CheckCircle2 className="h-4 w-4 mr-1" />
+  1093→  1093→                  {isEdit ? "Save Changes" : "Create User"}
+  1094→  1094→                </>
+  1095→  1095→              )}
+  1096→  1096→            </Button>
+  1097→  1097→          </DialogFooter>
+  1098→  1098→        </form>
+  1099→  1099→      </DialogContent>
+  1100→  1100→    </Dialog>
+  1101→  1101→  );
+  1102→  1102→}
+  1103→  1103→
+  1104→  1104→// ─────────────────────────────────────────────────────────
+  1105→  1105→// Set Password Dialog (per user)
+  1106→  1106→// ─────────────────────────────────────────────────────────
+  1107→  1107→interface SetPasswordDialogProps {
+  1108→  1108→  user: UserProfile | null;
+  1109→  1109→  open: boolean;
+  1110→  1110→  onOpenChange: (o: boolean) => void;
+  1111→  1111→  onSaved: () => void;
+  1112→  1112→}
+  1113→  1113→
+  1114→  1114→function SetPasswordDialog({
+  1115→  1115→  user,
+  1116→  1116→  open,
+  1117→  1117→  onOpenChange,
+  1118→  1118→  onSaved,
+  1119→  1119→}: SetPasswordDialogProps) {
+  1120→  1120→  const { toast } = useToast();
+  1121→  1121→  const [password, setPassword] = useState("");
+  1122→  1122→  const [confirm, setConfirm] = useState("");
+  1123→  1123→  const [show, setShow] = useState(false);
+  1124→  1124→  const [saving, setSaving] = useState(false);
+  1125→  1125→
+  1126→  1126→  async function handleSubmit(e: React.FormEvent) {
+  1127→  1127→    e.preventDefault();
+  1128→  1128→    if (!user) return;
+  1129→  1129→    if (password.length < 4) {
+  1130→  1130→      toast({
+  1131→  1131→        title: "Password too short",
+  1132→  1132→        description: "Use at least 4 characters.",
+  1133→  1133→        variant: "destructive",
+  1134→  1134→      });
+  1135→  1135→      return;
+  1136→  1136→    }
+  1137→  1137→    if (password !== confirm) {
+  1138→  1138→      toast({
+  1139→  1139→        title: "Passwords do not match",
+  1140→  1140→        variant: "destructive",
+  1141→  1141→      });
+  1142→  1142→      return;
+  1143→  1143→    }
+  1144→  1144→    setSaving(true);
+  1145→  1145→    const res = await apiRequest("/api/auth/set-password", "POST", {
+  1146→  1146→      userId: user.id,
+  1147→  1147→      password,
+  1148→  1148→    });
+  1149→  1149→    setSaving(false);
+  1150→  1150→    if (res.ok) {
+  1151→  1151→      toast({
+  1152→  1152→        title: "Password set",
+  1153→  1153→        description: `${user.displayName} can now sign in.`,
+  1154→  1154→      });
+  1155→  1155→      onSaved();
+  1156→  1156→    } else {
+  1157→  1157→      toast({
+  1158→  1158→        title: "Failed to set password",
+  1159→  1159→        description: res.error,
+  1160→  1160→        variant: "destructive",
+  1161→  1161→      });
+  1162→  1162→    }
+  1163→  1163→  }
+  1164→  1164→
+  1165→  1165→  return (
+  1166→  1166→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1167→  1167→      <DialogContent className="sm:max-w-md">
+  1168→  1168→        <DialogHeader>
+  1169→  1169→          <DialogTitle className="flex items-center gap-2">
+  1170→  1170→            <KeyRound className="h-5 w-5 text-primary" />
+  1171→  1171→            Set Password
+  1172→  1172→          </DialogTitle>
+  1173→  1173→          <DialogDescription>
+  1174→  1174→            Set or reset the password for{" "}
+  1175→  1175→            <span className="font-semibold text-foreground">
+  1176→  1176→              {user?.displayName}
+  1177→  1177→            </span>{" "}
+  1178→  1178→            (<span className="font-mono">@{user?.username}</span>).
+  1179→  1179→          </DialogDescription>
+  1180→  1180→        </DialogHeader>
+  1181→  1181→        <form onSubmit={handleSubmit} className="space-y-4">
+  1182→  1182→          <Field label="New Password" required>
+  1183→  1183→            <div className="relative">
+  1184→  1184→              <Input
+  1185→  1185→                type={show ? "text" : "password"}
+  1186→  1186→                value={password}
+  1187→  1187→                onChange={(e) => setPassword(e.target.value)}
+  1188→  1188→                placeholder="Minimum 4 characters"
+  1189→  1189→                className="bg-background pr-10"
+  1190→  1190→                required
+  1191→  1191→                autoFocus
+  1192→  1192→              />
+  1193→  1193→              <button
+  1194→  1194→                type="button"
+  1195→  1195→                onClick={() => setShow((s) => !s)}
+  1196→  1196→                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+  1197→  1197→                aria-label={show ? "Hide password" : "Show password"}
+  1198→  1198→              >
+  1199→  1199→                {show ? (
+  1200→  1200→                  <EyeOff className="h-4 w-4" />
+  1201→  1201→                ) : (
+  1202→  1202→                  <Eye className="h-4 w-4" />
+  1203→  1203→                )}
+  1204→  1204→              </button>
+  1205→  1205→            </div>
+  1206→  1206→          </Field>
+  1207→  1207→          <Field label="Confirm Password" required>
+  1208→  1208→            <Input
+  1209→  1209→              type={show ? "text" : "password"}
+  1210→  1210→              value={confirm}
+  1211→  1211→              onChange={(e) => setConfirm(e.target.value)}
+  1212→  1212→              placeholder="Re-enter password"
+  1213→  1213→              className="bg-background"
+  1214→  1214→              required
+  1215→  1215→            />
+  1216→  1216→          </Field>
+  1217→  1217→          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300 flex items-start gap-2">
+  1218→  1218→            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+  1219→  1219→            <p>
+  1220→  1220→              This will overwrite any existing password for this user. The user
+  1221→  1221→              must use this new password to sign in.
+  1222→  1222→            </p>
+  1223→  1223→          </div>
+  1224→  1224→          <DialogFooter>
+  1225→  1225→            <Button
+  1226→  1226→              type="button"
+  1227→  1227→              variant="outline"
+  1228→  1228→              onClick={() => onOpenChange(false)}
+  1229→  1229→              disabled={saving}
+  1230→  1230→            >
+  1231→  1231→              Cancel
+  1232→  1232→            </Button>
+  1233→  1233→            <Button type="submit" disabled={saving}>
+  1234→  1234→              {saving ? (
+  1235→  1235→                <>
+  1236→  1236→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1237→  1237→                  Saving...
+  1238→  1238→                </>
+  1239→  1239→              ) : (
+  1240→  1240→                <>
+  1241→  1241→                  <KeyRound className="h-4 w-4 mr-1" />
+  1242→  1242→                  Set Password
+  1243→  1243→                </>
+  1244→  1244→              )}
+  1245→  1245→            </Button>
+  1246→  1246→          </DialogFooter>
+  1247→  1247→        </form>
+  1248→  1248→      </DialogContent>
+  1249→  1249→    </Dialog>
+  1250→  1250→  );
+  1251→  1251→}
+  1252→  1252→
+  1253→  1253→// ═════════════════════════════════════════════════════════
+  1254→  1254→// TAB 2 — Roles & Access
+  1255→  1255→// ═════════════════════════════════════════════════════════
+  1256→  1256→function RolesAccessTab() {
+  1257→  1257→  const roleDescriptions: {
+  1258→  1258→    role: string;
+  1259→  1259→    description: string;
+  1260→  1260→    icon: LucideIcon;
+  1261→  1261→  }[] = [
+  1262→  1262→    {
+  1263→  1263→      role: "Admin",
+  1264→  1264→      description:
+  1265→  1265→        "Full system control — manages users, settings and every module.",
+  1266→  1266→      icon: Crown,
+  1267→  1267→    },
+  1268→  1268→    {
+  1269→  1269→      role: "Manager",
+  1270→  1270→      description: "Approves and oversees operations across most modules.",
+  1271→  1271→      icon: UserCog,
+  1272→  1272→    },
+  1273→  1273→    {
+  1274→  1274→      role: "Officer",
+  1275→  1275→      description: "Edits operational records in assigned departments.",
+  1276→  1276→      icon: Shield,
+  1277→  1277→    },
+  1278→  1278→    {
+  1279→  1279→      role: "Clerk",
+  1280→  1280→      description:
+  1281→  1281→        "Creates and edits files, items and collection records.",
+  1282→  1282→      icon: ClipboardCheck,
+  1283→  1283→    },
+  1284→  1284→    {
+  1285→  1285→      role: "Viewer",
+  1286→  1286→      description: "Read-only access to dashboards and records.",
+  1287→  1287→      icon: Eye,
+  1288→  1288→    },
+  1289→  1289→  ];
+  1290→  1290→
+  1291→  1291→  return (
+  1292→  1292→    <div className="space-y-5">
+  1293→  1293→      {/* Header banner */}
+  1294→  1294→      <div className="bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent border border-violet-500/20 rounded-xl p-5 flex items-start gap-3">
+  1295→  1295→        <div className="h-12 w-12 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center shrink-0 ring-2 ring-violet-500/20">
+  1296→  1296→          <Shield className="h-6 w-6" />
+  1297→  1297→        </div>
+  1298→  1298→        <div>
+  1299→  1299→          <h2 className="text-xl font-bold text-foreground">
+  1300→  1300→            Roles &amp; Access Permissions
+  1301→  1301→          </h2>
+  1302→  1302→          <p className="text-sm text-muted-foreground mt-1">
+  1303→  1303→            The permission matrix below defines what each role can do across
+  1304→  1304→            every module of the CE Logistic Panel. This is a reference
+  1305→  1305→            configuration — admins assign roles to users in the User Profiles
+  1306→  1306→            tab.
+  1307→  1307→          </p>
+  1308→  1308→        </div>
+  1309→  1309→      </div>
+  1310→  1310→
+  1311→  1311→      {/* Role description cards */}
+  1312→  1312→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+  1313→  1313→        {roleDescriptions.map(({ role, description, icon: Icon }) => (
+  1314→  1314→          <div
+  1315→  1315→            key={role}
+  1316→  1316→            className="bg-card border border-border rounded-xl p-4 hover:border-primary/40 transition-all hover:-translate-y-0.5"
+  1317→  1317→          >
+  1318→  1318→            <div className="flex items-center gap-2 mb-2">
+  1319→  1319→              <div
+  1320→  1320→                className={cn(
+  1321→  1321→                  "h-8 w-8 rounded-md flex items-center justify-center",
+  1322→  1322→                  userRoleColor(role)
+  1323→  1323→                )}
+  1324→  1324→              >
+  1325→  1325→                <Icon className="h-4 w-4" />
+  1326→  1326→              </div>
+  1327→  1327→              <CustomBadge className={userRoleColor(role)}>{role}</CustomBadge>
+  1328→  1328→            </div>
+  1329→  1329→            <p className="text-xs text-muted-foreground leading-relaxed">
+  1330→  1330→              {description}
+  1331→  1331→            </p>
+  1332→  1332→          </div>
+  1333→  1333→        ))}
+  1334→  1334→      </div>
+  1335→  1335→
+  1336→  1336→      {/* Permission matrix */}
+  1337→  1337→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1338→  1338→        <div className="bg-gradient-to-r from-secondary/60 to-transparent border-b border-border p-4 flex items-center justify-between gap-3">
+  1339→  1339→          <div>
+  1340→  1340→            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+  1341→  1341→              <ListTree className="h-4 w-4 text-primary" />
+  1342→  1342→              Module Permission Matrix
+  1343→  1343→            </h3>
+  1344→  1344→            <p className="text-xs text-muted-foreground mt-0.5">
+  1345→  1345→              Read-only reference of role-based access control (RBAC) for the
+  1346→  1346→              ERP modules.
+  1347→  1347→            </p>
+  1348→  1348→          </div>
+  1349→  1349→          <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1350→  1350→            {ROLE_PERMISSIONS.length} modules × {USER_ROLES.length} roles
+  1351→  1351→          </CustomBadge>
+  1352→  1352→        </div>
+  1353→  1353→        <ScrollArea className="max-h-[60vh]">
+  1354→  1354→          <Table>
+  1355→  1355→            <TableHeader className="sticky top-0 bg-card z-10">
+  1356→  1356→              <TableRow className="border-border hover:bg-transparent">
+  1357→  1357→                <TableHead className="min-w-[180px]">Module</TableHead>
+  1358→  1358→                {USER_ROLES.map((role) => {
+  1359→  1359→                  const Icon = roleDescriptions.find((r) => r.role === role)
+  1360→  1360→                    ?.icon;
+  1361→  1361→                  return (
+  1362→  1362→                    <TableHead
+  1363→  1363→                      key={role}
+  1364→  1364→                      className="text-center min-w-[140px]"
+  1365→  1365→                    >
+  1366→  1366→                      <div className="flex flex-col items-center gap-1">
+  1367→  1367→                        <div
+  1368→  1368→                          className={cn(
+  1369→  1369→                            "h-7 w-7 rounded-md flex items-center justify-center",
+  1370→  1370→                            userRoleColor(role)
+  1371→  1371→                          )}
+  1372→  1372→                        >
+  1373→  1373→                          {Icon && <Icon className="h-3.5 w-3.5" />}
+  1374→  1374→                        </div>
+  1375→  1375→                        <span className="text-xs font-semibold">{role}</span>
+  1376→  1376→                      </div>
+  1377→  1377→                    </TableHead>
+  1378→  1378→                  );
+  1379→  1379→                })}
+  1380→  1380→              </TableRow>
+  1381→  1381→            </TableHeader>
+  1382→  1382→            <TableBody>
+  1383→  1383→              {ROLE_PERMISSIONS.map((row, idx) => (
+  1384→  1384→                <TableRow
+  1385→  1385→                  key={row.module}
+  1386→  1386→                  className={cn(
+  1387→  1387→                    "border-border transition-colors hover:bg-secondary/30",
+  1388→  1388→                    idx % 2 === 1 && "bg-secondary/10"
+  1389→  1389→                  )}
+  1390→  1390→                >
+  1391→  1391→                  <TableCell className="font-medium text-foreground">
+  1392→  1392→                    <div className="flex items-center gap-2">
+  1393→  1393→                      <div className="h-6 w-6 rounded bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
+  1394→  1394→                        {idx + 1}
+  1395→  1395→                      </div>
+  1396→  1396→                      {row.module}
+  1397→  1397→                    </div>
+  1398→  1398→                  </TableCell>
+  1399→  1399→                  <TableCell className="text-center">
+  1400→  1400→                    <PermissionBadge value={row.admin} />
+  1401→  1401→                  </TableCell>
+  1402→  1402→                  <TableCell className="text-center">
+  1403→  1403→                    <PermissionBadge value={row.manager} />
+  1404→  1404→                  </TableCell>
+  1405→  1405→                  <TableCell className="text-center">
+  1406→  1406→                    <PermissionBadge value={row.officer} />
+  1407→  1407→                  </TableCell>
+  1408→  1408→                  <TableCell className="text-center">
+  1409→  1409→                    <PermissionBadge value={row.clerk} />
+  1410→  1410→                  </TableCell>
+  1411→  1411→                  <TableCell className="text-center">
+  1412→  1412→                    <PermissionBadge value={row.viewer} />
+  1413→  1413→                  </TableCell>
+  1414→  1414→                </TableRow>
+  1415→  1415→              ))}
+  1416→  1416→            </TableBody>
+  1417→  1417→          </Table>
+  1418→  1418→        </ScrollArea>
+  1419→  1419→      </div>
+  1420→  1420→
+  1421→  1421→      {/* Legend */}
+  1422→  1422→      <div className="bg-card border border-border rounded-xl p-4">
+  1423→  1423→        <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-2">
+  1424→  1424→          <Info className="h-4 w-4 text-primary" />
+  1425→  1425→          Legend
+  1426→  1426→        </p>
+  1427→  1427→        <div className="flex flex-wrap gap-3">
+  1428→  1428→          <CustomBadge className={permissionColor("Full")}>
+  1429→  1429→            <CheckCircle2 className="h-3 w-3 mr-1" />
+  1430→  1430→            Full Access
+  1431→  1431→          </CustomBadge>
+  1432→  1432→          <CustomBadge className={permissionColor("Edit")}>
+  1433→  1433→            <Pencil className="h-3 w-3 mr-1" />
+  1434→  1434→            Edit / Create
+  1435→  1435→          </CustomBadge>
+  1436→  1436→          <CustomBadge className={permissionColor("View")}>
+  1437→  1437→            <Eye className="h-3 w-3 mr-1" />
+  1438→  1438→            View Only
+  1439→  1439→          </CustomBadge>
+  1440→  1440→          <CustomBadge className={permissionColor("—")}>
+  1441→  1441→            <XCircle className="h-3 w-3 mr-1" />
+  1442→  1442→            No Access
+  1443→  1443→          </CustomBadge>
+  1444→  1444→        </div>
+  1445→  1445→      </div>
+  1446→  1446→    </div>
+  1447→  1447→  );
+  1448→  1448→}
+  1449→  1449→
+  1450→  1450→function PermissionBadge({ value }: { value: string }) {
+  1451→  1451→  return (
+  1452→  1452→    <CustomBadge className={cn("text-xs", permissionColor(value))}>
+  1453→  1453→      {value === "—" ? (
+  1454→  1454→        <XCircle className="h-3 w-3 mr-1" />
+  1455→  1455→      ) : value === "Full" ? (
+  1456→  1456→        <CheckCircle2 className="h-3 w-3 mr-1" />
+  1457→  1457→      ) : value === "View" ? (
+  1458→  1458→        <Eye className="h-3 w-3 mr-1" />
+  1459→  1459→      ) : (
+  1460→  1460→        <Pencil className="h-3 w-3 mr-1" />
+  1461→  1461→      )}
+  1462→  1462→      {value}
+  1463→  1463→    </CustomBadge>
+  1464→  1464→  );
+  1465→  1465→}
+  1466→  1466→
+  1467→  1467→// ═════════════════════════════════════════════════════════
+  1468→  1468→// TAB 3 — Authentication
+  1469→  1469→// ═════════════════════════════════════════════════════════
+  1470→  1470→function AuthenticationTab() {
+  1471→  1471→  const { toast } = useToast();
+  1472→  1472→  const [loginUsername, setLoginUsername] = useState("");
+  1473→  1473→  const [loginPassword, setLoginPassword] = useState("");
+  1474→  1474→  const [loginLoading, setLoginLoading] = useState(false);
+  1475→  1475→  const [loginResult, setLoginResult] = useState<
+  1476→  1476→    | { ok: boolean; user?: SessionUser; error?: string }
+  1477→  1477→    | null
+  1478→  1478→  >(null);
+  1479→  1479→
+  1480→  1480→  const {
+  1481→  1481→    data: session,
+  1482→  1482→    loading: sessionLoading,
+  1483→  1483→    refresh: refreshSession,
+  1484→  1484→  } = useFetch<SessionResponse>("/api/auth/session");
+  1485→  1485→  const {
+  1486→  1486→    data: users,
+  1487→  1487→    loading: usersLoading,
+  1488→  1488→    error: usersError,
+  1489→  1489→    refresh: refreshUsers,
+  1490→  1490→  } = useFetch<UserProfile[]>("/api/settings/users");
+  1491→  1491→
+  1492→  1492→  const [passwordTarget, setPasswordTarget] = useState<UserProfile | null>(
+  1493→  1493→    null
+  1494→  1494→  );
+  1495→  1495→
+  1496→  1496→  const defaultCredentials = [
+  1497→  1497→    { u: "rperera", p: "admin123", role: "Admin" },
+  1498→  1498→    { u: "tjaya", p: "manager123", role: "Manager" },
+  1499→  1499→    { u: "mfernando", p: "officer123", role: "Officer" },
+  1500→  1500→    { u: "pbandara", p: "clerk123", role: "Clerk" },
+  1501→  1501→  ];
+  1502→  1502→
+  1503→  1503→  async function handleLogin(e: React.FormEvent) {
+  1504→  1504→    e.preventDefault();
+  1505→  1505→    if (!loginUsername.trim() || !loginPassword) {
+  1506→  1506→      toast({
+  1507→  1507→        title: "Username and password are required",
+  1508→  1508→        variant: "destructive",
+  1509→  1509→      });
+  1510→  1510→      return;
+  1511→  1511→    }
+  1512→  1512→    setLoginLoading(true);
+  1513→  1513→    setLoginResult(null);
+  1514→  1514→    const res = await apiRequest("/api/auth/login", "POST", {
+  1515→  1515→      username: loginUsername.trim(),
+  1516→  1516→      password: loginPassword,
+  1517→  1517→    });
+  1518→  1518→    setLoginLoading(false);
+  1519→  1519→    if (res.ok) {
+  1520→  1520→      const data = res.data as { ok: boolean; user: SessionUser };
+  1521→  1521→      setLoginResult({ ok: true, user: data.user });
+  1522→  1522→      toast({
+  1523→  1523→        title: "Login successful",
+  1524→  1524→        description: `${data.user.displayName} (${data.user.role})`,
+  1525→  1525→      });
+  1526→  1526→      refreshSession();
+  1527→  1527→    } else {
+  1528→  1528→      setLoginResult({ ok: false, error: res.error });
+  1529→  1529→      toast({
+  1530→  1530→        title: "Login failed",
+  1531→  1531→        description: res.error,
+  1532→  1532→        variant: "destructive",
+  1533→  1533→      });
+  1534→  1534→    }
+  1535→  1535→  }
+  1536→  1536→
+  1537→  1537→  async function handleLogout() {
+  1538→  1538→    const res = await apiRequest("/api/auth/logout", "POST");
+  1539→  1539→    if (res.ok) {
+  1540→  1540→      toast({ title: "Logged out" });
+  1541→  1541→      refreshSession();
+  1542→  1542→    } else {
+  1543→  1543→      toast({
+  1544→  1544→        title: "Logout failed",
+  1545→  1545→        description: res.error,
+  1546→  1546→        variant: "destructive",
+  1547→  1547→      });
+  1548→  1548→    }
+  1549→  1549→  }
+  1550→  1550→
+  1551→  1551→  const securedCount = users?.filter((u) => u.passwordHash).length ?? 0;
+  1552→  1552→
+  1553→  1553→  return (
+  1554→  1554→    <div className="space-y-5">
+  1555→  1555→      {/* Default credentials info card */}
+  1556→  1556→      <div className="bg-gradient-to-r from-blue-500/10 via-cyan-500/5 to-transparent border border-blue-500/20 rounded-xl p-5">
+  1557→  1557→        <div className="flex items-start gap-3">
+  1558→  1558→          <div className="h-11 w-11 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0 ring-2 ring-blue-500/20">
+  1559→  1559→            <Info className="h-6 w-6" />
+  1560→  1560→          </div>
+  1561→  1561→          <div className="flex-1 min-w-0">
+  1562→  1562→            <h3 className="text-base font-semibold text-foreground">
+  1563→  1563→              Authentication Overview
+  1564→  1564→            </h3>
+  1565→  1565→            <p className="text-sm text-muted-foreground mt-1">
+  1566→  1566→              Users must have a password set to authenticate. Use the Set
+  1567→  1567→              Password action to assign credentials. Below are the default
+  1568→  1568→              seeded credentials:
+  1569→  1569→            </p>
+  1570→  1570→            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+  1571→  1571→              {defaultCredentials.map((c) => (
+  1572→  1572→                <div
+  1573→  1573→                  key={c.u}
+  1574→  1574→                  className="bg-card/60 border border-border rounded-lg p-2.5"
+  1575→  1575→                >
+  1576→  1576→                  <div className="flex items-center justify-between mb-1">
+  1577→  1577→                    <span className="font-mono text-sm text-foreground">
+  1578→  1578→                      {c.u}
+  1579→  1579→                    </span>
+  1580→  1580→                    <CustomBadge className={userRoleColor(c.role)}>
+  1581→  1581→                      {c.role}
+  1582→  1582→                    </CustomBadge>
+  1583→  1583→                  </div>
+  1584→  1584→                  <p className="text-xs text-muted-foreground font-mono">
+  1585→  1585→                    pwd: {c.p}
+  1586→  1586→                  </p>
+  1587→  1587→                </div>
+  1588→  1588→              ))}
+  1589→  1589→            </div>
+  1590→  1590→          </div>
+  1591→  1591→        </div>
+  1592→  1592→      </div>
+  1593→  1593→
+  1594→  1594→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  1595→  1595→        {/* Login test panel */}
+  1596→  1596→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1597→  1597→          <div className="bg-gradient-to-r from-emerald-500/10 to-transparent border-b border-border p-4 flex items-center gap-2">
+  1598→  1598→            <div className="h-9 w-9 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+  1599→  1599→              <LogIn className="h-5 w-5" />
+  1600→  1600→            </div>
+  1601→  1601→            <div>
+  1602→  1602→              <h3 className="text-sm font-semibold text-foreground">
+  1603→  1603→                Login Test Panel
+  1604→  1604→              </h3>
+  1605→  1605→              <p className="text-xs text-muted-foreground">
+  1606→  1606→                Verify credentials and create a session
+  1607→  1607→              </p>
+  1608→  1608→            </div>
+  1609→  1609→          </div>
+  1610→  1610→          <form onSubmit={handleLogin} className="p-5 space-y-4">
+  1611→  1611→            <Field label="Username" required>
+  1612→  1612→              <Input
+  1613→  1613→                value={loginUsername}
+  1614→  1614→                onChange={(e) => setLoginUsername(e.target.value)}
+  1615→  1615→                placeholder="e.g. rperera"
+  1616→  1616→                className="bg-background font-mono"
+  1617→  1617→                required
+  1618→  1618→              />
+  1619→  1619→            </Field>
+  1620→  1620→            <Field label="Password" required>
+  1621→  1621→              <Input
+  1622→  1622→                type="password"
+  1623→  1623→                value={loginPassword}
+  1624→  1624→                onChange={(e) => setLoginPassword(e.target.value)}
+  1625→  1625→                placeholder="Enter password"
+  1626→  1626→                className="bg-background"
+  1627→  1627→                required
+  1628→  1628→              />
+  1629→  1629→            </Field>
+  1630→  1630→            <Button type="submit" disabled={loginLoading} className="w-full">
+  1631→  1631→              {loginLoading ? (
+  1632→  1632→                <>
+  1633→  1633→                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+  1634→  1634→                  Authenticating...
+  1635→  1635→                </>
+  1636→  1636→              ) : (
+  1637→  1637→                <>
+  1638→  1638→                  <LogIn className="h-4 w-4 mr-1" />
+  1639→  1639→                  Test Login
+  1640→  1640→                </>
+  1641→  1641→              )}
+  1642→  1642→            </Button>
+  1643→  1643→            {loginResult && (
+  1644→  1644→              <div
+  1645→  1645→                className={cn(
+  1646→  1646→                  "rounded-lg border p-3 flex items-start gap-2",
+  1647→  1647→                  loginResult.ok
+  1648→  1648→                    ? "border-emerald-500/30 bg-emerald-500/5"
+  1649→  1649→                    : "border-red-500/30 bg-red-500/5"
+  1650→  1650→                )}
+  1651→  1651→              >
+  1652→  1652→                {loginResult.ok ? (
+  1653→  1653→                  <>
+  1654→  1654→                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+  1655→  1655→                    <div className="text-sm">
+  1656→  1656→                      <p className="font-semibold text-emerald-400">
+  1657→  1657→                        Login successful
+  1658→  1658→                      </p>
+  1659→  1659→                      <p className="text-muted-foreground">
+  1660→  1660→                        {loginResult.user?.displayName} (
+  1661→  1661→                        {loginResult.user?.username}) — {loginResult.user?.role}
+  1662→  1662→                      </p>
+  1663→  1663→                    </div>
+  1664→  1664→                  </>
+  1665→  1665→                ) : (
+  1666→  1666→                  <>
+  1667→  1667→                    <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+  1668→  1668→                    <div className="text-sm">
+  1669→  1669→                      <p className="font-semibold text-red-400">
+  1670→  1670→                        Login failed
+  1671→  1671→                      </p>
+  1672→  1672→                      <p className="text-muted-foreground">
+  1673→  1673→                        {loginResult.error}
+  1674→  1674→                      </p>
+  1675→  1675→                    </div>
+  1676→  1676→                  </>
+  1677→  1677→                )}
+  1678→  1678→              </div>
+  1679→  1679→            )}
+  1680→  1680→          </form>
+  1681→  1681→        </div>
+  1682→  1682→
+  1683→  1683→        {/* Current session */}
+  1684→  1684→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1685→  1685→          <div className="bg-gradient-to-r from-violet-500/10 to-transparent border-b border-border p-4 flex items-center justify-between gap-2">
+  1686→  1686→            <div className="flex items-center gap-2">
+  1687→  1687→              <div className="h-9 w-9 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center">
+  1688→  1688→                <Fingerprint className="h-5 w-5" />
+  1689→  1689→              </div>
+  1690→  1690→              <div>
+  1691→  1691→                <h3 className="text-sm font-semibold text-foreground">
+  1692→  1692→                  Current Session
+  1693→  1693→                </h3>
+  1694→  1694→                <p className="text-xs text-muted-foreground">
+  1695→  1695→                  Active session on this client
+  1696→  1696→                </p>
+  1697→  1697→              </div>
+  1698→  1698→            </div>
+  1699→  1699→            {session?.authenticated && (
+  1700→  1700→              <Button
+  1701→  1701→                variant="outline"
+  1702→  1702→                size="sm"
+  1703→  1703→                onClick={handleLogout}
+  1704→  1704→                className="text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30"
+  1705→  1705→              >
+  1706→  1706→                <LogOut className="h-3.5 w-3.5 mr-1" />
+  1707→  1707→                Logout
+  1708→  1708→              </Button>
+  1709→  1709→            )}
+  1710→  1710→          </div>
+  1711→  1711→          <div className="p-5">
+  1712→  1712→            {sessionLoading ? (
+  1713→  1713→              <div className="flex items-center justify-center py-8">
+  1714→  1714→                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+  1715→  1715→              </div>
+  1716→  1716→            ) : session?.authenticated && session.user ? (
+  1717→  1717→              <div className="space-y-3">
+  1718→  1718→                <div className="flex items-center gap-3 pb-3 border-b border-border">
+  1719→  1719→                  <div className="h-12 w-12 rounded-full bg-primary/15 text-primary flex items-center justify-center text-base font-bold">
+  1720→  1720→                    {session.user.username.slice(0, 2).toUpperCase()}
+  1721→  1721→                  </div>
+  1722→  1722→                  <div className="min-w-0">
+  1723→  1723→                    <p className="text-base font-semibold text-foreground truncate">
+  1724→  1724→                      {session.user.displayName}
+  1725→  1725→                    </p>
+  1726→  1726→                    <p className="text-xs text-muted-foreground font-mono">
+  1727→  1727→                      @{session.user.username}
+  1728→  1728→                    </p>
+  1729→  1729→                  </div>
+  1730→  1730→                  <CustomBadge
+  1731→  1731→                    className={cn(
+  1732→  1732→                      "ml-auto shrink-0",
+  1733→  1733→                      userRoleColor(session.user.role)
+  1734→  1734→                    )}
+  1735→  1735→                  >
+  1736→  1736→                    <Shield className="h-3 w-3 mr-1" />
+  1737→  1737→                    {session.user.role}
+  1738→  1738→                  </CustomBadge>
+  1739→  1739→                </div>
+  1740→  1740→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+  1741→  1741→                  <div className="bg-secondary/40 rounded-lg p-2.5">
+  1742→  1742→                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1743→  1743→                      User ID
+  1744→  1744→                    </p>
+  1745→  1745→                    <p className="text-xs font-mono text-foreground truncate">
+  1746→  1746→                      {session.user.id}
+  1747→  1747→                    </p>
+  1748→  1748→                  </div>
+  1749→  1749→                  <div className="bg-secondary/40 rounded-lg p-2.5">
+  1750→  1750→                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1751→  1751→                      Department
+  1752→  1752→                    </p>
+  1753→  1753→                    <p className="text-sm text-foreground">
+  1754→  1754→                      {session.user.department || "—"}
+  1755→  1755→                    </p>
+  1756→  1756→                  </div>
+  1757→  1757→                </div>
+  1758→  1758→                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
+  1759→  1759→                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+  1760→  1760→                  Session is active. Cookie-based session valid for 24 hours.
+  1761→  1761→                </div>
+  1762→  1762→              </div>
+  1763→  1763→            ) : (
+  1764→  1764→              <div className="flex flex-col items-center justify-center py-8 text-center">
+  1765→  1765→                <div className="h-12 w-12 rounded-full bg-amber-500/10 flex items-center justify-center mb-3">
+  1766→  1766→                  <Lock className="h-6 w-6 text-amber-400" />
+  1767→  1767→                </div>
+  1768→  1768→                <p className="text-sm font-semibold text-foreground">
+  1769→  1769→                  Not authenticated
+  1770→  1770→                </p>
+  1771→  1771→                <p className="text-xs text-muted-foreground mt-1">
+  1772→  1772→                  Use the Login Test Panel to start a session.
+  1773→  1773→                </p>
+  1774→  1774→              </div>
+  1775→  1775→            )}
+  1776→  1776→          </div>
+  1777→  1777→        </div>
+  1778→  1778→      </div>
+  1779→  1779→
+  1780→  1780→      {/* Users password status list */}
+  1781→  1781→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1782→  1782→        <div className="bg-gradient-to-r from-blue-500/10 to-transparent border-b border-border p-4 flex items-center justify-between gap-2">
+  1783→  1783→          <div className="flex items-center gap-2">
+  1784→  1784→            <div className="h-9 w-9 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center">
+  1785→  1785→              <KeyRound className="h-5 w-5" />
+  1786→  1786→            </div>
+  1787→  1787→            <div>
+  1788→  1788→              <h3 className="text-sm font-semibold text-foreground">
+  1789→  1789→                User Password Status
+  1790→  1790→              </h3>
+  1791→  1791→              <p className="text-xs text-muted-foreground">
+  1792→  1792→                Quick set or reset password for any user
+  1793→  1793→              </p>
+  1794→  1794→            </div>
+  1795→  1795→          </div>
+  1796→  1796→          <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1797→  1797→            {securedCount} / {users?.length ?? 0} secured
+  1798→  1798→          </CustomBadge>
+  1799→  1799→        </div>
+  1800→  1800→        {usersLoading ? (
+  1801→  1801→          <LoadingState label="Loading users..." />
+  1802→  1802→        ) : usersError ? (
+  1803→  1803→          <ErrorState message={usersError} />
+  1804→  1804→        ) : users && users.length > 0 ? (
+  1805→  1805→          <ScrollArea className="max-h-[60vh]">
+  1806→  1806→            <Table>
+  1807→  1807→              <TableHeader className="sticky top-0 bg-card z-10">
+  1808→  1808→                <TableRow className="border-border hover:bg-transparent">
+  1809→  1809→                  <TableHead className="w-[40px]">Sr</TableHead>
+  1810→  1810→                  <TableHead>User</TableHead>
+  1811→  1811→                  <TableHead>Role</TableHead>
+  1812→  1812→                  <TableHead>Password</TableHead>
+  1813→  1813→                  <TableHead>Status</TableHead>
+  1814→  1814→                  <TableHead className="text-right">Action</TableHead>
+  1815→  1815→                </TableRow>
+  1816→  1816→              </TableHeader>
+  1817→  1817→              <TableBody>
+  1818→  1818→                {users.map((u, idx) => {
+  1819→  1819→                  const hasPassword = !!u.passwordHash;
+  1820→  1820→                  return (
+  1821→  1821→                    <TableRow
+  1822→  1822→                      key={u.id}
+  1823→  1823→                      className="border-border hover:bg-secondary/30 transition-colors"
+  1824→  1824→                    >
+  1825→  1825→                      <TableCell className="text-xs text-muted-foreground">
+  1826→  1826→                        {idx + 1}
+  1827→  1827→                      </TableCell>
+  1828→  1828→                      <TableCell>
+  1829→  1829→                        <div className="flex items-center gap-2">
+  1830→  1830→                          <div className="h-7 w-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-semibold">
+  1831→  1831→                            {u.username.slice(0, 2).toUpperCase()}
+  1832→  1832→                          </div>
+  1833→  1833→                          <div>
+  1834→  1834→                            <p className="font-medium text-foreground text-sm">
+  1835→  1835→                              {u.displayName}
+  1836→  1836→                            </p>
+  1837→  1837→                            <p className="text-xs text-muted-foreground font-mono">
+  1838→  1838→                              @{u.username}
+  1839→  1839→                            </p>
+  1840→  1840→                          </div>
+  1841→  1841→                        </div>
+  1842→  1842→                      </TableCell>
+  1843→  1843→                      <TableCell>
+  1844→  1844→                        <CustomBadge className={userRoleColor(u.role)}>
+  1845→  1845→                          <Shield className="h-3 w-3 mr-1" />
+  1846→  1846→                          {u.role}
+  1847→  1847→                        </CustomBadge>
+  1848→  1848→                      </TableCell>
+  1849→  1849→                      <TableCell>
+  1850→  1850→                        <CustomBadge
+  1851→  1851→                          className={
+  1852→  1852→                            hasPassword
+  1853→  1853→                              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+  1854→  1854→                              : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+  1855→  1855→                          }
+  1856→  1856→                        >
+  1857→  1857→                          {hasPassword ? (
+  1858→  1858→                            <>
+  1859→  1859→                              <Lock className="h-3 w-3 mr-1" />
+  1860→  1860→                              Password Set
+  1861→  1861→                            </>
+  1862→  1862→                          ) : (
+  1863→  1863→                            <>
+  1864→  1864→                              <Unlock className="h-3 w-3 mr-1" />
+  1865→  1865→                              No Password
+  1866→  1866→                            </>
+  1867→  1867→                          )}
+  1868→  1868→                        </CustomBadge>
+  1869→  1869→                      </TableCell>
+  1870→  1870→                      <TableCell>
+  1871→  1871→                        <CustomBadge className={activeBadgeClass(u.active)}>
+  1872→  1872→                          {u.active ? (
+  1873→  1873→                            <>
+  1874→  1874→                              <CheckCircle2 className="h-3 w-3 mr-1" />
+  1875→  1875→                              Active
+  1876→  1876→                            </>
+  1877→  1877→                          ) : (
+  1878→  1878→                            <>
+  1879→  1879→                              <XCircle className="h-3 w-3 mr-1" />
+  1880→  1880→                              Inactive
+  1881→  1881→                            </>
+  1882→  1882→                          )}
+  1883→  1883→                        </CustomBadge>
+  1884→  1884→                      </TableCell>
+  1885→  1885→                      <TableCell className="text-right">
+  1886→  1886→                        <Button
+  1887→  1887→                          variant="outline"
+  1888→  1888→                          size="sm"
+  1889→  1889→                          onClick={() => setPasswordTarget(u)}
+  1890→  1890→                        >
+  1891→  1891→                          <KeyRound className="h-3.5 w-3.5 mr-1" />
+  1892→  1892→                          Set Password
+  1893→  1893→                        </Button>
+  1894→  1894→                      </TableCell>
+  1895→  1895→                    </TableRow>
+  1896→  1896→                  );
+  1897→  1897→                })}
+  1898→  1898→              </TableBody>
+  1899→  1899→            </Table>
+  1900→  1900→          </ScrollArea>
+  1901→  1901→        ) : (
+  1902→  1902→          <EmptyState
+  1903→  1903→            icon={Users}
+  1904→  1904→            title="No users found"
+  1905→  1905→            description="Create users in the User Profiles tab first."
+  1906→  1906→          />
+  1907→  1907→        )}
+  1908→  1908→      </div>
+  1909→  1909→
+  1910→  1910→      {passwordTarget && (
+  1911→  1911→        <SetPasswordDialog
+  1912→  1912→          key={`pwd-${passwordTarget.id}`}
+  1913→  1913→          user={passwordTarget}
+  1914→  1914→          open={!!passwordTarget}
+  1915→  1915→          onOpenChange={(o) => !o && setPasswordTarget(null)}
+  1916→  1916→          onSaved={() => {
+  1917→  1917→            setPasswordTarget(null);
+  1918→  1918→            refreshUsers();
+  1919→  1919→          }}
+  1920→  1920→        />
+  1921→  1921→      )}
+  1922→  1922→    </div>
+  1923→  1923→  );
+  1924→  1924→}
+  1925→  1925→
+  1926→  1926→// ═════════════════════════════════════════════════════════
+  1927→  1927→// TAB 4 — Vote Management
+  1928→  1928→// ═════════════════════════════════════════════════════════
+  1929→  1929→function VoteManagementTab() {
+  1930→  1930→  const { data: list, loading, error, refresh } = useFetch<Vote[]>(
+  1931→  1931→    "/api/votes"
+  1932→  1932→  );
+  1933→  1933→  const { toast } = useToast();
+  1934→  1934→
+  1935→  1935→  const [addOpen, setAddOpen] = useState(false);
+  1936→  1936→  const [editTarget, setEditTarget] = useState<Vote | null>(null);
+  1937→  1937→  const [deleteTarget, setDeleteTarget] = useState<Vote | null>(null);
+  1938→  1938→  const [deleting, setDeleting] = useState(false);
+  1939→  1939→
+  1940→  1940→  const stats = useMemo(() => {
+  1941→  1941→    const votes = list ?? [];
+  1942→  1942→    const capital = votes.filter((v) => v.voteType === "Capital");
+  1943→  1943→    const recurring = votes.filter((v) => v.voteType === "Recurring");
+  1944→  1944→    const totalAllocation = votes.reduce(
+  1945→  1945→      (acc, v) => acc + (v.allocation ?? 0),
+  1946→  1946→      0
+  1947→  1947→    );
+  1948→  1948→    return {
+  1949→  1949→      total: votes.length,
+  1950→  1950→      capital: capital.length,
+  1951→  1951→      recurring: recurring.length,
+  1952→  1952→      totalAllocation,
+  1953→  1953→    };
+  1954→  1954→  }, [list]);
+  1955→  1955→
+  1956→  1956→  async function handleDelete() {
+  1957→  1957→    if (!deleteTarget) return;
+  1958→  1958→    setDeleting(true);
+  1959→  1959→    const res = await apiRequest(`/api/votes/${deleteTarget.id}`, "DELETE");
+  1960→  1960→    setDeleting(false);
+  1961→  1961→    if (res.ok) {
+  1962→  1962→      toast({
+  1963→  1963→        title: "Vote deleted",
+  1964→  1964→        description: deleteTarget.voteNumber,
+  1965→  1965→      });
+  1966→  1966→      setDeleteTarget(null);
+  1967→  1967→      refresh();
+  1968→  1968→    } else {
+  1969→  1969→      toast({
+  1970→  1970→        title: "Failed to delete",
+  1971→  1971→        description: res.error,
+  1972→  1972→        variant: "destructive",
+  1973→  1973→      });
+  1974→  1974→    }
+  1975→  1975→  }
+  1976→  1976→
+  1977→  1977→  if (loading) return <LoadingState label="Loading votes..." />;
+  1978→  1978→  if (error) return <ErrorState message={error} />;
+  1979→  1979→
+  1980→  1980→  const votes = list ?? [];
+  1981→  1981→
+  1982→  1982→  return (
+  1983→  1983→    <div className="space-y-5">
+  1984→  1984→      {/* Stat cards (custom gradient cards) */}
+  1985→  1985→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  1986→  1986→        <div className="bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 rounded-xl p-4 flex items-start gap-3 hover:from-blue-500/15 hover:to-blue-500/10 transition-all">
+  1987→  1987→          <div className="h-10 w-10 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center shrink-0">
+  1988→  1988→            <Vote className="h-5 w-5" />
+  1989→  1989→          </div>
+  1990→  1990→          <div className="min-w-0">
+  1991→  1991→            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+  1992→  1992→              Total Votes
+  1993→  1993→            </p>
+  1994→  1994→            <p className="text-2xl font-bold text-foreground mt-0.5">
+  1995→  1995→              {stats.total}
+  1996→  1996→            </p>
+  1997→  1997→            <p className="text-xs text-muted-foreground">All configured</p>
+  1998→  1998→          </div>
+  1999→  1999→        </div>
+  2000→  2000→        <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/20 rounded-xl p-4 flex items-start gap-3 hover:from-blue-500/15 hover:to-cyan-500/10 transition-all">
+
+[showing lines 1-2000 of 2002; use offset=2001 with limit to continue reading]

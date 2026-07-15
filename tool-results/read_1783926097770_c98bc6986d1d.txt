@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  AlertDialog,
+    19→  AlertDialogContent,
+    20→  AlertDialogHeader,
+    21→  AlertDialogFooter,
+    22→  AlertDialogTitle,
+    23→  AlertDialogDescription,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→} from "@/components/ui/alert-dialog";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Input } from "@/components/ui/input";
+    29→import { Label } from "@/components/ui/label";
+    30→import { Textarea } from "@/components/ui/textarea";
+    31→import { Progress } from "@/components/ui/progress";
+    32→import { Slider } from "@/components/ui/slider";
+    33→import {
+    34→  Select,
+    35→  SelectContent,
+    36→  SelectItem,
+    37→  SelectTrigger,
+    38→  SelectValue,
+    39→} from "@/components/ui/select";
+    40→import {
+    41→  Table,
+    42→  TableHeader,
+    43→  TableBody,
+    44→  TableHead,
+    45→  TableRow,
+    46→  TableCell,
+    47→} from "@/components/ui/table";
+    48→import { useToast } from "@/hooks/use-toast";
+    49→import {
+    50→  CSLOG_APPOINTMENTS,
+    51→  CE_APPOINTMENTS,
+    52→  STAKEHOLDER_DEPARTMENTS,
+    53→  STAKEHOLDER_ROLES,
+    54→  AVAILABILITY_STATUSES,
+    55→  availabilityColor,
+    56→  departmentColor,
+    57→  ratingColor,
+    58→  ratingLabel,
+    59→} from "@/lib/constants";
+    60→import { cn } from "@/lib/utils";
+    61→import {
+    62→  Users,
+    63→  User,
+    64→  Phone,
+    65→  MessageCircle,
+    66→  Mail,
+    67→  Building2,
+    68→  Star,
+    69→  Plus,
+    70→  Pencil,
+    71→  Trash2,
+    72→  Eye,
+    73→  ShieldCheck,
+    74→  Award,
+    75→  Loader2,
+    76→  Search,
+    77→  Filter,
+    78→  X,
+    79→  Anchor,
+    80→  Wrench,
+    81→  Briefcase,
+    82→  ClipboardList,
+    83→  Contact,
+    84→  TrendingUp,
+    85→  AlertTriangle,
+    86→  StickyNote,
+    87→  PhoneCall,
+    88→  IdCard,
+    89→  ChevronRight,
+    90→} from "lucide-react";
+    91→import {
+    92→  BarChart,
+    93→  Bar,
+    94→  XAxis,
+    95→  YAxis,
+    96→  Tooltip,
+    97→  ResponsiveContainer,
+    98→  Cell,
+    99→  CartesianGrid,
+   100→} from "recharts";
+   101→
+   102→// ─────────────────────────────────────────────────────────
+   103→// Types
+   104→// ─────────────────────────────────────────────────────────
+   105→interface Stakeholder {
+   106→  id: string;
+   107→  name: string;
+   108→  rankOrRate: string | null;
+   109→  svcNumber: string | null;
+   110→  appointment: string | null;
+   111→  department: string;
+   112→  officeNumber: string | null;
+   113→  telephone: string | null;
+   114→  whatsapp: string | null;
+   115→  email: string | null;
+   116→  availability: string;
+   117→  role: string;
+   118→  createdAt: string;
+   119→  updatedAt: string;
+   120→}
+   121→
+   122→interface SupplierContact {
+   123→  id: string;
+   124→  supplierId: string;
+   125→  name: string;
+   126→  designation: string | null;
+   127→  telephone: string | null;
+   128→  whatsapp: string | null;
+   129→  email: string | null;
+   130→  isPrimary: boolean;
+   131→  createdAt: string;
+   132→}
+   133→
+   134→interface SupplierNomination {
+   135→  id: string;
+   136→  supplierId: string;
+   137→  itemCode: string | null;
+   138→  itemName: string;
+   139→  category: string;
+   140→  createdAt: string;
+   141→}
+   142→
+   143→interface SupplierRating {
+   144→  id: string;
+   145→  supplierId: string;
+   146→  qciScore: number;
+   147→  loyalty: number;
+   148→  professionalism: number;
+   149→  activeEngagement: number;
+   150→  values: number;
+   151→  overallScore: number;
+   152→  remarks: string | null;
+   153→  ratedBy: string | null;
+   154→  ratedAt: string;
+   155→}
+   156→
+   157→interface Supplier {
+   158→  id: string;
+   159→  name: string;
+   160→  contactPerson: string | null;
+   161→  telephone: string | null;
+   162→  whatsapp: string | null;
+   163→  email: string | null;
+   164→  address: string | null;
+   165→  contractDetails: string | null;
+   166→  registrationNo: string | null;
+   167→  vatNo: string | null;
+   168→  bankDetails: string | null;
+   169→  createdAt: string;
+   170→  updatedAt: string;
+   171→  contacts: SupplierContact[];
+   172→  nominations: SupplierNomination[];
+   173→  ratings: SupplierRating[];
+   174→  avgRating: number;
+   175→  ratingCount: number;
+   176→}
+   177→
+   178→// ─────────────────────────────────────────────────────────
+   179→// Helpers
+   180→// ─────────────────────────────────────────────────────────
+   181→const ALL_APPOINTMENTS = [
+   182→  "all",
+   183→  ...CSLOG_APPOINTMENTS,
+   184→  ...CE_APPOINTMENTS,
+   185→] as const;
+   186→
+   187→/** Strip everything except digits from a phone string. */
+   188→function digits(num: string | null | undefined): string {
+   189→  if (!num) return "";
+   190→  return num.replace(/[^\d]/g, "");
+   191→}
+   192→
+   193→/** Build a tel: link (digits only, keep simple). */
+   194→function telLink(num: string | null | undefined): string | null {
+   195→  const d = digits(num);
+   196→  return d ? `tel:${d}` : null;
+   197→}
+   198→
+   199→/**
+   200→ * Build a wa.me link.
+   201→ * Sri Lankan numbers starting with 0 are converted to +94.
+   202→ * Otherwise, return the digits as-is.
+   203→ */
+   204→function waMeLink(num: string | null | undefined): string | null {
+   205→  const d = digits(num);
+   206→  if (!d) return null;
+   207→  if (d.startsWith("0")) {
+   208→    return `https://wa.me/94${d.slice(1)}`;
+   209→  }
+   210→  return `https://wa.me/${d}`;
+   211→}
+   212→
+   213→/** Bar color for a rating score. */
+   214→function ratingBarColor(score: number): string {
+   215→  if (score >= 4.5) return "#10b981"; // emerald
+   216→  if (score >= 3.5) return "#3b82f6"; // blue
+   217→  if (score >= 2.5) return "#f59e0b"; // amber
+   218→  return "#ef4444"; // red
+   219→}
+   220→
+   221→/** Color for an individual rating category progress bar (matches ratingColor thresholds). */
+   222→function ratingProgressClass(score: number): string {
+   223→  if (score >= 4.5) return "bg-emerald-500";
+   224→  if (score >= 3.5) return "bg-blue-500";
+   225→  if (score >= 2.5) return "bg-amber-500";
+   226→  return "bg-red-500";
+   227→}
+   228→
+   229→function formatDate(value: string | null | undefined): string {
+   230→  if (!value) return "—";
+   231→  const d = new Date(value);
+   232→  if (isNaN(d.getTime())) return "—";
+   233→  return d.toLocaleString("en-GB", {
+   234→    day: "2-digit",
+   235→    month: "short",
+   236→    year: "numeric",
+   237→    hour: "2-digit",
+   238→    minute: "2-digit",
+   239→  });
+   240→}
+   241→
+   242→// ─────────────────────────────────────────────────────────
+   243→// Main Module
+   244→// ─────────────────────────────────────────────────────────
+   245→export function StakeholdersModule() {
+   246→  const [tab, setTab] = useState<"officers" | "suppliers">("officers");
+   247→
+   248→  return (
+   249→    <div className="space-y-6">
+   250→      <PageHeader
+   251→        title="Stakeholders Directory"
+   252→        description="Officers, sailors & supplier contract information — contact cards, ratings & evaluations"
+   253→        icon={Users}
+   254→      />
+   255→      <Tabs value={tab} onValueChange={(v) => setTab(v as "officers" | "suppliers")}>
+   256→        <TabsList className="bg-card border border-border">
+   257→          <TabsTrigger value="officers">
+   258→            <User className="h-4 w-4" />
+   259→            Officers & Sailors
+   260→          </TabsTrigger>
+   261→          <TabsTrigger value="suppliers">
+   262→            <Building2 className="h-4 w-4" />
+   263→            Suppliers
+   264→          </TabsTrigger>
+   265→        </TabsList>
+   266→        <TabsContent value="officers">
+   267→          <OfficersSailorsTab />
+   268→        </TabsContent>
+   269→        <TabsContent value="suppliers">
+   270→          <SuppliersTab />
+   271→        </TabsContent>
+   272→      </Tabs>
+   273→    </div>
+   274→  );
+   275→}
+   276→
+   277→// ═════════════════════════════════════════════════════════
+   278→// TAB 1 — Officers & Sailors Directory
+   279→// ═════════════════════════════════════════════════════════
+   280→function OfficersSailorsTab() {
+   281→  const { data: list, loading, error, refresh } = useFetch<Stakeholder[]>(
+   282→    "/api/stakeholders"
+   283→  );
+   284→  const { toast } = useToast();
+   285→
+   286→  const [search, setSearch] = useState("");
+   287→  const [deptFilter, setDeptFilter] = useState("all");
+   288→  const [apptFilter, setApptFilter] = useState("all");
+   289→  const [roleFilter, setRoleFilter] = useState("all");
+   290→  const [availFilter, setAvailFilter] = useState("all");
+   291→
+   292→  const [addOpen, setAddOpen] = useState(false);
+   293→  const [editTarget, setEditTarget] = useState<Stakeholder | null>(null);
+   294→  const [viewTarget, setViewTarget] = useState<Stakeholder | null>(null);
+   295→  const [deleteTarget, setDeleteTarget] = useState<Stakeholder | null>(null);
+   296→
+   297→  const filtered = useMemo(() => {
+   298→    if (!list) return [];
+   299→    const s = search.trim().toLowerCase();
+   300→    return list.filter((p) => {
+   301→      if (deptFilter !== "all" && p.department !== deptFilter) return false;
+   302→      if (apptFilter !== "all" && p.appointment !== apptFilter) return false;
+   303→      if (roleFilter !== "all" && p.role !== roleFilter) return false;
+   304→      if (availFilter !== "all" && p.availability !== availFilter) return false;
+   305→      if (s) {
+   306→        const hay = `${p.name} ${p.svcNumber ?? ""} ${p.appointment ?? ""}`.toLowerCase();
+   307→        if (!hay.includes(s)) return false;
+   308→      }
+   309→      return true;
+   310→    });
+   311→  }, [list, search, deptFilter, apptFilter, roleFilter, availFilter]);
+   312→
+   313→  const cslogCount = useMemo(
+   314→    () => list?.filter((p) => p.department === "CSLOG").length ?? 0,
+   315→    [list]
+   316→  );
+   317→  const ceCount = useMemo(
+   318→    () => list?.filter((p) => p.department === "CE").length ?? 0,
+   319→    [list]
+   320→  );
+   321→  const availableCount = useMemo(
+   322→    () => list?.filter((p) => p.availability === "Available").length ?? 0,
+   323→    [list]
+   324→  );
+   325→
+   326→  const filtersActive =
+   327→    search !== "" ||
+   328→    deptFilter !== "all" ||
+   329→    apptFilter !== "all" ||
+   330→    roleFilter !== "all" ||
+   331→    availFilter !== "all";
+   332→
+   333→  function clearFilters() {
+   334→    setSearch("");
+   335→    setDeptFilter("all");
+   336→    setApptFilter("all");
+   337→    setRoleFilter("all");
+   338→    setAvailFilter("all");
+   339→  }
+   340→
+   341→  async function handleDelete() {
+   342→    if (!deleteTarget) return;
+   343→    const res = await apiRequest(`/api/stakeholders/${deleteTarget.id}`, "DELETE");
+   344→    if (res.ok) {
+   345→      toast({ title: "Person deleted", description: deleteTarget.name });
+   346→      setDeleteTarget(null);
+   347→      refresh();
+   348→    } else {
+   349→      toast({
+   350→        title: "Failed to delete",
+   351→        description: res.error,
+   352→        variant: "destructive",
+   353→      });
+   354→    }
+   355→  }
+   356→
+   357→  if (loading) return <LoadingState label="Loading personnel..." />;
+   358→  if (error) return <ErrorState message={error} />;
+   359→
+   360→  return (
+   361→    <div className="space-y-4">
+   362→      {/* Stat cards */}
+   363→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   364→        <StatCard
+   365→          label="Total Personnel"
+   366→          value={list?.length ?? 0}
+   367→          icon={Users}
+   368→          accent="blue"
+   369→          sub="All departments"
+   370→        />
+   371→        <StatCard
+   372→          label="CSLOG Dept"
+   373→          value={cslogCount}
+   374→          icon={Anchor}
+   375→          accent="purple"
+   376→          sub="Logistics officers & sailors"
+   377→        />
+   378→        <StatCard
+   379→          label="CE Dept"
+   380→          value={ceCount}
+   381→          icon={Wrench}
+   382→          accent="amber"
+   383→          sub="Civil engineering"
+   384→        />
+   385→        <StatCard
+   386→          label="Available Now"
+   387→          value={availableCount}
+   388→          icon={ShieldCheck}
+   389→          accent="green"
+   390→          sub="On duty & reachable"
+   391→        />
+   392→      </div>
+   393→
+   394→      {/* Toolbar */}
+   395→      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+   396→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+   397→          <div className="flex-1 min-w-0">
+   398→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+   399→              Search (Name / SVC / Appointment)
+   400→            </Label>
+   401→            <div className="relative">
+   402→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   403→              <Input
+   404→                value={search}
+   405→                onChange={(e) => setSearch(e.target.value)}
+   406→                placeholder="Search personnel..."
+   407→                className="pl-9"
+   408→              />
+   409→            </div>
+   410→          </div>
+   411→          <div>
+   412→            <Label className="text-xs text-muted-foreground mb-1.5 block">Department</Label>
+   413→            <Select value={deptFilter} onValueChange={setDeptFilter}>
+   414→              <SelectTrigger className="w-full lg:w-44">
+   415→                <SelectValue />
+   416→              </SelectTrigger>
+   417→              <SelectContent>
+   418→                <SelectItem value="all">All Departments</SelectItem>
+   419→                {STAKEHOLDER_DEPARTMENTS.map((d) => (
+   420→                  <SelectItem key={d} value={d}>
+   421→                    {d}
+   422→                  </SelectItem>
+   423→                ))}
+   424→              </SelectContent>
+   425→            </Select>
+   426→          </div>
+   427→          <div>
+   428→            <Label className="text-xs text-muted-foreground mb-1.5 block">Appointment</Label>
+   429→            <Select value={apptFilter} onValueChange={setApptFilter}>
+   430→              <SelectTrigger className="w-full lg:w-48">
+   431→                <SelectValue />
+   432→              </SelectTrigger>
+   433→              <SelectContent>
+   434→                <SelectItem value="all">All Appointments</SelectItem>
+   435→                <SelectItem value="__cslog" disabled className="text-muted-foreground">
+   436→                  — CSLOG —
+   437→                </SelectItem>
+   438→                {CSLOG_APPOINTMENTS.map((a) => (
+   439→                  <SelectItem key={a} value={a}>
+   440→                    {a}
+   441→                  </SelectItem>
+   442→                ))}
+   443→                <SelectItem value="__ce" disabled className="text-muted-foreground">
+   444→                  — CE —
+   445→                </SelectItem>
+   446→                {CE_APPOINTMENTS.map((a) => (
+   447→                  <SelectItem key={a} value={a}>
+   448→                    {a}
+   449→                  </SelectItem>
+   450→                ))}
+   451→              </SelectContent>
+   452→            </Select>
+   453→          </div>
+   454→          <div>
+   455→            <Label className="text-xs text-muted-foreground mb-1.5 block">Role</Label>
+   456→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+   457→              <SelectTrigger className="w-full lg:w-36">
+   458→                <SelectValue />
+   459→              </SelectTrigger>
+   460→              <SelectContent>
+   461→                <SelectItem value="all">All Roles</SelectItem>
+   462→                {STAKEHOLDER_ROLES.map((r) => (
+   463→                  <SelectItem key={r} value={r}>
+   464→                    {r}
+   465→                  </SelectItem>
+   466→                ))}
+   467→              </SelectContent>
+   468→            </Select>
+   469→          </div>
+   470→          <div>
+   471→            <Label className="text-xs text-muted-foreground mb-1.5 block">Availability</Label>
+   472→            <Select value={availFilter} onValueChange={setAvailFilter}>
+   473→              <SelectTrigger className="w-full lg:w-40">
+   474→                <SelectValue />
+   475→              </SelectTrigger>
+   476→              <SelectContent>
+   477→                <SelectItem value="all">All Statuses</SelectItem>
+   478→                {AVAILABILITY_STATUSES.map((a) => (
+   479→                  <SelectItem key={a} value={a}>
+   480→                    {a}
+   481→                  </SelectItem>
+   482→                ))}
+   483→              </SelectContent>
+   484→            </Select>
+   485→          </div>
+   486→          {filtersActive && (
+   487→            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9">
+   488→              <X className="h-4 w-4" /> Clear
+   489→            </Button>
+   490→          )}
+   491→          <Button onClick={() => setAddOpen(true)} className="h-9 lg:ml-auto">
+   492→            <Plus className="h-4 w-4" /> Add Person
+   493→          </Button>
+   494→        </div>
+   495→      </div>
+   496→
+   497→      {/* Directory table */}
+   498→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+   499→        {!filtered.length ? (
+   500→          <EmptyState
+   501→            icon={filtersActive ? Filter : Users}
+   502→            title={filtersActive ? "No matches" : "No personnel yet"}
+   503→            description={
+   504→              filtersActive
+   505→                ? "Try clearing filters to see everyone."
+   506→                : "Add officers and sailors to start building your directory."
+   507→            }
+   508→            action={
+   509→              filtersActive ? (
+   510→                <Button variant="outline" size="sm" onClick={clearFilters}>
+   511→                  Clear Filters
+   512→                </Button>
+   513→              ) : (
+   514→                <Button size="sm" onClick={() => setAddOpen(true)}>
+   515→                  <Plus className="h-4 w-4" /> Add Person
+   516→                </Button>
+   517→              )
+   518→            }
+   519→          />
+   520→        ) : (
+   521→          <div className="overflow-x-auto">
+   522→            <Table>
+   523→              <TableHeader>
+   524→                <TableRow className="border-border bg-muted/30 hover:bg-muted/30">
+   525→                  <TableHead className="min-w-[180px]">Name</TableHead>
+   526→                  <TableHead>Rank / Rate</TableHead>
+   527→                  <TableHead>Appointment</TableHead>
+   528→                  <TableHead>Dept</TableHead>
+   529→                  <TableHead>SVC Number</TableHead>
+   530→                  <TableHead>Office</TableHead>
+   531→                  <TableHead>Telephone</TableHead>
+   532→                  <TableHead>WhatsApp</TableHead>
+   533→                  <TableHead>Availability</TableHead>
+   534→                  <TableHead className="text-right">Actions</TableHead>
+   535→                </TableRow>
+   536→              </TableHeader>
+   537→              <TableBody>
+   538→                {filtered.map((p) => (
+   539→                  <TableRow
+   540→                    key={p.id}
+   541→                    className="border-border cursor-pointer"
+   542→                    onClick={() => setViewTarget(p)}
+   543→                  >
+   544→                    <TableCell>
+   545→                      <div className="flex items-center gap-2">
+   546→                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+   547→                          <User className="h-4 w-4" />
+   548→                        </div>
+   549→                        <div className="min-w-0">
+   550→                          <p className="font-medium text-foreground truncate">{p.name}</p>
+   551→                          <p className="text-xs text-muted-foreground">{p.role}</p>
+   552→                        </div>
+   553→                      </div>
+   554→                    </TableCell>
+   555→                    <TableCell className="text-muted-foreground">
+   556→                      {p.rankOrRate || "—"}
+   557→                    </TableCell>
+   558→                    <TableCell>
+   559→                      {p.appointment ? (
+   560→                        <CustomBadge className={departmentColor(p.department)}>
+   561→                          {p.appointment}
+   562→                        </CustomBadge>
+   563→                      ) : (
+   564→                        <span className="text-muted-foreground">—</span>
+   565→                      )}
+   566→                    </TableCell>
+   567→                    <TableCell>
+   568→                      <CustomBadge className={departmentColor(p.department)}>
+   569→                        {p.department}
+   570→                      </CustomBadge>
+   571→                    </TableCell>
+   572→                    <TableCell className="text-muted-foreground font-mono text-xs">
+   573→                      {p.svcNumber || "—"}
+   574→                    </TableCell>
+   575→                    <TableCell className="text-muted-foreground">
+   576→                      {p.officeNumber || "—"}
+   577→                    </TableCell>
+   578→                    <TableCell>
+   579→                      {telLink(p.telephone) ? (
+   580→                        <a
+   581→                          href={telLink(p.telephone)!}
+   582→                          onClick={(e) => e.stopPropagation()}
+   583→                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+   584→                        >
+   585→                          <Phone className="h-3 w-3" />
+   586→                          {p.telephone}
+   587→                        </a>
+   588→                      ) : (
+   589→                        <span className="text-muted-foreground">—</span>
+   590→                      )}
+   591→                    </TableCell>
+   592→                    <TableCell>
+   593→                      {waMeLink(p.whatsapp) ? (
+   594→                        <a
+   595→                          href={waMeLink(p.whatsapp)!}
+   596→                          target="_blank"
+   597→                          rel="noopener noreferrer"
+   598→                          onClick={(e) => e.stopPropagation()}
+   599→                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+   600→                        >
+   601→                          <MessageCircle className="h-3 w-3" />
+   602→                          {p.whatsapp}
+   603→                        </a>
+   604→                      ) : (
+   605→                        <span className="text-muted-foreground">—</span>
+   606→                      )}
+   607→                    </TableCell>
+   608→                    <TableCell>
+   609→                      <CustomBadge className={availabilityColor(p.availability)}>
+   610→                        {p.availability}
+   611→                      </CustomBadge>
+   612→                    </TableCell>
+   613→                    <TableCell className="text-right">
+   614→                      <div
+   615→                        className="flex items-center justify-end gap-1"
+   616→                        onClick={(e) => e.stopPropagation()}
+   617→                      >
+   618→                        <Button
+   619→                          variant="ghost"
+   620→                          size="icon"
+   621→                          className="h-8 w-8"
+   622→                          onClick={() => setViewTarget(p)}
+   623→                          title="View"
+   624→                        >
+   625→                          <Eye className="h-4 w-4" />
+   626→                        </Button>
+   627→                        <Button
+   628→                          variant="ghost"
+   629→                          size="icon"
+   630→                          className="h-8 w-8"
+   631→                          onClick={() => setEditTarget(p)}
+   632→                          title="Edit"
+   633→                        >
+   634→                          <Pencil className="h-4 w-4" />
+   635→                        </Button>
+   636→                        <Button
+   637→                          variant="ghost"
+   638→                          size="icon"
+   639→                          className="h-8 w-8 text-red-400 hover:text-red-300"
+   640→                          onClick={() => setDeleteTarget(p)}
+   641→                          title="Delete"
+   642→                        >
+   643→                          <Trash2 className="h-4 w-4" />
+   644→                        </Button>
+   645→                      </div>
+   646→                    </TableCell>
+   647→                  </TableRow>
+   648→                ))}
+   649→              </TableBody>
+   650→            </Table>
+   651→          </div>
+   652→        )}
+   653→      </div>
+   654→
+   655→      {/* Add / Edit dialog */}
+   656→      {addOpen && (
+   657→        <StakeholderFormDialog
+   658→          open={addOpen}
+   659→          onOpenChange={setAddOpen}
+   660→          onSaved={() => {
+   661→            setAddOpen(false);
+   662→            refresh();
+   663→          }}
+   664→        />
+   665→      )}
+   666→      {editTarget && (
+   667→        <StakeholderFormDialog
+   668→          open={!!editTarget}
+   669→          onOpenChange={(o) => !o && setEditTarget(null)}
+   670→          initial={editTarget}
+   671→          onSaved={() => {
+   672→            setEditTarget(null);
+   673→            refresh();
+   674→          }}
+   675→        />
+   676→      )}
+   677→
+   678→      {/* View dialog */}
+   679→      {viewTarget && (
+   680→        <StakeholderViewDialog
+   681→          stakeholder={viewTarget}
+   682→          open={!!viewTarget}
+   683→          onOpenChange={(o) => !o && setViewTarget(null)}
+   684→          onEdit={() => {
+   685→            const p = viewTarget;
+   686→            setViewTarget(null);
+   687→            setEditTarget(p);
+   688→          }}
+   689→        />
+   690→      )}
+   691→
+   692→      {/* Delete confirm */}
+   693→      <AlertDialog
+   694→        open={!!deleteTarget}
+   695→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+   696→      >
+   697→        <AlertDialogContent>
+   698→          <AlertDialogHeader>
+   699→            <AlertDialogTitle>Delete personnel record?</AlertDialogTitle>
+   700→            <AlertDialogDescription>
+   701→              This will permanently delete{" "}
+   702→              <span className="text-foreground font-medium">{deleteTarget?.name}</span>{" "}
+   703→              from the directory. This action cannot be undone.
+   704→            </AlertDialogDescription>
+   705→          </AlertDialogHeader>
+   706→          <AlertDialogFooter>
+   707→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   708→            <AlertDialogAction
+   709→              className="bg-red-500 hover:bg-red-600 text-white"
+   710→              onClick={handleDelete}
+   711→            >
+   712→              <Trash2 className="h-4 w-4" /> Delete
+   713→            </AlertDialogAction>
+   714→          </AlertDialogFooter>
+   715→        </AlertDialogContent>
+   716→      </AlertDialog>
+   717→    </div>
+   718→  );
+   719→}
+   720→
+   721→// ─────────────────────────────────────────────────────────
+   722→// Stakeholder Form (Add / Edit)
+   723→// ─────────────────────────────────────────────────────────
+   724→interface StakeholderFormProps {
+   725→  open: boolean;
+   726→  onOpenChange: (o: boolean) => void;
+   727→  initial?: Stakeholder | null;
+   728→  onSaved: () => void;
+   729→}
+   730→
+   731→function StakeholderFormDialog({
+   732→  open,
+   733→  onOpenChange,
+   734→  initial,
+   735→  onSaved,
+   736→}: StakeholderFormProps) {
+   737→  const isEdit = !!initial;
+   738→  const { toast } = useToast();
+   739→  const [saving, setSaving] = useState(false);
+   740→
+   741→  // Form state (initialised once from `initial` — keyed remount via `key` prop on caller)
+   742→  const [name, setName] = useState(initial?.name ?? "");
+   743→  const [rankOrRate, setRankOrRate] = useState(initial?.rankOrRate ?? "");
+   744→  const [svcNumber, setSvcNumber] = useState(initial?.svcNumber ?? "");
+   745→  const [appointment, setAppointment] = useState(initial?.appointment ?? "");
+   746→  const [department, setDepartment] = useState(initial?.department ?? "CSLOG");
+   747→  const [officeNumber, setOfficeNumber] = useState(initial?.officeNumber ?? "");
+   748→  const [telephone, setTelephone] = useState(initial?.telephone ?? "");
+   749→  const [whatsapp, setWhatsapp] = useState(initial?.whatsapp ?? "");
+   750→  const [email, setEmail] = useState(initial?.email ?? "");
+   751→  const [availability, setAvailability] = useState(
+   752→    initial?.availability ?? "Available"
+   753→  );
+   754→  const [role, setRole] = useState(initial?.role ?? "Officer");
+   755→
+   756→  // Derive appointment options from department
+   757→  const apptOptions =
+   758→    department === "CE" ? CE_APPOINTMENTS : CSLOG_APPOINTMENTS;
+   759→
+   760→  async function handleSubmit(e: React.FormEvent) {
+   761→    e.preventDefault();
+   762→    if (!name.trim()) {
+   763→      toast({ title: "Name is required", variant: "destructive" });
+   764→      return;
+   765→    }
+   766→    setSaving(true);
+   767→    const body = {
+   768→      name: name.trim(),
+   769→      rankOrRate: rankOrRate.trim() || null,
+   770→      svcNumber: svcNumber.trim() || null,
+   771→      appointment: appointment || null,
+   772→      department,
+   773→      officeNumber: officeNumber.trim() || null,
+   774→      telephone: telephone.trim() || null,
+   775→      whatsapp: whatsapp.trim() || null,
+   776→      email: email.trim() || null,
+   777→      availability,
+   778→      role,
+   779→    };
+   780→    const res = isEdit
+   781→      ? await apiRequest(`/api/stakeholders/${initial!.id}`, "PUT", body)
+   782→      : await apiRequest("/api/stakeholders", "POST", body);
+   783→    setSaving(false);
+   784→    if (res.ok) {
+   785→      toast({
+   786→        title: isEdit ? "Person updated" : "Person added",
+   787→        description: body.name,
+   788→      });
+   789→      onSaved();
+   790→    } else {
+   791→      toast({
+   792→        title: "Failed to save",
+   793→        description: res.error,
+   794→        variant: "destructive",
+   795→      });
+   796→    }
+   797→  }
+   798→
+   799→  return (
+   800→    <Dialog open={open} onOpenChange={onOpenChange}>
+   801→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+   802→        <DialogHeader>
+   803→          <DialogTitle>{isEdit ? "Edit Personnel" : "Add Personnel"}</DialogTitle>
+   804→          <DialogDescription>
+   805→            Capture contact & appointment details for officers and sailors.
+   806→          </DialogDescription>
+   807→        </DialogHeader>
+   808→        <form onSubmit={handleSubmit} className="space-y-4">
+   809→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   810→            <Field label="Full Name" required>
+   811→              <Input
+   812→                value={name}
+   813→                onChange={(e) => setName(e.target.value)}
+   814→                placeholder="e.g. Cdr. R. Perera"
+   815→                required
+   816→              />
+   817→            </Field>
+   818→            <Field label="Rank / Rate">
+   819→              <Input
+   820→                value={rankOrRate}
+   821→                onChange={(e) => setRankOrRate(e.target.value)}
+   822→                placeholder="e.g. Commander / Leading Seaman"
+   823→              />
+   824→            </Field>
+   825→            <Field label="SVC Number">
+   826→              <Input
+   827→                value={svcNumber}
+   828→                onChange={(e) => setSvcNumber(e.target.value)}
+   829→                placeholder="e.g. SVC/1234"
+   830→              />
+   831→            </Field>
+   832→            <Field label="Department">
+   833→              <Select
+   834→                value={department}
+   835→                onValueChange={(v) => {
+   836→                  setDepartment(v);
+   837→                  // Reset appointment when department changes (avoid mismatch)
+   838→                  setAppointment("");
+   839→                }}
+   840→              >
+   841→                <SelectTrigger className="w-full">
+   842→                  <SelectValue />
+   843→                </SelectTrigger>
+   844→                <SelectContent>
+   845→                  {STAKEHOLDER_DEPARTMENTS.map((d) => (
+   846→                    <SelectItem key={d} value={d}>
+   847→                      {d}
+   848→                    </SelectItem>
+   849→                  ))}
+   850→                </SelectContent>
+   851→              </Select>
+   852→            </Field>
+   853→            <Field label="Appointment">
+   854→              <Select value={appointment} onValueChange={setAppointment}>
+   855→                <SelectTrigger className="w-full">
+   856→                  <SelectValue placeholder="Select appointment" />
+   857→                </SelectTrigger>
+   858→                <SelectContent>
+   859→                  {apptOptions.map((a) => (
+   860→                    <SelectItem key={a} value={a}>
+   861→                      {a}
+   862→                    </SelectItem>
+   863→                  ))}
+   864→                </SelectContent>
+   865→              </Select>
+   866→            </Field>
+   867→            <Field label="Role">
+   868→              <Select value={role} onValueChange={setRole}>
+   869→                <SelectTrigger className="w-full">
+   870→                  <SelectValue />
+   871→                </SelectTrigger>
+   872→                <SelectContent>
+   873→                  {STAKEHOLDER_ROLES.map((r) => (
+   874→                    <SelectItem key={r} value={r}>
+   875→                      {r}
+   876→                    </SelectItem>
+   877→                  ))}
+   878→                </SelectContent>
+   879→              </Select>
+   880→            </Field>
+   881→            <Field label="Office Number">
+   882→              <Input
+   883→                value={officeNumber}
+   884→                onChange={(e) => setOfficeNumber(e.target.value)}
+   885→                placeholder="e.g. Ext 2101"
+   886→              />
+   887→            </Field>
+   888→            <Field label="Availability">
+   889→              <Select value={availability} onValueChange={setAvailability}>
+   890→                <SelectTrigger className="w-full">
+   891→                  <SelectValue />
+   892→                </SelectTrigger>
+   893→                <SelectContent>
+   894→                  {AVAILABILITY_STATUSES.map((a) => (
+   895→                    <SelectItem key={a} value={a}>
+   896→                      {a}
+   897→                    </SelectItem>
+   898→                  ))}
+   899→                </SelectContent>
+   900→              </Select>
+   901→            </Field>
+   902→            <Field label="Telephone">
+   903→              <Input
+   904→                value={telephone}
+   905→                onChange={(e) => setTelephone(e.target.value)}
+   906→                placeholder="e.g. 011-2345678"
+   907→              />
+   908→            </Field>
+   909→            <Field label="WhatsApp">
+   910→              <Input
+   911→                value={whatsapp}
+   912→                onChange={(e) => setWhatsapp(e.target.value)}
+   913→                placeholder="e.g. 077-1234567"
+   914→              />
+   915→            </Field>
+   916→            <Field label="Email" className="sm:col-span-2">
+   917→              <Input
+   918→                type="email"
+   919→                value={email}
+   920→                onChange={(e) => setEmail(e.target.value)}
+   921→                placeholder="e.g. rperera@navy.lk"
+   922→              />
+   923→            </Field>
+   924→          </div>
+   925→          <DialogFooter>
+   926→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+   927→              Cancel
+   928→            </Button>
+   929→            <Button type="submit" disabled={saving}>
+   930→              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   931→              {isEdit ? "Update" : "Add"} Personnel
+   932→            </Button>
+   933→          </DialogFooter>
+   934→        </form>
+   935→      </DialogContent>
+   936→    </Dialog>
+   937→  );
+   938→}
+   939→
+   940→// ─────────────────────────────────────────────────────────
+   941→// Stakeholder View Dialog (Contact Card)
+   942→// ─────────────────────────────────────────────────────────
+   943→function StakeholderViewDialog({
+   944→  stakeholder,
+   945→  open,
+   946→  onOpenChange,
+   947→  onEdit,
+   948→}: {
+   949→  stakeholder: Stakeholder;
+   950→  open: boolean;
+   951→  onOpenChange: (o: boolean) => void;
+   952→  onEdit: () => void;
+   953→}) {
+   954→  const s = stakeholder;
+   955→  return (
+   956→    <Dialog open={open} onOpenChange={onOpenChange}>
+   957→      <DialogContent className="sm:max-w-lg">
+   958→        <DialogHeader>
+   959→          <DialogTitle className="flex items-center gap-2">
+   960→            <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+   961→              <User className="h-5 w-5" />
+   962→            </div>
+   963→            <div>
+   964→              <div>{s.name}</div>
+   965→              <div className="text-xs text-muted-foreground font-normal flex items-center gap-1.5 mt-0.5">
+   966→                {s.rankOrRate && <span>{s.rankOrRate}</span>}
+   967→                {s.appointment && (
+   968→                  <>
+   969→                    <span>·</span>
+   970→                    <CustomBadge className={departmentColor(s.department)}>
+   971→                      {s.appointment}
+   972→                    </CustomBadge>
+   973→                  </>
+   974→                )}
+   975→              </div>
+   976→            </div>
+   977→          </DialogTitle>
+   978→        </DialogHeader>
+   979→
+   980→        <div className="space-y-4">
+   981→          {/* Department / Role / Availability chips */}
+   982→          <div className="flex flex-wrap gap-2">
+   983→            <CustomBadge className={departmentColor(s.department)}>
+   984→              <Building2 className="h-3 w-3 mr-1" /> {s.department} Dept
+   985→            </CustomBadge>
+   986→            <CustomBadge className="bg-secondary text-secondary-foreground border-border">
+   987→              <Briefcase className="h-3 w-3 mr-1" /> {s.role}
+   988→            </CustomBadge>
+   989→            <CustomBadge className={availabilityColor(s.availability)}>
+   990→              <ShieldCheck className="h-3 w-3 mr-1" /> {s.availability}
+   991→            </CustomBadge>
+   992→          </div>
+   993→
+   994→          {/* Contact rows */}
+   995→          <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+   996→            <ContactRow
+   997→              icon={IdCard}
+   998→              label="SVC Number"
+   999→              value={s.svcNumber}
+  1000→              mono
+  1001→            />
+  1002→            <ContactRow icon={Building2} label="Office Number" value={s.officeNumber} />
+  1003→            <ContactRow
+  1004→              icon={Phone}
+  1005→              label="Telephone"
+  1006→              value={s.telephone}
+  1007→              href={telLink(s.telephone)}
+  1008→              hrefLabel="Call"
+  1009→              accent="blue"
+  1010→            />
+  1011→            <ContactRow
+  1012→              icon={MessageCircle}
+  1013→              label="WhatsApp"
+  1014→              value={s.whatsapp}
+  1015→              href={waMeLink(s.whatsapp)}
+  1016→              hrefLabel="Open chat"
+  1017→              external
+  1018→              accent="green"
+  1019→            />
+  1020→            <ContactRow
+  1021→              icon={Mail}
+  1022→              label="Email"
+  1023→              value={s.email}
+  1024→              href={s.email ? `mailto:${s.email}` : null}
+  1025→              hrefLabel="Send"
+  1026→              accent="blue"
+  1027→            />
+  1028→          </div>
+  1029→
+  1030→          <div className="flex justify-end gap-2">
+  1031→            <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1032→              Close
+  1033→            </Button>
+  1034→            <Button onClick={onEdit}>
+  1035→              <Pencil className="h-4 w-4" /> Edit
+  1036→            </Button>
+  1037→          </div>
+  1038→        </div>
+  1039→      </DialogContent>
+  1040→    </Dialog>
+  1041→  );
+  1042→}
+  1043→
+  1044→function ContactRow({
+  1045→  icon: Icon,
+  1046→  label,
+  1047→  value,
+  1048→  href,
+  1049→  hrefLabel,
+  1050→  external,
+  1051→  accent = "default",
+  1052→  mono,
+  1053→}: {
+  1054→  icon: React.ComponentType<{ className?: string }>;
+  1055→  label: string;
+  1056→  value: string | null;
+  1057→  href?: string | null;
+  1058→  hrefLabel?: string;
+  1059→  external?: boolean;
+  1060→  accent?: "default" | "blue" | "green";
+  1061→  mono?: boolean;
+  1062→}) {
+  1063→  const accentClass =
+  1064→    accent === "blue"
+  1065→      ? "text-blue-400"
+  1066→      : accent === "green"
+  1067→        ? "text-emerald-400"
+  1068→        : "text-muted-foreground";
+  1069→  return (
+  1070→    <div className="flex items-center justify-between gap-3 p-3">
+  1071→      <div className="flex items-center gap-2.5 min-w-0">
+  1072→        <Icon className={cn("h-4 w-4 shrink-0", accentClass)} />
+  1073→        <div className="min-w-0">
+  1074→          <p className="text-xs text-muted-foreground">{label}</p>
+  1075→          <p
+  1076→            className={cn(
+  1077→              "text-sm text-foreground truncate",
+  1078→              mono && "font-mono"
+  1079→            )}
+  1080→          >
+  1081→            {value || "—"}
+  1082→          </p>
+  1083→        </div>
+  1084→      </div>
+  1085→      {href && value && (
+  1086→        <a
+  1087→          href={href}
+  1088→          target={external ? "_blank" : undefined}
+  1089→          rel={external ? "noopener noreferrer" : undefined}
+  1090→          className={cn(
+  1091→            "inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border hover:bg-accent transition-colors",
+  1092→            accent === "blue" && "border-blue-500/30 text-blue-400 hover:bg-blue-500/10",
+  1093→            accent === "green" &&
+  1094→              "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10",
+  1095→            accent === "default" &&
+  1096→              "border-border text-muted-foreground hover:bg-muted"
+  1097→          )}
+  1098→        >
+  1099→          {hrefLabel || "Open"}
+  1100→          <ChevronRight className="h-3 w-3" />
+  1101→        </a>
+  1102→      )}
+  1103→    </div>
+  1104→  );
+  1105→}
+  1106→
+  1107→// ═════════════════════════════════════════════════════════
+  1108→// TAB 2 — Suppliers Directory & Ratings Dashboard
+  1109→// ═════════════════════════════════════════════════════════
+  1110→function SuppliersTab() {
+  1111→  const { data: list, loading, error, refresh } = useFetch<Supplier[]>(
+  1112→    "/api/suppliers"
+  1113→  );
+  1114→  const { toast } = useToast();
+  1115→
+  1116→  const [search, setSearch] = useState("");
+  1117→  const [minRating, setMinRating] = useState("0");
+  1118→
+  1119→  const [addOpen, setAddOpen] = useState(false);
+  1120→  const [editTarget, setEditTarget] = useState<Supplier | null>(null);
+  1121→  const [viewTarget, setViewTarget] = useState<Supplier | null>(null);
+  1122→  const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
+  1123→
+  1124→  const filtered = useMemo(() => {
+  1125→    if (!list) return [];
+  1126→    const s = search.trim().toLowerCase();
+  1127→    const min = parseFloat(minRating);
+  1128→    return list.filter((sup) => {
+  1129→      if (!isNaN(min) && (sup.avgRating || 0) < min) return false;
+  1130→      if (s) {
+  1131→        const hay = `${sup.name} ${sup.contactPerson ?? ""} ${
+  1132→          sup.telephone ?? ""
+  1133→        }`.toLowerCase();
+  1134→        if (!hay.includes(s)) return false;
+  1135→      }
+  1136→      return true;
+  1137→    });
+  1138→  }, [list, search, minRating]);
+  1139→
+  1140→  const dashboard = useMemo(() => {
+  1141→    if (!list || !list.length)
+  1142→      return { total: 0, avg: 0, topName: "—", underReview: 0 };
+  1143→    const total = list.length;
+  1144→    const rated = list.filter((s) => s.ratingCount > 0);
+  1145→    const avg =
+  1146→      rated.length > 0
+  1147→        ? rated.reduce((sum, s) => sum + (s.avgRating || 0), 0) / rated.length
+  1148→        : 0;
+  1149→    const top = rated.length
+  1150→      ? rated.reduce((a, b) => ((b.avgRating || 0) > (a.avgRating || 0) ? b : a))
+  1151→      : null;
+  1152→    const underReview = list.filter(
+  1153→      (s) => s.ratingCount > 0 && (s.avgRating || 0) < 2.5
+  1154→    ).length;
+  1155→    return {
+  1156→      total,
+  1157→      avg,
+  1158→      topName: top?.name ?? "—",
+  1159→      underReview,
+  1160→    };
+  1161→  }, [list]);
+  1162→
+  1163→  const chartData = useMemo(() => {
+  1164→    if (!list) return [];
+  1165→    return list
+  1166→      .map((s) => ({
+  1167→        name: s.name.length > 18 ? s.name.slice(0, 16) + "…" : s.name,
+  1168→        rating: Math.round((s.avgRating || 0) * 100) / 100,
+  1169→        color: ratingBarColor(s.avgRating || 0),
+  1170→      }))
+  1171→      .sort((a, b) => b.rating - a.rating);
+  1172→  }, [list]);
+  1173→
+  1174→  const filtersActive = search !== "" || minRating !== "0";
+  1175→
+  1176→  function clearFilters() {
+  1177→    setSearch("");
+  1178→    setMinRating("0");
+  1179→  }
+  1180→
+  1181→  async function handleDelete() {
+  1182→    if (!deleteTarget) return;
+  1183→    const res = await apiRequest(`/api/suppliers/${deleteTarget.id}`, "DELETE");
+  1184→    if (res.ok) {
+  1185→      toast({ title: "Supplier deleted", description: deleteTarget.name });
+  1186→      setDeleteTarget(null);
+  1187→      refresh();
+  1188→    } else {
+  1189→      toast({
+  1190→        title: "Failed to delete",
+  1191→        description: res.error,
+  1192→        variant: "destructive",
+  1193→      });
+  1194→    }
+  1195→  }
+  1196→
+  1197→  if (loading) return <LoadingState label="Loading suppliers..." />;
+  1198→  if (error) return <ErrorState message={error} />;
+  1199→
+  1200→  return (
+  1201→    <div className="space-y-4">
+  1202→      {/* Dashboard summary cards */}
+  1203→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  1204→        <StatCard
+  1205→          label="Total Suppliers"
+  1206→          value={dashboard.total}
+  1207→          icon={Building2}
+  1208→          accent="blue"
+  1209→          sub="Registered vendors"
+  1210→        />
+  1211→        <StatCard
+  1212→          label="Avg Rating"
+  1213→          value={dashboard.avg ? `${dashboard.avg.toFixed(2)} / 5` : "—"}
+  1214→          icon={Star}
+  1215→          accent="purple"
+  1216→          sub="Across all rated suppliers"
+  1217→        />
+  1218→        <StatCard
+  1219→          label="Top Rated"
+  1220→          value={dashboard.topName}
+  1221→          icon={Award}
+  1222→          accent="green"
+  1223→          sub="Highest overall score"
+  1224→        />
+  1225→        <StatCard
+  1226→          label="Under Review"
+  1227→          value={dashboard.underReview}
+  1228→          icon={AlertTriangle}
+  1229→          accent="red"
+  1230→          sub="Avg rating below 2.5"
+  1231→        />
+  1232→      </div>
+  1233→
+  1234→      {/* Ratings overview chart */}
+  1235→      <div className="bg-card border border-border rounded-xl p-4">
+  1236→        <div className="flex items-center justify-between mb-3">
+  1237→          <div className="flex items-center gap-2">
+  1238→            <TrendingUp className="h-4 w-4 text-primary" />
+  1239→            <h3 className="text-sm font-semibold text-foreground">
+  1240→              Supplier Ratings Overview
+  1241→            </h3>
+  1242→          </div>
+  1243→          <span className="text-xs text-muted-foreground">
+  1244→            Avg score per supplier (color-coded by rating band)
+  1245→          </span>
+  1246→        </div>
+  1247→        {chartData.length === 0 ? (
+  1248→          <EmptyState
+  1249→            icon={TrendingUp}
+  1250→            title="No supplier ratings yet"
+  1251→            description="Add ratings to suppliers to see the overview chart."
+  1252→          />
+  1253→        ) : (
+  1254→          <div className="w-full h-72">
+  1255→            <ResponsiveContainer width="100%" height="100%">
+  1256→              <BarChart
+  1257→                data={chartData}
+  1258→                margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+  1259→              >
+  1260→                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" vertical={false} />
+  1261→                <XAxis
+  1262→                  dataKey="name"
+  1263→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1264→                  axisLine={{ stroke: "#2d3548" }}
+  1265→                  interval={0}
+  1266→                  angle={-15}
+  1267→                  textAnchor="end"
+  1268→                  height={60}
+  1269→                />
+  1270→                <YAxis
+  1271→                  domain={[0, 5]}
+  1272→                  ticks={[0, 1, 2, 3, 4, 5]}
+  1273→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1274→                  axisLine={{ stroke: "#2d3548" }}
+  1275→                />
+  1276→                <Tooltip
+  1277→                  cursor={{ fill: "#2d354833" }}
+  1278→                  contentStyle={{
+  1279→                    background: "#1a1f2e",
+  1280→                    border: "1px solid #2d3548",
+  1281→                    borderRadius: 8,
+  1282→                    fontSize: 12,
+  1283→                  }}
+  1284→                  labelStyle={{ color: "#e2e8f0" }}
+  1285→                />
+  1286→                <Bar dataKey="rating" radius={[4, 4, 0, 0]}>
+  1287→                  {chartData.map((entry, idx) => (
+  1288→                    <Cell key={idx} fill={entry.color} />
+  1289→                  ))}
+  1290→                </Bar>
+  1291→              </BarChart>
+  1292→            </ResponsiveContainer>
+  1293→          </div>
+  1294→        )}
+  1295→      </div>
+  1296→
+  1297→      {/* Filters toolbar */}
+  1298→      <div className="bg-card border border-border rounded-xl p-4">
+  1299→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+  1300→          <div className="flex-1 min-w-0">
+  1301→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+  1302→              Search (Name / Contact / Phone)
+  1303→            </Label>
+  1304→            <div className="relative">
+  1305→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+  1306→              <Input
+  1307→                value={search}
+  1308→                onChange={(e) => setSearch(e.target.value)}
+  1309→                placeholder="Search suppliers..."
+  1310→                className="pl-9"
+  1311→              />
+  1312→            </div>
+  1313→          </div>
+  1314→          <div>
+  1315→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+  1316→              Minimum Rating
+  1317→            </Label>
+  1318→            <Select value={minRating} onValueChange={setMinRating}>
+  1319→              <SelectTrigger className="w-full lg:w-48">
+  1320→                <SelectValue />
+  1321→              </SelectTrigger>
+  1322→              <SelectContent>
+  1323→                <SelectItem value="0">All Ratings</SelectItem>
+  1324→                <SelectItem value="4.5">4.5+ (Excellent)</SelectItem>
+  1325→                <SelectItem value="3.5">3.5+ (Good)</SelectItem>
+  1326→                <SelectItem value="2.5">2.5+ (Satisfactory)</SelectItem>
+  1327→                <SelectItem value="1.5">1.5+ (Below Average)</SelectItem>
+  1328→              </SelectContent>
+  1329→            </Select>
+  1330→          </div>
+  1331→          {filtersActive && (
+  1332→            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9">
+  1333→              <X className="h-4 w-4" /> Clear
+  1334→            </Button>
+  1335→          )}
+  1336→          <Button onClick={() => setAddOpen(true)} className="h-9 lg:ml-auto">
+  1337→            <Plus className="h-4 w-4" /> Add Supplier
+  1338→          </Button>
+  1339→        </div>
+  1340→      </div>
+  1341→
+  1342→      {/* Suppliers table */}
+  1343→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1344→        {!filtered.length ? (
+  1345→          <EmptyState
+  1346→            icon={filtersActive ? Filter : Building2}
+  1347→            title={filtersActive ? "No matches" : "No suppliers yet"}
+  1348→            description={
+  1349→              filtersActive
+  1350→                ? "Try clearing filters to see all suppliers."
+  1351→                : "Add suppliers to start tracking contracts and ratings."
+  1352→            }
+  1353→            action={
+  1354→              filtersActive ? (
+  1355→                <Button variant="outline" size="sm" onClick={clearFilters}>
+  1356→                  Clear Filters
+  1357→                </Button>
+  1358→              ) : (
+  1359→                <Button size="sm" onClick={() => setAddOpen(true)}>
+  1360→                  <Plus className="h-4 w-4" /> Add Supplier
+  1361→                </Button>
+  1362→              )
+  1363→            }
+  1364→          />
+  1365→        ) : (
+  1366→          <div className="overflow-x-auto">
+  1367→            <Table>
+  1368→              <TableHeader>
+  1369→                <TableRow className="border-border bg-muted/30 hover:bg-muted/30">
+  1370→                  <TableHead className="min-w-[200px]">Supplier</TableHead>
+  1371→                  <TableHead>Contact Person</TableHead>
+  1372→                  <TableHead>Telephone</TableHead>
+  1373→                  <TableHead>WhatsApp</TableHead>
+  1374→                  <TableHead className="text-center">Nominated Items</TableHead>
+  1375→                  <TableHead className="text-center">Avg Rating</TableHead>
+  1376→                  <TableHead className="text-center">Ratings</TableHead>
+  1377→                  <TableHead className="text-right">Actions</TableHead>
+  1378→                </TableRow>
+  1379→              </TableHeader>
+  1380→              <TableBody>
+  1381→                {filtered.map((sup) => (
+  1382→                  <TableRow key={sup.id} className="border-border">
+  1383→                    <TableCell>
+  1384→                      <div className="flex items-center gap-2">
+  1385→                        <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+  1386→                          <Building2 className="h-4 w-4" />
+  1387→                        </div>
+  1388→                        <div className="min-w-0">
+  1389→                          <p className="font-medium text-foreground truncate">{sup.name}</p>
+  1390→                          {sup.contractDetails && (
+  1391→                            <p className="text-xs text-muted-foreground truncate max-w-[260px]">
+  1392→                              {sup.contractDetails}
+  1393→                            </p>
+  1394→                          )}
+  1395→                        </div>
+  1396→                      </div>
+  1397→                    </TableCell>
+  1398→                    <TableCell className="text-muted-foreground">
+  1399→                      {sup.contactPerson || "—"}
+  1400→                    </TableCell>
+  1401→                    <TableCell>
+  1402→                      {telLink(sup.telephone) ? (
+  1403→                        <a
+  1404→                          href={telLink(sup.telephone)!}
+  1405→                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+  1406→                        >
+  1407→                          <Phone className="h-3 w-3" />
+  1408→                          {sup.telephone}
+  1409→                        </a>
+  1410→                      ) : (
+  1411→                        <span className="text-muted-foreground">—</span>
+  1412→                      )}
+  1413→                    </TableCell>
+  1414→                    <TableCell>
+  1415→                      {waMeLink(sup.whatsapp) ? (
+  1416→                        <a
+  1417→                          href={waMeLink(sup.whatsapp)!}
+  1418→                          target="_blank"
+  1419→                          rel="noopener noreferrer"
+  1420→                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+  1421→                        >
+  1422→                          <MessageCircle className="h-3 w-3" />
+  1423→                          {sup.whatsapp}
+  1424→                        </a>
+  1425→                      ) : (
+  1426→                        <span className="text-muted-foreground">—</span>
+  1427→                      )}
+  1428→                    </TableCell>
+  1429→                    <TableCell className="text-center">
+  1430→                      <CustomBadge className="bg-secondary text-secondary-foreground border-border">
+  1431→                        {sup.nominations?.length ?? 0}
+  1432→                      </CustomBadge>
+  1433→                    </TableCell>
+  1434→                    <TableCell className="text-center">
+  1435→                      {sup.ratingCount > 0 ? (
+  1436→                        <CustomBadge className={ratingColor(sup.avgRating)}>
+  1437→                          <Star className="h-3 w-3 mr-1" />
+  1438→                          {sup.avgRating.toFixed(2)} · {ratingLabel(sup.avgRating)}
+  1439→                        </CustomBadge>
+  1440→                      ) : (
+  1441→                        <span className="text-muted-foreground text-xs">Not rated</span>
+  1442→                      )}
+  1443→                    </TableCell>
+  1444→                    <TableCell className="text-center text-muted-foreground">
+  1445→                      {sup.ratingCount}
+  1446→                    </TableCell>
+  1447→                    <TableCell className="text-right">
+  1448→                      <div className="flex items-center justify-end gap-1">
+  1449→                        <Button
+  1450→                          variant="ghost"
+  1451→                          size="icon"
+  1452→                          className="h-8 w-8"
+  1453→                          onClick={() => setViewTarget(sup)}
+  1454→                          title="View Details"
+  1455→                        >
+  1456→                          <Eye className="h-4 w-4" />
+  1457→                        </Button>
+  1458→                        <Button
+  1459→                          variant="ghost"
+  1460→                          size="icon"
+  1461→                          className="h-8 w-8"
+  1462→                          onClick={() => setEditTarget(sup)}
+  1463→                          title="Edit"
+  1464→                        >
+  1465→                          <Pencil className="h-4 w-4" />
+  1466→                        </Button>
+  1467→                        <Button
+  1468→                          variant="ghost"
+  1469→                          size="icon"
+  1470→                          className="h-8 w-8 text-red-400 hover:text-red-300"
+  1471→                          onClick={() => setDeleteTarget(sup)}
+  1472→                          title="Delete"
+  1473→                        >
+  1474→                          <Trash2 className="h-4 w-4" />
+  1475→                        </Button>
+  1476→                      </div>
+  1477→                    </TableCell>
+  1478→                  </TableRow>
+  1479→                ))}
+  1480→              </TableBody>
+  1481→            </Table>
+  1482→          </div>
+  1483→        )}
+  1484→      </div>
+  1485→
+  1486→      {/* Add / Edit supplier dialog */}
+  1487→      {addOpen && (
+  1488→        <SupplierFormDialog
+  1489→          key="add"
+  1490→          open={addOpen}
+  1491→          onOpenChange={setAddOpen}
+  1492→          onSaved={() => {
+  1493→            setAddOpen(false);
+  1494→            refresh();
+  1495→          }}
+  1496→        />
+  1497→      )}
+  1498→      {editTarget && (
+  1499→        <SupplierFormDialog
+  1500→          key={`edit-${editTarget.id}`}
+  1501→          open={!!editTarget}
+  1502→          onOpenChange={(o) => !o && setEditTarget(null)}
+  1503→          initial={editTarget}
+  1504→          onSaved={() => {
+  1505→            setEditTarget(null);
+  1506→            refresh();
+  1507→          }}
+  1508→        />
+  1509→      )}
+  1510→
+  1511→      {/* Details dialog (centerpiece) */}
+  1512→      {viewTarget && (
+  1513→        <SupplierDetailsDialog
+  1514→          key={`view-${viewTarget.id}`}
+  1515→          supplierId={viewTarget.id}
+  1516→          open={!!viewTarget}
+  1517→          onOpenChange={(o) => !o && setViewTarget(null)}
+  1518→          onEdit={() => {
+  1519→            const sup = viewTarget;
+  1520→            setViewTarget(null);
+  1521→            setEditTarget(sup);
+  1522→          }}
+  1523→          onChanged={refresh}
+  1524→        />
+  1525→      )}
+  1526→
+  1527→      {/* Delete confirm */}
+  1528→      <AlertDialog
+  1529→        open={!!deleteTarget}
+  1530→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+  1531→      >
+  1532→        <AlertDialogContent>
+  1533→          <AlertDialogHeader>
+  1534→            <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
+  1535→            <AlertDialogDescription>
+  1536→              This will permanently delete{" "}
+  1537→              <span className="text-foreground font-medium">{deleteTarget?.name}</span>{" "}
+  1538→              and all related contacts, nominations, and ratings. This cannot be undone.
+  1539→            </AlertDialogDescription>
+  1540→          </AlertDialogHeader>
+  1541→          <AlertDialogFooter>
+  1542→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1543→            <AlertDialogAction
+  1544→              className="bg-red-500 hover:bg-red-600 text-white"
+  1545→              onClick={handleDelete}
+  1546→            >
+  1547→              <Trash2 className="h-4 w-4" /> Delete
+  1548→            </AlertDialogAction>
+  1549→          </AlertDialogFooter>
+  1550→        </AlertDialogContent>
+  1551→      </AlertDialog>
+  1552→    </div>
+  1553→  );
+  1554→}
+  1555→
+  1556→// ─────────────────────────────────────────────────────────
+  1557→// Supplier Form (Add / Edit)
+  1558→// ─────────────────────────────────────────────────────────
+  1559→interface SupplierFormProps {
+  1560→  open: boolean;
+  1561→  onOpenChange: (o: boolean) => void;
+  1562→  initial?: Supplier | null;
+  1563→  onSaved: () => void;
+  1564→}
+  1565→
+  1566→function SupplierFormDialog({
+  1567→  open,
+  1568→  onOpenChange,
+  1569→  initial,
+  1570→  onSaved,
+  1571→}: SupplierFormProps) {
+  1572→  const isEdit = !!initial;
+  1573→  const { toast } = useToast();
+  1574→  const [saving, setSaving] = useState(false);
+  1575→
+  1576→  const [name, setName] = useState(initial?.name ?? "");
+  1577→  const [contactPerson, setContactPerson] = useState(initial?.contactPerson ?? "");
+  1578→  const [telephone, setTelephone] = useState(initial?.telephone ?? "");
+  1579→  const [whatsapp, setWhatsapp] = useState(initial?.whatsapp ?? "");
+  1580→  const [email, setEmail] = useState(initial?.email ?? "");
+  1581→  const [address, setAddress] = useState(initial?.address ?? "");
+  1582→  const [contractDetails, setContractDetails] = useState(
+  1583→    initial?.contractDetails ?? ""
+  1584→  );
+  1585→  const [registrationNo, setRegistrationNo] = useState(
+  1586→    initial?.registrationNo ?? ""
+  1587→  );
+  1588→  const [vatNo, setVatNo] = useState(initial?.vatNo ?? "");
+  1589→  const [bankDetails, setBankDetails] = useState(initial?.bankDetails ?? "");
+  1590→
+  1591→  async function handleSubmit(e: React.FormEvent) {
+  1592→    e.preventDefault();
+  1593→    if (!name.trim()) {
+  1594→      toast({ title: "Supplier name is required", variant: "destructive" });
+  1595→      return;
+  1596→    }
+  1597→    setSaving(true);
+  1598→    const body = {
+  1599→      name: name.trim(),
+  1600→      contactPerson: contactPerson.trim() || null,
+  1601→      telephone: telephone.trim() || null,
+  1602→      whatsapp: whatsapp.trim() || null,
+  1603→      email: email.trim() || null,
+  1604→      address: address.trim() || null,
+  1605→      contractDetails: contractDetails.trim() || null,
+  1606→      registrationNo: registrationNo.trim() || null,
+  1607→      vatNo: vatNo.trim() || null,
+  1608→      bankDetails: bankDetails.trim() || null,
+  1609→    };
+  1610→    const res = isEdit
+  1611→      ? await apiRequest(`/api/suppliers/${initial!.id}`, "PUT", body)
+  1612→      : await apiRequest("/api/suppliers", "POST", body);
+  1613→    setSaving(false);
+  1614→    if (res.ok) {
+  1615→      toast({
+  1616→        title: isEdit ? "Supplier updated" : "Supplier added",
+  1617→        description: body.name,
+  1618→      });
+  1619→      onSaved();
+  1620→    } else {
+  1621→      toast({
+  1622→        title: "Failed to save",
+  1623→        description: res.error,
+  1624→        variant: "destructive",
+  1625→      });
+  1626→    }
+  1627→  }
+  1628→
+  1629→  return (
+  1630→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1631→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+  1632→        <DialogHeader>
+  1633→          <DialogTitle>{isEdit ? "Edit Supplier" : "Add Supplier"}</DialogTitle>
+  1634→          <DialogDescription>
+  1635→            Capture contract, contact, and registration details.
+  1636→          </DialogDescription>
+  1637→        </DialogHeader>
+  1638→        <form onSubmit={handleSubmit} className="space-y-4">
+  1639→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1640→            <Field label="Supplier Name" required className="sm:col-span-2">
+  1641→              <Input
+  1642→                value={name}
+  1643→                onChange={(e) => setName(e.target.value)}
+  1644→                placeholder="e.g. Marine Pumps Ltd"
+  1645→                required
+  1646→              />
+  1647→            </Field>
+  1648→            <Field label="Contact Person">
+  1649→              <Input
+  1650→                value={contactPerson}
+  1651→                onChange={(e) => setContactPerson(e.target.value)}
+  1652→                placeholder="e.g. Mr. Sunil Perera"
+  1653→              />
+  1654→            </Field>
+  1655→            <Field label="Telephone">
+  1656→              <Input
+  1657→                value={telephone}
+  1658→                onChange={(e) => setTelephone(e.target.value)}
+  1659→                placeholder="e.g. 011-2587411"
+  1660→              />
+  1661→            </Field>
+  1662→            <Field label="WhatsApp">
+  1663→              <Input
+  1664→                value={whatsapp}
+  1665→                onChange={(e) => setWhatsapp(e.target.value)}
+  1666→                placeholder="e.g. 077-9988776"
+  1667→              />
+  1668→            </Field>
+  1669→            <Field label="Email">
+  1670→              <Input
+  1671→                type="email"
+  1672→                value={email}
+  1673→                onChange={(e) => setEmail(e.target.value)}
+  1674→                placeholder="e.g. sales@marinepumps.lk"
+  1675→              />
+  1676→            </Field>
+  1677→            <Field label="Address" className="sm:col-span-2">
+  1678→              <Textarea
+  1679→                value={address}
+  1680→                onChange={(e) => setAddress(e.target.value)}
+  1681→                placeholder="Full address"
+  1682→                rows={2}
+  1683→              />
+  1684→            </Field>
+  1685→            <Field label="Contract Details" className="sm:col-span-2">
+  1686→              <Textarea
+  1687→                value={contractDetails}
+  1688→                onChange={(e) => setContractDetails(e.target.value)}
+  1689→                placeholder="RC validity, contract type, etc."
+  1690→                rows={2}
+  1691→              />
+  1692→            </Field>
+  1693→            <Field label="Registration No.">
+  1694→              <Input
+  1695→                value={registrationNo}
+  1696→                onChange={(e) => setRegistrationNo(e.target.value)}
+  1697→                placeholder="PV-XXXX-XXXX"
+  1698→              />
+  1699→            </Field>
+  1700→            <Field label="VAT No.">
+  1701→              <Input
+  1702→                value={vatNo}
+  1703→                onChange={(e) => setVatNo(e.target.value)}
+  1704→                placeholder="VAT-XXXXXXXX"
+  1705→              />
+  1706→            </Field>
+  1707→            <Field label="Bank Details" className="sm:col-span-2">
+  1708→              <Input
+  1709→                value={bankDetails}
+  1710→                onChange={(e) => setBankDetails(e.target.value)}
+  1711→                placeholder="Bank - Account Number"
+  1712→              />
+  1713→            </Field>
+  1714→          </div>
+  1715→          <DialogFooter>
+  1716→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+  1717→              Cancel
+  1718→            </Button>
+  1719→            <Button type="submit" disabled={saving}>
+  1720→              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1721→              {isEdit ? "Update" : "Add"} Supplier
+  1722→            </Button>
+  1723→          </DialogFooter>
+  1724→        </form>
+  1725→      </DialogContent>
+  1726→    </Dialog>
+  1727→  );
+  1728→}
+  1729→
+  1730→// ═════════════════════════════════════════════════════════
+  1731→// Supplier Details Dialog (centerpiece)
+  1732→// ═════════════════════════════════════════════════════════
+  1733→function SupplierDetailsDialog({
+  1734→  supplierId,
+  1735→  open,
+  1736→  onOpenChange,
+  1737→  onEdit,
+  1738→  onChanged,
+  1739→}: {
+  1740→  supplierId: string;
+  1741→  open: boolean;
+  1742→  onOpenChange: (o: boolean) => void;
+  1743→  onEdit: () => void;
+  1744→  onChanged: () => void;
+  1745→}) {
+  1746→  // Fetch single supplier (always live — refreshable from inside)
+  1747→  const { data: sup, loading, error, refresh } = useFetch<Supplier>(
+  1748→    `/api/suppliers/${supplierId}`
+  1749→  );
+  1750→  const { toast } = useToast();
+  1751→
+  1752→  return (
+  1753→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1754→      <DialogContent
+  1755→        showCloseButton
+  1756→        className="sm:max-w-4xl max-h-[92vh] overflow-y-auto"
+  1757→      >
+  1758→        <DialogHeader>
+  1759→          <div className="flex items-start gap-3 pr-8">
+  1760→            <div className="h-12 w-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+  1761→              <Building2 className="h-6 w-6" />
+  1762→            </div>
+  1763→            <div className="min-w-0 flex-1">
+  1764→              <DialogTitle className="truncate">{sup?.name ?? "Supplier"}</DialogTitle>
+  1765→              <DialogDescription className="flex items-center gap-2 flex-wrap mt-1">
+  1766→                {sup?.contactPerson && <span>{sup.contactPerson}</span>}
+  1767→                {sup && sup.ratingCount > 0 && (
+  1768→                  <CustomBadge className={ratingColor(sup.avgRating)}>
+  1769→                    <Star className="h-3 w-3 mr-1" />
+  1770→                    {sup.avgRating.toFixed(2)} · {ratingLabel(sup.avgRating)}
+  1771→                  </CustomBadge>
+  1772→                )}
+  1773→                {sup && sup.ratingCount === 0 && (
+  1774→                  <CustomBadge className="bg-secondary text-muted-foreground border-border">
+  1775→                    Not rated yet
+  1776→                  </CustomBadge>
+  1777→                )}
+  1778→              </DialogDescription>
+  1779→            </div>
+  1780→          </div>
+  1781→        </DialogHeader>
+  1782→
+  1783→        {loading ? (
+  1784→          <LoadingState label="Loading supplier details..." />
+  1785→        ) : error ? (
+  1786→          <ErrorState message={error} />
+  1787→        ) : !sup ? (
+  1788→          <EmptyState icon={Building2} title="Supplier not found" />
+  1789→        ) : (
+  1790→          <div className="space-y-5">
+  1791→            {/* Contract Details */}
+  1792→            <Section
+  1793→              icon={ClipboardList}
+  1794→              title="Contract Details"
+  1795→              accent="blue"
+  1796→            >
+  1797→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1798→                <DetailItem label="Contract Details" value={sup.contractDetails} full />
+  1799→                <DetailItem label="Registration No." value={sup.registrationNo} />
+  1800→                <DetailItem label="VAT No." value={sup.vatNo} />
+  1801→                <DetailItem label="Bank Details" value={sup.bankDetails} full />
+  1802→                <DetailItem label="Address" value={sup.address} full />
+  1803→                <DetailItem
+  1804→                  label="Telephone"
+  1805→                  value={sup.telephone}
+  1806→                  href={telLink(sup.telephone)}
+  1807→                  hrefLabel="Call"
+  1808→                  accent="blue"
+  1809→                />
+  1810→                <DetailItem
+  1811→                  label="WhatsApp"
+  1812→                  value={sup.whatsapp}
+  1813→                  href={waMeLink(sup.whatsapp)}
+  1814→                  hrefLabel="Chat"
+  1815→                  external
+  1816→                  accent="green"
+  1817→                />
+  1818→                <DetailItem
+  1819→                  label="Email"
+  1820→                  value={sup.email}
+  1821→                  href={sup.email ? `mailto:${sup.email}` : null}
+  1822→                  hrefLabel="Mail"
+  1823→                  accent="blue"
+  1824→                  full
+  1825→                />
+  1826→              </div>
+  1827→            </Section>
+  1828→
+  1829→            {/* Contact Persons */}
+  1830→            <Section icon={Contact} title="Contact Persons" accent="purple">
+  1831→              <ContactsSection
+  1832→                supplierId={sup.id}
+  1833→                contacts={sup.contacts}
+  1834→                onChanged={() => {
+  1835→                  refresh();
+  1836→                  onChanged();
+  1837→                }}
+  1838→              />
+  1839→            </Section>
+  1840→
+  1841→            {/* Nominated Items */}
+  1842→            <Section icon={StickyNote} title="Nominated Items" accent="amber">
+  1843→              <NominationsSection
+  1844→                supplierId={sup.id}
+  1845→                nominations={sup.nominations}
+  1846→                onChanged={() => {
+  1847→                  refresh();
+  1848→                  onChanged();
+  1849→                }}
+  1850→              />
+  1851→            </Section>
+  1852→
+  1853→            {/* Ratings & Evaluation */}
+  1854→            <Section icon={Award} title="Ratings & Evaluation" accent="green">
+  1855→              <RatingsSection
+  1856→                supplierId={sup.id}
+  1857→                ratings={sup.ratings}
+  1858→                avgRating={sup.avgRating}
+  1859→                ratingCount={sup.ratingCount}
+  1860→                onChanged={() => {
+  1861→                  refresh();
+  1862→                  onChanged();
+  1863→                }}
+  1864→              />
+  1865→            </Section>
+  1866→
+  1867→            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+  1868→              <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1869→                Close
+  1870→              </Button>
+  1871→              <Button onClick={onEdit}>
+  1872→                <Pencil className="h-4 w-4" /> Edit Supplier
+  1873→              </Button>
+  1874→            </div>
+  1875→          </div>
+  1876→        )}
+  1877→      </DialogContent>
+  1878→    </Dialog>
+  1879→  );
+  1880→}
+  1881→
+  1882→// ─── Sub-sections inside supplier details ───
+  1883→function Section({
+  1884→  icon: Icon,
+  1885→  title,
+  1886→  accent = "blue",
+  1887→  children,
+  1888→}: {
+  1889→  icon: React.ComponentType<{ className?: string }>;
+  1890→  title: string;
+  1891→  accent?: "blue" | "purple" | "amber" | "green";
+  1892→  children: React.ReactNode;
+  1893→}) {
+  1894→  const accentClass = {
+  1895→    blue: "text-blue-400 bg-blue-500/10",
+  1896→    purple: "text-violet-400 bg-violet-500/10",
+  1897→    amber: "text-amber-400 bg-amber-500/10",
+  1898→    green: "text-emerald-400 bg-emerald-500/10",
+  1899→  }[accent];
+  1900→  return (
+  1901→    <div className="rounded-xl border border-border bg-muted/20 p-4">
+  1902→      <div className="flex items-center gap-2 mb-3">
+  1903→        <div className={cn("h-7 w-7 rounded-lg flex items-center justify-center", accentClass)}>
+  1904→          <Icon className="h-4 w-4" />
+  1905→        </div>
+  1906→        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+  1907→      </div>
+  1908→      {children}
+  1909→    </div>
+  1910→  );
+  1911→}
+  1912→
+  1913→function DetailItem({
+  1914→  label,
+  1915→  value,
+  1916→  href,
+  1917→  hrefLabel,
+  1918→  external,
+  1919→  accent = "default",
+  1920→  full,
+  1921→}: {
+  1922→  label: string;
+  1923→  value: string | null;
+  1924→  href?: string | null;
+  1925→  hrefLabel?: string;
+  1926→  external?: boolean;
+  1927→  accent?: "default" | "blue" | "green";
+  1928→  full?: boolean;
+  1929→}) {
+  1930→  return (
+  1931→    <div className={cn("rounded-md border border-border bg-card p-2.5", full && "sm:col-span-2")}>
+  1932→      <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
+  1933→      <div className="flex items-center justify-between gap-2">
+  1934→        <p
+  1935→          className={cn(
+  1936→            "text-sm text-foreground break-words min-w-0",
+  1937→            !value && "text-muted-foreground"
+  1938→          )}
+  1939→        >
+  1940→          {value || "—"}
+  1941→        </p>
+  1942→        {href && value && (
+  1943→          <a
+  1944→            href={href}
+  1945→            target={external ? "_blank" : undefined}
+  1946→            rel={external ? "noopener noreferrer" : undefined}
+  1947→            className={cn(
+  1948→              "inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded border hover:bg-accent transition-colors shrink-0",
+  1949→              accent === "blue" && "border-blue-500/30 text-blue-400 hover:bg-blue-500/10",
+  1950→              accent === "green" &&
+  1951→                "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10",
+  1952→              accent === "default" &&
+  1953→                "border-border text-muted-foreground hover:bg-muted"
+  1954→            )}
+  1955→          >
+  1956→            {hrefLabel || "Open"}
+  1957→          </a>
+  1958→        )}
+  1959→      </div>
+  1960→    </div>
+  1961→  );
+  1962→}
+  1963→
+  1964→// ─── Contacts sub-section ───
+  1965→function ContactsSection({
+  1966→  supplierId,
+  1967→  contacts,
+  1968→  onChanged,
+  1969→}: {
+  1970→  supplierId: string;
+  1971→  contacts: SupplierContact[];
+  1972→  onChanged: () => void;
+  1973→}) {
+  1974→  const { toast } = useToast();
+  1975→  const [addOpen, setAddOpen] = useState(false);
+  1976→  const [deletingId, setDeletingId] = useState<string | null>(null);
+  1977→
+  1978→  async function handleDelete(cid: string) {
+  1979→    setDeletingId(cid);
+  1980→    const res = await apiRequest(
+  1981→      `/api/suppliers/${supplierId}/contacts/${cid}`,
+  1982→      "DELETE"
+  1983→    );
+  1984→    setDeletingId(null);
+  1985→    if (res.ok) {
+  1986→      toast({ title: "Contact removed" });
+  1987→      onChanged();
+  1988→    } else {
+  1989→      toast({ title: "Failed", description: res.error, variant: "destructive" });
+  1990→    }
+  1991→  }
+  1992→
+  1993→  return (
+  1994→    <div className="space-y-3">
+  1995→      <div className="flex items-center justify-between">
+  1996→        <p className="text-xs text-muted-foreground">
+  1997→          {contacts.length} contact{contacts.length === 1 ? "" : "s"} on file
+  1998→        </p>
+  1999→        <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+  2000→          <Plus className="h-3.5 w-3.5" /> Add Contact
+
+[showing lines 1-2000 of 2822; use offset=2001 with limit to continue reading]

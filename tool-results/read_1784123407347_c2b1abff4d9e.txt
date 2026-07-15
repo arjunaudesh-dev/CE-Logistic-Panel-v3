@@ -1,0 +1,302 @@
+   900→  * Fetches GET /api/theme-profiles. Uses useThemeProfile() for the currently-active profile.
+   901→  * Info card: "Theme profiles let users choose color combinations. Users can also switch instantly from the palette icon in the topbar."
+   902→  * Active profile indicator card showing the current profile name + mode + 2 color swatches + "Active" badge.
+   903→  * Preset grid (12 cards from THEME_PROFILE_PRESETS — 6 dark + 6 light): each card is a button that calls handleApplyPreset → setProfile() (instant apply via CSS variables). Shows preset name, mode badge, 2 color swatches, hex codes, and an "Active"/"Default"/"Click to apply" status pill. Each card has a "Set as Default" button → handleSetDefault POST/PUT to /api/theme-profiles with isDefault:true (also locally applies the theme). Active preset is highlighted with a fuchsia ring.
+   904→  * Saved & Custom Profiles section: "Create Custom Profile" button + Table of DB-persisted profiles (Name, Mode badge, Colors swatches, Status: Default/Active/—, Actions: Apply / Set Default / Delete). Empty state when no saved profiles.
+   905→  * CustomThemeFormDialog: name input, mode Select (dark/light), primary + accent color pickers (native input[type=color] + hex Input), "Set as Default" amber checkbox, Live Preview block showing the 2 swatches + a sample primary-colored button. → POST /api/theme-profiles.
+   906→  * Delete confirmation via AlertDialog → DELETE /api/theme-profiles/[id].
+   907→- All new components use semantic Tailwind classes for light/dark theme support (dark: variants for amber light-mode badges, var(--background)/var(--card)/var(--border), text-foreground/text-muted-foreground). Fully responsive (mobile-first grids, flex-wrap toolbars, overflow-x-auto scrollbar-thin on tables).
+   908→
+   909→PART C — Navy List Upload Verification (stakeholders.tsx):
+   910→- Verified the existing Navy List upload feature is complete and working:
+   911→  * "Upload Navy List" button is prominent and visible in the Officers & Sailors tab (top of NavyListSection).
+   912→  * CSV template (NAVY_LIST_CSV_COLUMNS) includes exactly the required columns: Name, Rank, SVCNumber, Appointment, Seniority, Department, Category.
+   913→  * /api/navy-list POST auto-updates Stakeholder.seniority (plus category + department + areaStoreLocation for sailors) where name matches — confirmed by reading the route file.
+   914→  * After upload, onImported callback calls nlRefresh() + onStakeholdersRefresh() which triggers re-fetch of /api/stakeholders → CategorySection re-sorts by seniority (most senior first) and renders the #N seniority badge (or "Unranked" for null/999).
+   915→- Made "Upload Navy List" button more prominent by switching from `variant="outline"` to default (primary-filled) so it stands out as the section's primary action.
+   916→- Added an explicit "Refresh" button (RefreshCw icon, variant="outline") that calls handleRefresh — a new function that triggers nlRefresh() + onStakeholdersRefresh() in parallel and shows a brief spinner + success toast ("Directory refreshed: N Navy List records · M officers (K ranked)"). Spinner is visible for ≥350ms for UX feedback even on fast networks. Button is positioned between "Upload Navy List" and "View Navy List" so the user has a visible "re-pull latest" affordance after upload.
+   917→- Imported RefreshCw icon from lucide-react. Used existing cn helper for the conditional animate-spin class.
+   918→
+   919→Pre-existing bug fix (outside task scope but blocking home page):
+   920→- Discovered the home page was returning HTTP 500 because two files (present-position.tsx + procurement.tsx, both modified by previous agents) imported `FileMultiple` from lucide-react — an icon that does NOT exist in lucide-react 0.525.0. Replaced all `FileMultiple` → `Files` (the correct lucide-react icon name) in both files. Home page now returns HTTP 200 with ~40KB HTML.
+   921→
+   922→Verification:
+   923→- `bun run lint` → 0 errors, 0 warnings across the whole project (after all 5 file edits + 2 FileMultiple fixes).
+   924→- Dev server log: clean compiles, GET / 200, GET /api/number-prefixes 200, GET /api/theme-profiles 200, GET /api/navy-list 200, GET /api/stakeholders 200.
+   925→- curl-tested POST /api/theme-profiles (create) → 201 with all fields persisted. Cleaned up via DELETE → 200.
+   926→- Verified /api/number-prefixes returns the 5 seeded prefixes (PR/NAV255/NAV254/PO/FILE) with prefix/suffix/nextNumber/description fields.
+   927→- Verified /api/navy-list returns seeded records sorted by seniority (Capt. T. Jayasuriya #1, Cdr. R. Perera #2, Lt. Cdr. A. Wickrama #3, ...) — confirms the seniority sort + auto-identified department/category flow is working end-to-end.
+   928→
+   929→Stage Summary:
+   930→- 3 target files enhanced in place + 2 incidental bug-fix files patched. All retain named exports + "use client" directive.
+   931→- add-project-wizard.tsx (~890 lines): EstimateRow now carries totalCost. CSV template emits 5 columns (ItemName, Qty, Unit, EstimateCost, TotalCost) with a sample row demonstrating TotalCost = Qty × EstimateCost. CSV parser detects the TotalCost column (preferring CSV value, falling back to Qty × EstimateCost). Editable grid + preview dialog both show EstimateCost (per unit) + TotalCost side-by-side. TotalCost auto-recomputes when Qty or EstimateCost is edited. Grand Total summary below the grid sums all row totals. API body unchanged — estimateCost stays per-unit. All other Step 1 fields (Project Name, Vote Number conditional on Funds checkbox, Project Type, Funding Source, Reference, Vote Allocation, Benefactor, Start/EDC, Officer, Status, Description) and Step 2 (EstimateItemsTable with AI Process) preserved untouched.
+   932→- settings.tsx (~5.1k lines): Now 8 tabs (Users, Roles, Auth, Votes, Stores, Process, Number Prefixes, Theme & Colors). NumberPrefixesTab fetches /api/number-prefixes, shows live-preview cards per docType (PR/NAV255/NAV254/PO/FILE), a configured-prefixes table with Edit/Delete, and an Add/Edit dialog with docType Select (disabled on edit), prefix mono input, suffix, nextNumber, description, and a live "prefix + end = full" preview. ThemeColorsTab fetches /api/theme-profiles, shows the active profile indicator, a 12-preset grid (6 dark + 6 light) where clicking applies instantly via useThemeProfile.setProfile, a "Set as Default" button on each preset (POST/PUT isDefault:true), and a saved/custom profiles table + create dialog with native color pickers. All other 6 tabs (User Profiles, Roles & Access, Authentication, Vote Management, Store Management, Process Flows) preserved untouched.
+   933→- stakeholders.tsx (~4.3k lines): "Upload Navy List" button now uses the default (primary-filled) variant for prominence. New "Refresh" button (RefreshCw icon, with animate-spin during refresh) re-fetches both the Navy List and the Stakeholders directory in parallel, with a brief success toast reporting record/officer/ranked counts. Navy List CSV template (Name, Rank, SVCNumber, Appointment, Seniority, Department, Category), auto-identify Department/Category from Appointment+Rank when blank, seniority-based re-sorting of officer sections, #N seniority badges, view/clear dialogs — all preserved untouched. All existing 5 categorised sections, Suppliers tab, supplier details pop-up, contacts/nominations/ratings CRUD preserved untouched.
+   934→- present-position.tsx + procurement.tsx: replaced invalid `FileMultiple` lucide-react import with `Files` (pre-existing bug from previous agents that was blocking the home page with HTTP 500; now HTTP 200).
+   935→- All edits use semantic Tailwind classes (bg-card, text-foreground, border-border, text-muted-foreground, dark: variants for amber light-mode badges) so they adapt to light/dark theme. Fully responsive (mobile-first grids, flex-wrap toolbars, max-h scroll containers with scrollbar-thin, overflow-x-auto on tables). Uses only shared ERP components (StatCard, PageHeader, LoadingState, ErrorState, EmptyState, CustomBadge, useFetch, apiRequest, useToast, useThemeProfile) + shadcn/ui primitives (Dialog, AlertDialog, Button, Input, Label, Textarea, Checkbox, Select, Table family, Tabs) + lucide-react icons. Lint-clean, runtime-clean. No TODOs/placeholders, no extra dependencies installed.
+   936→
+   937→---
+   938→Task ID: 3
+   939→Agent: Projects + Procurement File Grouping + Inline Update
+   940→Task: Add "Group by File" toggle (default ON) with merged multi-item rows + inline "Update" position popover + blank file-number handling to present-position.tsx (Projects) and procurement.tsx (Procurement)
+   941→
+   942→Work Log:
+   943→- Read worklog.md (esp. Task 1-theme-prefix-schema foundation: fileGroupKey already in ProjectFile Prisma model + /api/projects/[id]/files GET returns it; NUMBER_PREFIX_TYPES constant; theme tokens). Also read the latest Task 3-5 entry which noted `FileMultiple` is NOT a valid lucide-react export — the previous agent had to replace it with `Files`. I confirmed this and used `Files` from the start.
+   944→- Read both target files in full: present-position.tsx (1003 lines) + procurement.tsx (1356 lines), plus file-log.tsx (ProjectFile interface), estimate-items.tsx (GroupCard reference pattern), /api/projects/[id]/files route (GET returns fileGroupKey), /api/projects/[id]/files/[fileId] route (PUT accepts presentPosition/comment/changedBy + auto-logs), /api/procurement/[id] route (PUT accepts presentPosition/comment/changedBy + auto-logs), prisma/schema.prisma (ProjectFile.fileGroupKey String? exists; ProcurementFile has no fileGroupKey — only prNumber).
+   945→
+   946→FOUNDATION CHANGE — file-log.tsx (1-line additive):
+   947→- Extended the exported `ProjectFile` interface to include `fileGroupKey?: string | null`. This was required because the API already returns fileGroupKey (Prisma includes it by default) but the TS interface didn't declare it, so present-position.tsx couldn't read `f.fileGroupKey` for grouping. Purely additive — no existing code is affected.
+   948→
+   949→PART A — present-position.tsx (Projects Present Position file register):
+   950→- Imports: added `Fragment` from react, `Popover/PopoverContent/PopoverTrigger` from `@/components/ui/popover`, `RefreshCw`, `Files`, `ChevronRight` from lucide-react.
+   951→- New state: `groupByFile: boolean` (default `true`), `expandedGroups: Set<string>` (tracks which group keys are expanded).
+   952→- New `toggleGroup(key)` helper that toggles a key in the Set.
+   953→- New `FileGroup` interface + `groupedView` useMemo: groups `filteredFiles` by `(f.fileGroupKey?.trim()) || f.prNumber`. Groups of 2+ items become "merged" group entries; items with a unique key fall back to "singles". Each group pre-computes: totalCost, totalQty, commonSupplier (if 1 distinct), commonCategory, commonPosition, commonFileNumber, commonUnit, commonResponsiblePerson, firstCreatedAt. Common-value logic uses Set size === 1 to detect "all items share this value" — otherwise renders "multiple" / "mixed" badge.
+   954→- Toolbar: added a new "Group by File" / "Grouped by File" toggle button (Files icon, variant switches default↔outline based on state) between Export and Add File. Default ON.
+   955→- Table body rewrite: when `groupByFile && groupedView.groups.length > 0`, render Fragment-wrapped group header rows + (when expanded) indented child rows; otherwise render `filteredFiles` (or `groupedView.singles`) via the extracted `renderSingleFileRow(f)` helper. Group header row shows: PR Number + Files icon + "{N} items" badge, File Number (common or "—"), "multiple" item code, first item name + "+N more", total qty + common unit, "varies" unit price, **bold** total file cost, common supplier (or "multiple"), common PositionBadge (or amber "mixed" CustomBadge), common CategoryBadge (or "multiple"), and an actions cell with [QuickUpdatePopover isGroup] + [expand/collapse ChevronRight/Down button]. Child rows are indented (pl-8) with an ArrowRight prefix, lighter background (bg-secondary/10), and per-item details (item code, item name, qty, unit price, file cost, supplier, position, category) + per-item actions [QuickUpdatePopover] [Edit pencil]. The group row's onClick expands/collapses; the child row's onClick opens the file log (existing behaviour preserved).
+   956→- File Number cell rewrite (per task spec #3): removed the "Assign File No" inline button entirely. The File Number column now shows the file number with a Hash icon (emerald) when set, or a muted "—" when empty/null. No "Pending" text, no inline action — file number is set later in the process via the Edit dialog.
+   957→- New `QuickUpdatePopover` component (RefreshCw icon trigger): inline lightweight popover for position-only updates. Contents: current PositionBadge + file/PR context + (for groups) an amber "Applies to all N items" warning, a Select for the new position (from PRESENT_POSITIONS), a "Changed By" Input (default "Officer"), an optional Comment Input (placeholder auto-fills with "Position changed: X → Y" when position differs), and Cancel + Save buttons. On Save: validates position, then for groups (isMultiFile) shows `window.confirm("Update position for all N items in this file?")`; loops PUT /api/projects/[id]/files/[fileId] with `{ presentPosition, comment, changedBy }` for every file in the group via Promise.all; reports success/failure counts via toast; closes popover; calls `onSaved()` which triggers `refresh() + onChanged()` so the file register and project summary re-pull. Each QuickUpdatePopover instance is per-row (mounted once) so useState initialises from `files[0].presentPosition`. After Save, the user's chosen position matches the file's new position (self-correcting).
+   958→- Renamed existing pencil button title from "Update Position" → "Edit File (full dialog)" to differentiate it from the new "Quick Update Position" popover button. Existing UpdatePositionDialog (full edit with position transition UI, responsible person, file number, supplier, comment, changedBy) is preserved untouched — the pencil still opens it.
+   959→- Footer text updated to reflect grouped view: "{N} grouped file(s) + {M} single file(s) · Click a group row to expand its items · Click any row to view full log" vs the original "{N} file(s) · Click any row to view full log · Click the pencil to update position & assign file number".
+   960→- All existing functionality preserved: search/position filter/file-number filter pills, sortable headers, Export CSV, Add File, File Log dialog (click any row), UpdatePositionDialog (pencil), Allocation History dialog, "PR from Estimate" tab with EstimateItemsTable.
+   961→
+   962→PART B — procurement.tsx (Procurement files table):
+   963→- Imports: added `Fragment` from react, `Popover/PopoverContent/PopoverTrigger`, `RefreshCw`, `Files`, `ArrowRight` from lucide-react. Also added `CustomBadge` to the existing erp/badges import (was missing).
+   964→- New state: `groupByFile: boolean` (default `true`), `expandedGroups: Set<string>`. New `toggleGroup(key)` helper.
+   965→- New `ProcFileGroup` interface + `groupedView` useMemo: groups `filteredFiles` by `f.prNumber` only (ProcurementFile has no fileGroupKey field per schema). Same common-value logic as Projects but also tracks commonProjectName + commonVoteNumber (shown in the Project cell of the merged row).
+   966→- New `DisplayRow` discriminated union type (`{ type: "group"; group } | { type: "single"; file }`) and `displayRows` useMemo that flattens groups + singles when groupByFile is ON, or just singles when OFF.
+   967→- Pagination now paginates `displayRows` (groups + singles) instead of `filteredFiles`. Each group counts as 1 row against PAGE_SIZE=15; expanded child rows do NOT count (a fully expanded page just gets taller). Pagination text updated: "Showing X–Y of Z row(s) ({N} items · {M} grouped file(s))" when grouped, else "Showing X–Y of Z files" as before.
+   968→- PageHeader actions: wrapped Add File button in a flex container with the new "Group by File" / "Grouped by File" toggle button (Files icon, default↔outline variant). Clicking the toggle also resets page to 1.
+   969→- Table body rewrite: when groupByFile is ON and groups exist, render Fragment-wrapped merged group header rows + (when expanded) indented child rows. Group header row shows: PR Number + Files icon + "{N} items" badge, common Project Name + common Vote Number (or "multiple"/"—"), "multiple" item code, first item name + "+N more", common unit (or "varies"), total qty, "varies" unit price, **bold** total file cost, common supplier (or "multiple"), common PositionBadge (or amber "mixed"), common CategoryBadge (or "multiple"), and actions cell [ProcurementQuickUpdatePopover isGroup] + [expand/collapse button]. Child rows: indented (pl-8) with ArrowRight prefix, lighter bg, per-item Project/Item/Qty/UnitPrice/FileCost/Supplier/Position/Category + per-item actions [ProcurementQuickUpdatePopover] [pencil → UpdatePositionDialog] [History → FileLogDialog] [Download → CSV export]. Single rows render with the same actions as before plus the new QuickUpdatePopover as the first action.
+   970→- Renamed existing pencil button title from "Update Position" → "Update Position (full dialog)" to differentiate from the new "Quick Update Position" popover. The existing UpdatePositionDialog (newPosition + comment + changedBy) is preserved untouched.
+   971→- New `ProcurementQuickUpdatePopover` component: same shape as the Projects one but PUTs to `/api/procurement/{id}` per file (no projectId in the URL). Same group-confirm flow, same Promise.all parallel updates, same toast feedback.
+   972→- All existing functionality preserved: search bar, supplier/project/position/category filters, date range filters + Today/This Week/This Month presets, sortable PR/File Cost headers, pagination, File Log dialog, UpdatePositionDialog (pencil), per-row CSV export, Add File dialog.
+   973→
+   974→Verification:
+   975→- `bun run lint` → 0 errors, 0 warnings across the whole project after all edits.
+   976→- Dev server log: GET / 200 (~40KB HTML), no compile errors, no runtime exceptions.
+   977→- curl-tested PUT /api/procurement/{id} with `{ presentPosition, comment, changedBy }` → 200, presentPosition updated, ProcurementLog auto-created (confirmed by re-fetching the file and counting logs: 0 → 1). Reverted the test change.
+   978→- curl-tested PUT /api/projects/{id}/files/{fileId} with `{ presentPosition, comment, changedBy }` → 200, presentPosition updated. Reverted the test change.
+   979→- Verified GET /api/projects/{id}/files returns fileGroupKey (currently null in seeded data — my grouping logic correctly falls back to prNumber via `(f.fileGroupKey?.trim()) || f.prNumber`).
+   980→- Verified home page renders without errors (HTTP 200, ~40KB HTML, no "Application error" / "Failed to compile" markers).
+   981→
+   982→Stage Summary:
+   983→- 3 files touched: file-log.tsx (1-line additive interface extension for fileGroupKey), present-position.tsx (~1003 → ~1407 lines), procurement.tsx (~1356 → ~1815 lines). All retain named exports (`FileLogDialog`, `PresentPositionDialog`, `ProcurementModule`) + "use client" directive.
+   984→- present-position.tsx: Group-by-File toggle (default ON) merges items sharing `fileGroupKey || prNumber` into a single row showing the PR Number once, common file number, common supplier/category/position/responsible person, summed total file cost, and an expand toggle to view individual items. Inline "Quick Update Position" popover (RefreshCw icon) added beside the existing pencil/Edit button on every row + every group header; for groups it confirms "Update position for all N items in this file?" and loops PUT /api/projects/{id}/files/{fileId} for every item. "Assign File No" inline button removed; File Number column now shows a muted "—" when empty (no "Pending" text). Existing UpdatePositionDialog (full edit with position transition, responsible person, file number, supplier) preserved as the pencil action. Search/filter/sort/Export/Add File/File Log/Allocation History/PR-from-Estimate tab all preserved.
+   985→- procurement.tsx: Group-by-File toggle (default ON) merges items sharing the same `prNumber` into a single row (ProcurementFile has no fileGroupKey field — grouping is strictly by prNumber). Merged row shows PR Number + item count, common project + vote number, common supplier/category/position, summed total file cost, and an expand toggle. Inline "Quick Update Position" popover (RefreshCw icon) added beside the existing pencil button on every row + every group header; for groups it confirms "Update position for all N items in this file?" and loops PUT /api/procurement/{id} for every item. Existing UpdatePositionDialog (pencil), File Log dialog (History), per-row CSV export, Add File dialog, all filters + date presets + sortable headers + pagination all preserved. Pagination now paginates groups+singles when grouped (each group = 1 row); expanded child rows don't count against PAGE_SIZE.
+   986→- All edits use semantic Tailwind classes (bg-card, bg-secondary/30, text-foreground, text-muted-foreground, border-border, bg-popover/text-popover-foreground for the popover) so they adapt to light/dark theme. Fully responsive (mobile-first, flex-wrap toolbars, overflow-x-auto on tables, sticky expand chevrons). Uses only shared ERP components (PositionBadge, CategoryBadge, CustomBadge, LoadingState, EmptyState, useFetch, apiRequest, useToast) + shadcn/ui primitives (Dialog, Popover, PopoverContent, PopoverTrigger, Button, Input, Label, Select, Table family) + lucide-react icons (Files, RefreshCw, ChevronRight, ChevronDown, ArrowRight, Hash, Pencil, History, Download, etc.). Lint-clean, runtime-clean. No TODOs/placeholders, no extra dependencies installed.
+   987→
+   988→---
+   989→Task ID: 1-schema-finance
+   990→Agent: Main (Schema: Vote dept, Financial Delegation, Store responsible, ProcessStep redesign)
+   991→Task: Vote department, FinancialDelegation model, StoreSetting responsible persons, ProcessStep new fields
+   992→
+   993→Work Log:
+   994→- Schema: Vote.department (SLN/MOD/custom); FinancialDelegation model (value, authority, label); StoreSetting.responsiblePersons + responsibleOfficers (JSON); ProcessStep new fields (department, responsibleOfficers, responsibleSailors JSON, financialDelegationId, prefixedNumber); NumberPrefix.stepId
+   995→- Created /api/financial-delegations (GET,POST) + [id] (PUT,DELETE)
+   996→- Updated /api/process-flows/[id]/steps POST+PUT to accept department, responsibleOfficers/Sailors (JSON), financialDelegationId, prefixedNumber
+   997→- Updated /api/votes POST+PUT to accept department
+   998→- Updated /api/settings/stores-config POST+PUT to accept department, responsiblePersons/Officers (JSON)
+   999→- Seeded 6 votes (5 active SLN + 1 inactive MOD), 7 financial delegations (500K-Cdr to 50M-CNC)
+  1000→- Added constants: VOTE_DEPARTMENTS (SLN/MOD), FINANCIAL_AUTHORITIES (Cdr/Capt/FC/AOE/CNC), PROCESS_STEP_STAGES (26 stages incl. new: Finalizing Specification, Pre-tender, Financial Authority, Collection and QCI, To be Oncharge, Complete, Post Tender), SETTINGS_DEPARTMENTS (CCED/CSLOG/Others), DIMENSION_UNITS (meter/inch)
+  1001→
+  1002→Stage Summary:
+  1003→- Backend ready. Frontend needed: Projects/Procurement checkbox multi-select + cost columns + estimate unit cost fix + no re-route; Rate Finder discontinue by rate code; Collection PO auto-fill + Part Supply form changes; Settings overhaul (roles module add/edit, auth user CRUD, vote dept + active-only, store responsible persons, process redesign with delegation as separate tab, Value&Step new tab)
+  1004→- NOTE: Firebase API key provided by user CANNOT be used — system runs on Next.js + Prisma/SQLite (locked stack). Continuing with Prisma.
+  1005→
+  1006→---
+  1007→Task ID: 3-4
+  1008→Agent: Rate Finder Discontinue + Collection PO Auto-fill + Part Supply Form
+  1009→Task: PART A — Rate Finder "Upload Discontinue List" by Rate Code (single-column CSV → moves matching RC items into Discontinued list). PART B — Collection Dashboard "Files to be Collected" card (PO-processed procurement files). PART C — "Select PO Item" auto-fill dropdowns in Add Part Supply Order + Record Collection dialogs. PART D — Part Supply Add Entry dialog: remove sailor count, add Provost Sailor + QC Checked-By (CCED) dropdowns from stakeholders, add Dimension (H/W/D + unit) with auto-calculated Quantity.
+  1010→
+  1011→Work Log:
+  1012→- Read worklog.md (foundation Task 1-schema-finance: DIMENSION_UNITS already exported, ProcurementFile/Stakeholder/PartSupplyEntry schemas confirmed).
+  1013→- Read both target files in full: rate-finder.tsx (1906 lines) and collection.tsx (3884 lines).
+  1014→- Inspected API routes: /api/rate-finder/discontinued (POST accepts arrays), /api/rate-finder/rc/[id] (DELETE), /api/procurement (GET returns array with presentPosition), /api/stakeholders (GET returns array with category/department/appointment), /api/collection/part-supply/[id]/entries (POST auto-calculates srNo + cumulativeBalance).
+  1015→- Confirmed seed data via curl: 2 procurement files at PO-processed positions (PR-2025-001 Order Placed, PR-2025-011 Items Dispatched); 4 CSLOG Sailors (provost candidates) and 4 CCED Officers (QC candidates — no "CCED Sailor" category seeded yet, used fallback to category/appointment containing "CCED").
+  1016→
+  1017→PART A — rate-finder.tsx:
+  1018→- Added `ArrowRightLeft` icon import + `DISCONTINUE_BY_RC_TEMPLATE` constant (single-column "Rate code" CSV template).
+  1019→- Extended `DiscontinuedTabProps` with `rcItems: RCItem[] | null` + `rcRefresh: () => void`; RateFinderModule now passes both to DiscontinuedTab.
+  1020→- Added new "Upload Discontinue List" button (variant outline, ArrowRightLeft icon, distinct from existing "Upload Discontinued List" full-CSV button) before the Add button. Tooltip explains the by-rate-code behavior.
+  1021→- New `UploadDiscontinueByRateCodeDialog` component (~330 lines) at the end of the file:
+  1022→  * Hidden file input (CSV only) + "Choose CSV File" + "Download Template" buttons.
+  1023→  * Parses CSV via existing parseCSV helper. Looks for "rate code" column header (also accepts "ratecode"/"rate_code"); if missing, assumes single-column list with optional header row. Trims + de-duplicates codes case-insensitively.
+  1024→  * Builds a preview table (one row per code) showing: Rate Code, Matched Item(s) (up to 3 with supplier), Last RC Price, RC Year, Status ("Will move" green badge or "Skipped" amber badge). Header bar shows count badges (matched codes / total RC items to move / no-match count) + Reset button.
+  1025→  * Submit: builds discontinuePayload from all matched RC items (itemCode, description, unit, lastRCPrice=rcPrice, lastRCYear=rcYear, discontinuedDate=today ISO, reason="Discontinued via bulk upload", alternatives=null) → POST bulk array to /api/rate-finder/discontinued → sequentially DELETE each matched RC item via /api/rate-finder/rc/[id].
+  1026→  * Success toast: "X items moved from RC list to Discontinued list" with description detailing deleted count + unmatched count. Calls onDone → refreshes both Discontinued and RC lists.
+  1027→  * Empty-state hint when no file selected; "Moving items..." spinner during submit; submit disabled when totalMatches === 0.
+  1028→
+  1029→PART B — collection.tsx DashboardTab:
+  1030→- Added `useFetch<ProcurementFile[]>("/api/procurement")` to DashboardTab.
+  1031→- Added `PO_PROCESSED_POSITIONS` constant (PO Placed / Order Placed / Items Dispatched / In Transit) + `isPoProcessed` helper.
+  1032→- Added new "Files to be Collected" card after Recent Activity section: header with ShoppingCart icon, file count amber badge, qty + value totals; explanatory subtitle; max-h-96 scrollable table with sticky header showing PR Number, Item (with item code/unit/project subtext), Supplier, Qty, File Cost, Position (PositionBadge). EmptyState when no PO-processed files.
+  1033→- Used `PositionBadge` (new import from @/components/erp/badges) to colour-code the present position.
+  1034→
+  1035→PART C — PO Item auto-fill dropdowns:
+  1036→- AddPartSupplyDialog: added `selectedPoId` state, `useFetch<ProcurementFile[]>` (only when open), filtered `poOptions`. New "Select PO Item" Select at the top of the form (with ShoppingCart icon) — selecting an item calls handlePoSelect which sets itemName, orderedQty (from f.qty), and supplier. Form fields below remain editable. Form reset on submit clears selectedPoId too.
+  1037→- RecordCollectionDialog: same pattern — `selectedPoId` state, fetches /api/procurement when open, "Select PO Item" Select auto-fills itemName, qty, receivedFrom (supplier).
+  1038→
+  1039→PART D — AddEntryDialog redesign:
+  1040→- Imported `DIMENSION_UNITS` from constants; `Ruler`, `Calculator`, `Anchor`, `ShoppingCart` icons from lucide-react; `PositionBadge` from badges.
+  1041→- Removed fields: `sailorCount`, `driverLicense`, `driverPhone` (and their inputs). Kept `driverName` state but repurposed to hold the "Provost Sailor Checked" name.
+  1042→- Added new state: `dimH`, `dimW`, `dimD`, `dimUnit` (default = "meter").
+  1043→- Added `useFetch<Stakeholder[]>("/api/stakeholders")` (only when open). Derived `provostSailors` (category contains "sailor" OR department contains "provost") and `ccedSailors` (category === "cced sailor" OR category/appointment contains "cced" — fallback for un-seeded categories).
+  1044→- New `computedQty` useMemo = Height × Width × Depth (rounded to 4 dp), returns null when any dim is missing/invalid. `effectiveQty` shows computed value when dimensions present, else falls back to manual `qty` string — keeps the qty Input `readOnly` + visually disabled when auto-filled, with a green "auto" badge.
+  1045→- Dimension UI: bordered card with Ruler icon + "Qty = H × W × D" badge, 4-col grid (Height/Width/Depth inputs + Unit Select with meter/inch options). Help text shows cubic meters/inches based on unit.
+  1046→- "Provost Sailor Checked" Select (Anchor icon, blue) populated from provostSailors — value saved into driverName column.
+  1047→- "QC Checked By" Select (ShieldCheck icon, emerald) populated from ccedSailors — value saved into qcCheckedBy column.
+  1048→- Submit payload: sailorCount=0 (model default preserved), driverLicense/driverPhone=undefined (no longer captured), qty=Number(effectiveQty) — server auto-calculates srNo + cumulativeBalance + updates order totals/status.
+  1049→- Reset on submit clears all dim fields + dimUnit back to meter.
+  1050→
+  1051→Display table + Print Receipt updates:
+  1052→- PartSupplyTab entries table: removed "Sailors" column (was sailorCount) and "Driver" column (was driverName + license + phone combined). Replaced with single "Provost Sailor" column showing e.driverName. Header now: Sr / Date / Vehicle / Qty / QC By / Provost Sailor / Cum. Bal.
+  1053→- PrintReceiptDialog table: same column change; "No entries" row colspan reduced 8 → 7.
+  1054→
+  1055→Type additions to collection.tsx:
+  1056→- `ProcurementFile` interface (matches Prisma model + optional logs).
+  1057→- `Stakeholder` interface (matches Prisma model).
+  1058→- `formatStakeholder(s)` helper → "Name (Rank) · Appointment".
+  1059→
+  1060→Verification:
+  1061→- `npx eslint src/components/erp/modules/rate-finder.tsx src/components/erp/modules/collection.tsx` → EXIT 0, zero errors in either file. (1 pre-existing error in settings.tsx from another agent's work — `ValueAndStepTab` undefined — is unrelated to this task.)
+  1062→- Verified via curl: GET /api/procurement returns 6 files (2 PO-processed: PR-2025-001 Order Placed, PR-2025-011 Items Dispatched). GET /api/stakeholders returns 12 stakeholders (4 CSLOG Sailors for provost, 4 CCED Officers for QC fallback). All endpoints 200 OK.
+  1063→- dev.log shows successful compiles ("✓ Compiled in 651ms", "✓ Compiled in 442ms") after edits; GET / returns HTTP 200; no compile errors referencing rate-finder.tsx or collection.tsx.
+  1064→
+  1065→Stage Summary:
+  1066→- 2 files touched: rate-finder.tsx (~1907 → ~2342 lines, +435), collection.tsx (~3884 → ~4218 lines, +334). Both retain named exports (`RateFinderModule`, `CollectionModule`) + "use client" directive. All existing functionality preserved.
+  1067→- PART A delivered: "Upload Discontinue List" button on Discontinued tab opens a new dialog that accepts a single-column Rate Code CSV, previews matched RC items (with status badges), then bulk-creates DiscontinuedItem records (with reason="Discontinued via bulk upload", discontinuedDate=today) and deletes the matched RC items — effectively moving them from RC list to Discontinued list. Existing manual Add + full-CSV Upload Discontinued features untouched.
+  1068→- PART B delivered: Dashboard "Files to be Collected" card with sticky-header scrollable table of PO-processed procurement files (PO Placed / Order Placed / Items Dispatched / In Transit), showing PR Number, Item, Supplier, Qty, File Cost, and Position badge.
+  1069→- PART C delivered: "Select PO Item" dropdown at the top of both Add Part Supply Order and Record Collection dialogs — picking an item auto-fills itemName, orderedQty/qty, supplier/receivedFrom. Fields remain editable afterwards.
+  1070→- PART D delivered: AddEntryDialog redesigned — No. of Sailors field removed; new "Provost Sailor Checked" Select (CSLOG Sailor stakeholders, saved to driverName column); new "QC Checked By" Select (CCED stakeholders, saved to qcCheckedBy column); new Dimension card with Height/Width/Depth inputs + meter/inch unit Select that auto-calculates the Quantity field (read-only when auto-filled, "auto" badge). Entries table + Print Receipt updated to show "Provost Sailor" column instead of "Sailors" + "Driver" columns.
+  1071→- Lint-clean, runtime-clean, no TODOs/placeholders, no extra dependencies installed. Uses only shared ERP components (StatCard, badges, PageHeader, states, useFetch, apiRequest, useToast) + shadcn/ui primitives + lucide-react icons. Semantic Tailwind classes for light/dark theme support; responsive (mobile-first, grid breakpoints, max-h scroll containers with custom webkit-scrollbar styling).
+  1072→
+  1073→---
+  1074→Task ID: 2
+  1075→Agent: Projects/Procurement Multi-Select + Cost Columns + Estimate Fix
+  1076→Task: Update Projects (present-position.tsx) + Procurement (procurement.tsx) + Estimate items (estimate-items.tsx, initiate-file.tsx, add-project-wizard.tsx) to add checkbox multi-select + Initiate Selected button, add Cost + File Cost columns, rename Estimate Cost → Unit Cost, fix the divided-by-qty bug, and ensure NO re-routing after initiate.
+  1077→
+  1078→Work Log:
+  1079→- Read worklog.md (esp. Tasks 1-enhance, 4-5, 3, 1-schema-finance) and inspected all 5 target files in full + the API routes (/api/estimates/[id]/items/[itemId], /api/estimates/[id]/process, /api/projects/[id]/files, /api/procurement/[id], /api/number-prefixes) + the Prisma schema (EstimateItem.estimateCost/approxCost/rcRate semantics) + the AI lib (processEstimateWithAI sets approxCost = rcRate if RC else estimateCost).
+  1080→- Confirmed the existing Group-by-File toggle + Quick Update Position popover + File Log dialog + Allocation History + PR-from-Estimate tab + Step 1 / Step 2 wizard flow are all preserved untouched.
+  1081→- Discovered a pre-existing parsing error in settings.tsx line 3632 (`.map((s, idx) => { ... return (...) })` was being closed with `))}` instead of `);})}`) introduced by a previous agent's uncommitted work — it blocked the entire home page with HTTP 500. Fixed it minimally (out of my task scope but blocking) so the dev server could compile again.
+  1082→
+  1083→PART A — present-position.tsx (Projects file register):
+  1084→- Imports: added `Checkbox` from `@/components/ui/checkbox` + `CheckSquare`, `ListChecks` icons from lucide-react.
+  1085→- New state: `selectedIds: Set<string>` (default empty) + `bulkInitiateOpen: boolean`.
+  1086→- New helpers: `toggleSelect(id)`, `selectMany(ids, on)`, `clearSelection()`. Derived state (`allVisibleIds`, `visibleSelectedCount`, `allVisibleSelected`, `someVisibleSelected`, `toggleSelectAllVisible`, `suggestedNextPosition`) computed AFTER `filteredFiles` is defined to avoid the temporal-dead-zone when useMemo callbacks evaluate on first render.
+  1087→- New `handleBulkInitiate({ newPosition, changedBy, comment })` — bulk-PUTs all selected files via `/api/projects/{id}/files/{fileId}` with Promise.all, reports success/failure counts via toast, clears selection, closes dialog, refreshes the register + parent summary.
+  1088→- Table header: added a checkbox column (w-10) as the first column with a "Select All" checkbox (uses true/false/"indeterminate" based on `allVisibleSelected` / `someVisibleSelected`). Added a new "Cost" column between "Unit Price" and "File Cost" headers. Updated colSpan from 11 → 13 (loading + empty rows).
+  1089→- Row rendering (single + grouped + expanded child): added a Checkbox cell as the first cell (with `e.stopPropagation()` so row-click doesn't fire). Group header checkbox is indeterminate-aware (toggles all items in the group). Added a Cost cell showing `formatCurrency(unitPrice × qty)` for single/child rows or "varies" italic for merged group rows. Selected rows get a subtle `bg-primary/[0.06]` highlight.
+  1090→- Selection bar (floating, above the table): appears when `selectedIds.size > 0`. Shows "N items selected" + Clear button + Initiate Selected button (CheckSquare icon).
+  1091→- New `BulkInitiateDialog` component: a dialog with target position Select (defaults to `suggestedNextPosition`, which picks the next index after the most common current position among selected files), Changed By input (default "Officer"), Comment input (placeholder `Bulk initiated → {newPosition}`). On submit, calls `handleBulkInitiate`. Parent passes a `key={bulk-${selectedIds.size}-${suggestedNextPosition}}` so the dialog remounts with the latest suggested position whenever the user opens it with a fresh selection.
+  1092→- All existing functionality preserved: Group-by-File toggle (default ON), Quick Update Position popover (RefreshCw), File Log dialog (click row), UpdatePositionDialog (pencil), Allocation History, Add File dialog, Export CSV, search/position/file-number filters, sortable headers, "PR from Estimate" tab with EstimateItemsTable.
+  1093→
+  1094→PART B — procurement.tsx (Procurement files table):
+  1095→- Imports: added `Checkbox`, `DialogDescription`, `CheckSquare`, `ListChecks`. (Other shadcn primitives already imported.)
+  1096→- New state: `selectedIds: Set<string>` + `bulkInitiateOpen: boolean` + multi-select helpers (same shape as Projects).
+  1097→- New derived state computed AFTER `filteredFiles`: `allVisibleIds`, `visibleSelectedCount`, `allVisibleSelected`, `someVisibleSelected`, `toggleSelectAllVisible`, `suggestedNextPosition`, `handleBulkInitiate` (PUTs `/api/procurement/{id}` for each selected file).
+  1098→- PageHeader actions: added an "Initiate Selected" button (with a count badge) that appears when items are selected. Existing Group by File + Add File buttons preserved.
+  1099→- Selection bar (between filters and table): same pattern as Projects — "N items selected" + Clear + Initiate Selected.
+  1100→- Table header: added a Select All checkbox column (w-10) + a new "Cost" column between "Unit Price" and "File Cost".
+  1101→- Row rendering (single + grouped + expanded child): added Checkbox cell + Cost cell (`formatCurrency(unitPrice × qty)` for single/child rows; "varies" for merged group rows). Group header checkbox is indeterminate-aware. Selected rows highlighted.
+  1102→- New `BulkInitiateDialog` component (same shape as Projects' version). Parent passes `key={bulk-${selectedIds.size}-${suggestedNextPosition}}` for fresh mount on each open.
+  1103→- All existing functionality preserved: Group-by-File toggle (default ON, groups by prNumber since ProcurementFile has no fileGroupKey field), Quick Update Position popover (RefreshCw), UpdatePositionDialog (pencil), File Log dialog (History), per-row CSV export (Download), Add File dialog, search/supplier/project/position/category filters, date range filters + Today/This Week/This Month presets, sortable PR/File Cost headers, pagination (15 per page; groups count as 1 row when grouped).
+  1104→
+  1105→PART C — estimate-items.tsx (Estimate items table + Step 2 of wizard):
+  1106→- Imports: added `Checkbox`, `Input`, `Label`, `Dialog/DialogContent/DialogHeader/DialogTitle/DialogFooter/DialogDescription`, `Select/SelectContent/SelectItem/SelectTrigger/SelectValue`, lucide icons (`CheckSquare`, `ListChecks`, `X`, `UserCheck`, `User`, `Layers`, `Info`, `RotateCcw`). Added `Stakeholder` + `NumberPrefix` interfaces.
+  1107→- Renamed SortKey type: `"approxCost"` → `"unitCost"` + added `"totalCost"` sort key.
+  1108→- EstimateItemsTable: now fetches `/api/number-prefixes` + `/api/stakeholders` (for the Bulk Initiate PR dialog). New state: `selectedIds`, `bulkInitiateOpen`. Helpers: `toggleSelect`, `selectMany`, `clearSelection`, `toggleSelectAllPending` (selects only Pending items since Initiated items can't be re-initiated). Derived: `allPendingIds`, `visibleSelectedCount`, `allPendingSelected`, `somePendingSelected`. Officers + sailors sorted by seniority. PR prefix auto-suggest from /api/number-prefixes docType=PR.
+  1109→- New `handleBulkInitiate({ prNumber, fileNumber, fileGroupKey, authorizedById, createdById })` — loops POST /api/estimates/{estimateId}/items/{itemId} for each selected item with the SAME prNumber/fileNumber/fileGroupKey/authorizedBy/createdBy so they collapse into a single grouped file in the PR Raised Files window. Reports success/failure counts via toast, clears selection, closes dialog, refreshes the estimate + calls onChanged.
+  1110→- SummaryTile "Total Approx Cost" renamed to "Total Cost" — now correctly sums `(isRC ? rcRate : approxCost) × qty` per row (was previously summing `approxCost` directly, which is per-unit so the sum was meaningless).
+  1111→- New selection bar (between summary tiles and group-by-file toggle): "N items selected · ready to initiate" + Clear + Initiate Selected.
+  1112→- Group-by-file toggle row: added a "Select All pending items" Checkbox next to the existing tip text.
+  1113→- ItemsSection: now accepts `selectedIds` + `onToggleSelect` props. Added new `unitCostOf(it)` (= it.isRC ? it.rcRate : it.approxCost) + `totalCostOf(it)` (= unitCostOf × qty) helpers — used by the sort comparator + the section's total cost. Header text changed from "Total Approx Cost:" → "Total Cost:". Sort comparator now handles `unitCost` + `totalCost` keys.
+  1114→- Table header inside ItemsSection: added a "Select" column (w-10) as the first column. Renamed "Approx Cost" → "Unit Cost". Added a new "Total Cost" sortable column between Unit Cost and RC No.
+  1115→- ItemRow: added `isSelected` + `onToggleSelect` props. The buggy `unitPrice = it.isRC ? it.rcRate : it.approxCost / (it.qty || 1)` is FIXED — now `unitCost = it.isRC ? it.rcRate : it.approxCost` (per-unit, no division). Display: Unit Cost column shows `formatCurrency(unitCost)` (+ "@RC rate" subline for RC items, replacing the buggy "@{unitPrice}" subline for non-RC). Total Cost column shows `formatCurrency(unitCost × qty)`. Added a Checkbox cell at the start (only for non-compact view + Pending items; Initiated items show "—" since they can't be re-initiated). Selected rows get `bg-primary/[0.06]`.
+  1116→- GroupCard: header total cost calc FIXED to `(isRC ? rcRate : approxCost) × qty` per item (was summing `approxCost` directly). Expanded items table header renamed "Approx Cost" → "Unit Cost" + added "Total Cost" column.
+  1117→- New `BulkInitiatePRDialog` component: same shape as InitiateFileDialog (PR Number + File Number + File Group Key + Authorized By officer Select + Created By sailor Select) but applies the SAME values to all selected items. PR Number defaults to the suggested value from /api/number-prefixes. File Group Key defaults to mirroring the PR Number (so all items share one file). On submit, calls `handleBulkInitiate`. Parent passes `key={bulk-${selectedIds.size}-${suggestedPrNumber}}` for fresh mount on each open.
+  1118→
+  1119→PART D — initiate-file.tsx (Single-item Initiate File dialog):
+  1120→- Fixed the buggy `unitPrice = item.isRC ? item.rcRate : item.approxCost / (item.qty || 1)` → `unitPrice = item.isRC ? item.rcRate : item.approxCost` (per-unit, no division).
+  1121→- Toast message updated: was "File initiated — {prNumber} / PR raised and forwarded to project window" → now "File initiated — {prNumber} / PR raised successfully. Item status updated below." (removed the misleading "forwarded to project window" wording that suggested routing away).
+  1122→- Dialog description updated: was "Raise a PR/GORF from this estimate item. The file will be forwarded to the project's PR Raised Files window." → now "Raise a PR/GORF from this estimate item. The item's status will update in place — you stay on this tab to continue initiating more files."
+  1123→- Renamed "Non-RC — Estimate Cost" → "Non-RC — Unit Cost" + "Est. Unit Cost" → "Unit Cost" in the detail grid.
+  1124→- The dialog STILL closes after submit (so the user is "in the same window" — the estimate items table) and calls `onInitiated()` which triggers `refresh()` so the item's status updates in place from "Pending" to "Initiated". NO tab switch anywhere in the flow.
+  1125→
+  1126→PART E — add-project-wizard.tsx (Step 1 CSV template + editable grid):
+  1127→- CSV template header renamed: `ItemName,Qty,Unit,EstimateCost,TotalCost` → `ItemName,Qty,Unit,UnitCost,TotalCost`.
+  1128→- Toast description updated to match: "Columns: ItemName, Qty, Unit, UnitCost (per unit), TotalCost (= Qty × UnitCost — leave blank to auto-compute)."
+  1129→- CSV parser: now detects `UnitCost` (preferred) OR legacy `EstimateCost` header for backward compatibility. The idxCost lookup matches: `h === "unitcost"` OR `h.includes("unit cost")` OR `h.includes("unitcost")` OR `h.includes("estimate") && (h.includes("cost") || h.includes("price"))` OR generic `(h.includes("cost") || h.includes("price")) && !h.includes("total")` (last clause is the original fallback).
+  1130→- Editable grid header: "Est. Cost / Unit (Rs.)" → "Unit Cost (Rs.)".
+  1131→- Editable grid total cost cell title attribute: "Total Cost = Qty × Estimate Cost (auto-computed)" → "Total Cost = Qty × Unit Cost (auto-computed)".
+  1132→- Tip text: "Estimate cost is per-unit; Total Cost auto-computes as Qty × Estimate Cost..." → "Unit Cost is per-unit; Total Cost auto-computes as Qty × Unit Cost...".
+  1133→- CSV import preview dialog header: "Est. Cost / Unit" → "Unit Cost".
+  1134→- Comments in the EstimateRow interface + updateRow function updated to reference "UnitCost" instead of "EstimateCost". The API field name stays `estimateCost` (per the task spec — the API field name represents per-unit cost).
+  1135→- All other Step 1 fields (Project Name, Vote Number conditional on Funds checkbox, Project Type, Funding Source, Reference, Vote Allocation, Benefactor, Start/EDC, Officer, Status, Description) and Step 2 (EstimateItemsTable with AI Process button) preserved untouched.
+  1136→
+  1137→Verification:
+  1138→- `bun run lint` → 0 errors, 0 warnings across the whole project (after all 5 file edits + 1 settings.tsx parsing fix).
+  1139→- Dev server log: GET / 200 (~40KB HTML), no compile errors, no runtime exceptions. All API endpoints (procurement, projects, estimates, number-prefixes, stakeholders) respond 200 OK.
+  1140→- curl-verified GET /api/projects/{id}/files returns unitPrice + qty + fileCost + fileGroupKey fields needed by the Cost + File Cost columns. Verified GET /api/estimates returns items with estimateCost + approxCost + rcRate fields needed by the Unit Cost + Total Cost columns.
+  1141→- Verified the seeded estimate has all RC items (isRC=true) — my code correctly uses `rcRate` as the per-unit cost for RC items, so the Unit Cost + Total Cost display is correct for the seeded data even though the seeded `approxCost` field happens to store the TOTAL cost (seed data inconsistency, not a code issue — the AI lib sets approxCost = rcRate for RC items).
+  1142→- Verified home page renders without errors (HTTP 200, no "Application error" / "Failed to compile" markers).
+  1143→
+  1144→Stage Summary:
+  1145→- 5 target files enhanced in place: present-position.tsx (~1407 → ~1640 lines), procurement.tsx (~1815 → ~2050 lines), estimate-items.tsx (~763 → ~1280 lines), initiate-file.tsx (~361 → ~361 lines, no net change), add-project-wizard.tsx (~891 → ~891 lines, no net change). All retain named exports (`PresentPositionDialog`, `ProcurementModule`, `EstimateItemsTable`, `InitiateFileDialog` + `EstimateItem`, `AddProjectWizard`) + "use client" directive.
+  1146→- Feature A (Multi-select to Initiate) delivered for both Projects file register + Procurement files table: checkbox column (with Select All + indeterminate-aware group checkboxes), selection bar with count + Clear + Initiate Selected, Bulk Initiate Dialog (target position picker for Projects/Procurement; full PR form with auto-suggested PR number for Estimate items).
+  1147→- Feature B (Cost + File Cost columns) delivered for both tables: new "Cost" column showing `unitPrice × qty` per item, existing "File Cost" column retained (shows stored fileCost / summed total for grouped rows).
+  1148→- Feature C (Unit Cost rename + Total Cost fix) delivered in estimate-items.tsx + initiate-file.tsx + add-project-wizard.tsx: all "Approx Cost" / "Estimate Cost" / "Est. Cost / Unit" labels renamed to "Unit Cost"; new "Total Cost" column showing `Unit Cost × Qty`; buggy `approxCost / qty` calculation removed; CSV template column renamed `EstimateCost` → `UnitCost` (parser accepts both for backward compat); API field name stays `estimateCost` (per spec).
+  1149→- Feature D (No re-route after initiate) delivered: toast message no longer says "forwarded to project window"; dialog description explicitly says "you stay on this tab"; dialog closes + refreshes the estimate items table so the item's status updates in place from "Pending" to "Initiated". NO tab switch anywhere in the flow (verified by tracing onInitiated → setInitiateItem(null) + refresh() + onChanged?.() — none of these touch activeTab).
+  1150→- All edits use semantic Tailwind classes (bg-card, bg-secondary/30, bg-primary/[0.06], text-foreground, text-muted-foreground, border-border, bg-popover/text-popover-foreground for popovers) so they adapt to light/dark theme. Fully responsive (mobile-first, flex-wrap toolbars, overflow-x-auto on tables, sticky expand chevrons). Uses only shared ERP components (PositionBadge, CategoryBadge, CustomBadge, LoadingState, EmptyState, useFetch, apiRequest, useToast) + shadcn/ui primitives (Dialog, Popover, PopoverContent, PopoverTrigger, Button, Input, Label, Checkbox, Select, Table family) + lucide-react icons (Files, RefreshCw, ChevronRight, ChevronDown, ArrowRight, Hash, Pencil, History, Download, CheckSquare, ListChecks, X, UserCheck, User, Layers, Info, RotateCcw). Lint-clean, runtime-clean. No TODOs/placeholders, no extra dependencies installed.
+  1151→
+  1152→---
+  1153→Task ID: 5
+  1154→Agent: Settings Overhaul — Roles, Auth, Votes, Stores, Process, Value&Step
+  1155→Task: Overhaul the Settings module: editable Roles matrix (Add/Edit/Delete module with localStorage), Auth tab full User CRUD (password + stakeholder link), Vote Management with Department combobox field, Store Management with department + multi-select responsible persons/officers, Process Step redesign (predefined stage dropdown, department, responsible officers/sailors, prefixed number auto-suggest, conditional financial delegation link), Flow form with optional default delegation, Number Prefix with linked Step dropdown, and a brand-new Value & Step tab (Financial Delegation CRUD + Step Management pool).
+  1156→
+  1157→Work Log:
+  1158→- Read worklog.md (esp. Task 1-schema-finance foundation: Vote.department, FinancialDelegation model, StoreSetting.responsiblePersons/Officers JSON, ProcessStep new fields department/responsibleOfficers/responsibleSailors/financialDelegationId/prefixedNumber, NumberPrefix.stepId, constants VOTE_DEPARTMENTS / FINANCIAL_AUTHORITIES / PROCESS_STEP_STAGES / SETTINGS_DEPARTMENTS). Read settings.tsx in full (5293 lines, 8 tabs).
+  1159→- Schema addition: ProcessFlow.financialDelegationId String? (so flows can carry an optional default delegation). Ran `bun run db:push` to sync. Added defensive try/catch in /api/process-flows POST+PUT routes so they work whether or not the running Prisma client cache knows about the new field (fall back to base data if Prisma throws a validation error mentioning `financialDelegationId`).
+  1160→- API hardening: /api/number-prefixes POST+PUT now persist `stepId` (NumberPrefix model already had it from Task 1).
+  1161→- Imports: added useEffect (for General Steps flow auto-create side-effect), constants VOTE_DEPARTMENTS / FINANCIAL_AUTHORITIES / PROCESS_STEP_STAGES / SETTINGS_DEPARTMENTS, and icons DollarSign / ChevronDown / ChevronUp / Filter.
+  1162→- Types: extended StoreConfig (department, responsiblePersons, responsibleOfficers as string|string[]|null), ProcessStep (department, responsibleOfficers, responsibleSailors, financialDelegationId, prefixedNumber), Vote (department), NumberPrefix (stepId), ProcessFlow (financialDelegationId), added new FinancialDelegation + Stakeholder interfaces, added parseJsonArray() helper to safely decode JSON-encoded array fields returned by the API.
+  1163→- SettingsTab union: added "value-step". Tabs array: added 9th tab "Value & Step" (DollarSign icon, emerald accent). Added TabsContent for ValueAndStepTab. Updated PageHeader description.
+  1164→- Fixed pre-existing syntax bug in CustomThemeFormDialog: `const ode, setMode]` → `const [mode, setMode]` (was blocking runtime).
+  1165→- TAB 2 — Roles & Access (full rewrite):
+  1166→  * New ModuleRow type with `custom: boolean` flag (preset vs user-added).
+  1167→  * loadModules() merges ROLE_PERMISSIONS presets with localStorage overrides (key `erp-settings-role-permissions-v1`) — preset rows are replaced by stored overrides with matching module name; custom rows (not in presets) are appended.
+  1168→  * Header now has: counts badge (`{rows.length} modules × {USER_ROLES.length} roles`), `{customCount} custom` violet badge (when > 0), `Reset` button (restores defaults), and `Add Module` button.
+  1169→  * Each row has a `custom` violet badge for user-added modules, plus Edit (pencil) and Delete (trash) action buttons per row. Custom modules are highlighted with bg-violet-500/5.
+  1170→  * New ModuleFormDialog: module name input + 5 role Select dropdowns (Admin/Manager/Officer/Clerk/Viewer) with options `—`/View/Edit/Create/Edit/Create/Edit Files/Create/Edit Items/Full. Live preview row of badges. Used for both Add (custom:true) and Edit (preserves custom flag).
+  1171→  * Delete AlertDialog with custom messaging for custom vs preset modules.
+  1172→  * All changes persist to localStorage immediately.
+  1173→- TAB 3 — Authentication (User CRUD section added):
+  1174→  * Added `stakeholders` useFetch for the optional user↔stakeholder link.
+  1175→  * Added state for addUserOpen / editUserTarget / deleteUserTarget / deletingUser.
+  1176→  * Replaced the read-only "User Password Status" list with a full "User Management" CRUD section: header with `{securedCount}/{users.length} secured` badge + `Add User` button, table with Sr/User/Role/Department/Password/Status/Actions columns. Each row has 3 action buttons: Set Password (emerald), Edit (pencil), Delete (trash).
+  1177→  * Empty state with `Add User` CTA.
+  1178→  * UserFormDialog reused (with optional `stakeholders` prop) for Add/Edit; AlertDialog for Delete confirm.
+  1179→  * Login Test Panel, Current Session card, default-credentials info card — all preserved untouched.
+  1180→- UserFormDialog (shared by User Profiles + Authentication tabs) — enhanced:
+  1181→  * Now accepts optional `stakeholders?: Stakeholder[]` prop; if not passed, fetches `/api/stakeholders` itself.
+  1182→  * Added `stakeholderId` state (Select with `— None —` + all stakeholders showing name/rank/dept/category).
+  1183→  * Added `password` + `showPassword` state. On Add: password is required (min 4 chars). On Edit: password is optional — leave blank to keep existing.
+  1184→  * handleSubmit: after saving the user (POST /api/settings/users or PUT), if a password was provided, calls POST /api/auth/set-password with the new userId (or existing id on edit). Toast message includes "(password set)"/"(password updated)" suffix when applicable.
+  1185→  * All previous fields (username, displayName, email, role, department, active) preserved.
+  1186→- TAB 4 — Vote Management (Department field added):
+  1187→  * VoteFormDialog: added `department` state (defaults to "SLN"). Field uses Input + `<datalist>` for HTML-native combobox behavior — user can pick SLN/MOD from the dropdown or type a custom code. Added quick-pick chips (SLN/MOD) below the input for one-click selection. Shows a violet "custom" badge when the value isn't in VOTE_DEPARTMENTS.
+  1188→  * Vote table: added "Department" column between Type and Allocation. Renders a CustomBadge with Building2 icon — blue for preset (SLN/MOD), violet for custom departments. The body field now sends `department: department.trim() || null` to the API.
+  1189→- TAB 5 — Store Management (Department + multi-select responsible persons/officers):
+  1190→  * StoreFormDialog completely rewritten. Fetches `/api/stakeholders` for the multi-selects.
+  1191→  * Added `department` Select (CSLOG/CCED) — when changed, resets responsiblePersons + responsibleOfficers selections (because stakeholders are dept-filtered).
+  1192→  * Department mapping: store dept "CSLOG" → stakeholder dept "CSLOG"; store dept "CCED" → stakeholder dept "CE".
+  1193→  * Two MultiStakeholderPicker instances: "Responsible Officers" (filtered by dept + category contains "officer") and "Responsible Persons (Sailors)" (filtered by dept + category contains "sailor"). Both use the new reusable component.
+  1194→  * Kept legacy `responsiblePerson` free-text Input (marked "legacy free-text") for backward compat.
+  1195→  * Body now sends `department`, `responsiblePersons` (string[]), `responsibleOfficers` (string[]) alongside the legacy fields. API stores them as JSON strings.
+  1196→  * Store table: replaced single "Responsible Person" column with 3 new columns — "Department" (CSLOG/CCED badge), "Responsible Officers" (blue badge list, falls back to legacy responsiblePerson italic when empty), "Responsible Persons" (emerald badge list).
+  1197→- New reusable component: MultiStakeholderPicker (label, value, onChange, options, loading, emptyHint). Search-filtered checkbox list inside a bordered container with a sticky search Input at top. Selected items appear as removable CustomBadges below the list. Used by StoreFormDialog, StepFormDialog, and GeneralStepFormDialog.
+  1198→- TAB 6 — Process (significant Step form redesign):
+  1199→  * StepFormDialog now fetches `/api/stakeholders`, `/api/financial-delegations`, `/api/number-prefixes`.
+
+[showing lines 900-1199 of 1426; use offset=1200 with limit to continue reading]

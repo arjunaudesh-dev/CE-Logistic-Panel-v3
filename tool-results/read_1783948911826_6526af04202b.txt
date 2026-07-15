@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  AlertDialog,
+    19→  AlertDialogContent,
+    20→  AlertDialogHeader,
+    21→  AlertDialogFooter,
+    22→  AlertDialogTitle,
+    23→  AlertDialogDescription,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→} from "@/components/ui/alert-dialog";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Input } from "@/components/ui/input";
+    29→import { Label } from "@/components/ui/label";
+    30→import { Textarea } from "@/components/ui/textarea";
+    31→import { Progress } from "@/components/ui/progress";
+    32→import { Slider } from "@/components/ui/slider";
+    33→import {
+    34→  Select,
+    35→  SelectContent,
+    36→  SelectItem,
+    37→  SelectTrigger,
+    38→  SelectValue,
+    39→} from "@/components/ui/select";
+    40→import {
+    41→  Table,
+    42→  TableHeader,
+    43→  TableBody,
+    44→  TableHead,
+    45→  TableRow,
+    46→  TableCell,
+    47→} from "@/components/ui/table";
+    48→import { useToast } from "@/hooks/use-toast";
+    49→import {
+    50→  CSLOG_APPOINTMENTS,
+    51→  CE_APPOINTMENTS,
+    52→  STAKEHOLDER_DEPARTMENTS,
+    53→  STAKEHOLDER_ROLES,
+    54→  STAKEHOLDER_CATEGORIES,
+    55→  stakeholderCategoryColor,
+    56→  AREA_STORES,
+    57→  AVAILABILITY_STATUSES,
+    58→  availabilityColor,
+    59→  departmentColor,
+    60→  ratingColor,
+    61→  ratingLabel,
+    62→} from "@/lib/constants";
+    63→import { cn } from "@/lib/utils";
+    64→import {
+    65→  Users,
+    66→  User,
+    67→  Phone,
+    68→  MessageCircle,
+    69→  Mail,
+    70→  Building2,
+    71→  Star,
+    72→  Plus,
+    73→  Pencil,
+    74→  Trash2,
+    75→  Eye,
+    76→  ShieldCheck,
+    77→  Award,
+    78→  Loader2,
+    79→  Search,
+    80→  Filter,
+    81→  X,
+    82→  Anchor,
+    83→  Wrench,
+    84→  Briefcase,
+    85→  ClipboardList,
+    86→  Contact,
+    87→  TrendingUp,
+    88→  AlertTriangle,
+    89→  StickyNote,
+    90→  PhoneCall,
+    91→  IdCard,
+    92→  ChevronRight,
+    93→  MapPin,
+    94→  Store,
+    95→  Medal,
+    96→  UserCircle,
+    97→} from "lucide-react";
+    98→import {
+    99→  BarChart,
+   100→  Bar,
+   101→  XAxis,
+   102→  YAxis,
+   103→  Tooltip,
+   104→  ResponsiveContainer,
+   105→  Cell,
+   106→  CartesianGrid,
+   107→} from "recharts";
+   108→
+   109→// ─────────────────────────────────────────────────────────
+   110→// Types
+   111→// ─────────────────────────────────────────────────────────
+   112→interface Stakeholder {
+   113→  id: string;
+   114→  name: string;
+   115→  rankOrRate: string | null;
+   116→  svcNumber: string | null;
+   117→  appointment: string | null;
+   118→  department: string;
+   119→  category: string; // CCED Officer | CCED Sailor | CSLOG Officer | CSLOG Sailor | Officer-in-Area | Officer (legacy)
+   120→  seniority: number | null;
+   121→  areaStoreLocation: string | null;
+   122→  subjectClerk: string | null;
+   123→  ilmsCced: string | null;
+   124→  officeNumber: string | null;
+   125→  telephone: string | null;
+   126→  whatsapp: string | null;
+   127→  email: string | null;
+   128→  availability: string;
+   129→  role: string;
+   130→  createdAt: string;
+   131→  updatedAt: string;
+   132→}
+   133→
+   134→interface SupplierContact {
+   135→  id: string;
+   136→  supplierId: string;
+   137→  name: string;
+   138→  designation: string | null;
+   139→  telephone: string | null;
+   140→  whatsapp: string | null;
+   141→  email: string | null;
+   142→  isPrimary: boolean;
+   143→  createdAt: string;
+   144→}
+   145→
+   146→interface SupplierNomination {
+   147→  id: string;
+   148→  supplierId: string;
+   149→  itemCode: string | null;
+   150→  itemName: string;
+   151→  category: string;
+   152→  createdAt: string;
+   153→}
+   154→
+   155→interface SupplierRating {
+   156→  id: string;
+   157→  supplierId: string;
+   158→  qciScore: number;
+   159→  loyalty: number;
+   160→  professionalism: number;
+   161→  activeEngagement: number;
+   162→  values: number;
+   163→  overallScore: number;
+   164→  remarks: string | null;
+   165→  ratedBy: string | null;
+   166→  ratedAt: string;
+   167→}
+   168→
+   169→interface Supplier {
+   170→  id: string;
+   171→  name: string;
+   172→  contactPerson: string | null;
+   173→  telephone: string | null;
+   174→  whatsapp: string | null;
+   175→  email: string | null;
+   176→  address: string | null;
+   177→  contractDetails: string | null;
+   178→  registrationNo: string | null;
+   179→  vatNo: string | null;
+   180→  bankDetails: string | null;
+   181→  createdAt: string;
+   182→  updatedAt: string;
+   183→  contacts: SupplierContact[];
+   184→  nominations: SupplierNomination[];
+   185→  ratings: SupplierRating[];
+   186→  avgRating: number;
+   187→  ratingCount: number;
+   188→}
+   189→
+   190→// ─────────────────────────────────────────────────────────
+   191→// Helpers
+   192→// ─────────────────────────────────────────────────────────
+   193→const ALL_APPOINTMENTS = [
+   194→  "all",
+   195→  ...CSLOG_APPOINTMENTS,
+   196→  ...CE_APPOINTMENTS,
+   197→] as const;
+   198→
+   199→/** Strip everything except digits from a phone string. */
+   200→function digits(num: string | null | undefined): string {
+   201→  if (!num) return "";
+   202→  return num.replace(/[^\d]/g, "");
+   203→}
+   204→
+   205→/** Build a tel: link (digits only, keep simple). */
+   206→function telLink(num: string | null | undefined): string | null {
+   207→  const d = digits(num);
+   208→  return d ? `tel:${d}` : null;
+   209→}
+   210→
+   211→/**
+   212→ * Build a wa.me link.
+   213→ * Sri Lankan numbers starting with 0 are converted to +94.
+   214→ * Otherwise, return the digits as-is.
+   215→ */
+   216→function waMeLink(num: string | null | undefined): string | null {
+   217→  const d = digits(num);
+   218→  if (!d) return null;
+   219→  if (d.startsWith("0")) {
+   220→    return `https://wa.me/94${d.slice(1)}`;
+   221→  }
+   222→  return `https://wa.me/${d}`;
+   223→}
+   224→
+   225→/** Bar color for a rating score. */
+   226→function ratingBarColor(score: number): string {
+   227→  if (score >= 4.5) return "#10b981"; // emerald
+   228→  if (score >= 3.5) return "#3b82f6"; // blue
+   229→  if (score >= 2.5) return "#f59e0b"; // amber
+   230→  return "#ef4444"; // red
+   231→}
+   232→
+   233→/** Color for an individual rating category progress bar (matches ratingColor thresholds). */
+   234→function ratingProgressClass(score: number): string {
+   235→  if (score >= 4.5) return "bg-emerald-500";
+   236→  if (score >= 3.5) return "bg-blue-500";
+   237→  if (score >= 2.5) return "bg-amber-500";
+   238→  return "bg-red-500";
+   239→}
+   240→
+   241→function formatDate(value: string | null | undefined): string {
+   242→  if (!value) return "—";
+   243→  const d = new Date(value);
+   244→  if (isNaN(d.getTime())) return "—";
+   245→  return d.toLocaleString("en-GB", {
+   246→    day: "2-digit",
+   247→    month: "short",
+   248→    year: "numeric",
+   249→    hour: "2-digit",
+   250→    minute: "2-digit",
+   251→  });
+   252→}
+   253→
+   254→/**
+   255→ * Resolve a stakeholder's category, falling back to department + role when the
+   256→ * legacy "Officer" / "Sailor" / null value is present (pre-categorisation data).
+   257→ * Returns one of STAKEHOLDER_CATEGORIES.
+   258→ */
+   259→function resolveCategory(p: {
+   260→  category?: string | null;
+   261→  department?: string | null;
+   262→  role?: string | null;
+   263→}): string {
+   264→  const cat = p.category;
+   265→  if (cat && (STAKEHOLDER_CATEGORIES as readonly string[]).includes(cat)) {
+   266→    return cat;
+   267→  }
+   268→  // Legacy fallback
+   269→  const dept = p.department ?? "CSLOG";
+   270→  const role = p.role ?? "Officer";
+   271→  if (dept === "CE") return role === "Sailor" ? "CCED Sailor" : "CCED Officer";
+   272→  return role === "Sailor" ? "CSLOG Sailor" : "CSLOG Officer";
+   273→}
+   274→
+   275→/** Whether a category is a sailor category (for table column display). */
+   276→function isSailorCategory(cat: string): boolean {
+   277→  return cat === "CCED Sailor" || cat === "CSLOG Sailor";
+   278→}
+   279→
+   280→// ─────────────────────────────────────────────────────────
+   281→// Main Module
+   282→// ─────────────────────────────────────────────────────────
+   283→export function StakeholdersModule() {
+   284→  const [tab, setTab] = useState<"officers" | "suppliers">("officers");
+   285→
+   286→  return (
+   287→    <div className="space-y-6">
+   288→      <PageHeader
+   289→        title="Stakeholders Directory"
+   290→        description="Officers, sailors & supplier contract information — contact cards, ratings & evaluations"
+   291→        icon={Users}
+   292→      />
+   293→      <Tabs value={tab} onValueChange={(v) => setTab(v as "officers" | "suppliers")}>
+   294→        <TabsList className="bg-card border border-border">
+   295→          <TabsTrigger value="officers">
+   296→            <User className="h-4 w-4" />
+   297→            Officers & Sailors
+   298→          </TabsTrigger>
+   299→          <TabsTrigger value="suppliers">
+   300→            <Building2 className="h-4 w-4" />
+   301→            Suppliers
+   302→          </TabsTrigger>
+   303→        </TabsList>
+   304→        <TabsContent value="officers">
+   305→          <OfficersSailorsTab />
+   306→        </TabsContent>
+   307→        <TabsContent value="suppliers">
+   308→          <SuppliersTab />
+   309→        </TabsContent>
+   310→      </Tabs>
+   311→    </div>
+   312→  );
+   313→}
+   314→
+   315→// ═════════════════════════════════════════════════════════
+   316→// TAB 1 — Officers & Sailors Directory (categorised)
+   317→// ═════════════════════════════════════════════════════════
+   318→function OfficersSailorsTab() {
+   319→  const { data: list, loading, error, refresh } = useFetch<Stakeholder[]>(
+   320→    "/api/stakeholders"
+   321→  );
+   322→  const { toast } = useToast();
+   323→
+   324→  const [search, setSearch] = useState("");
+   325→  const [deptFilter, setDeptFilter] = useState("all");
+   326→  const [apptFilter, setApptFilter] = useState("all");
+   327→  const [roleFilter, setRoleFilter] = useState("all");
+   328→  const [availFilter, setAvailFilter] = useState("all");
+   329→  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+   330→
+   331→  const [addOpen, setAddOpen] = useState(false);
+   332→  const [editTarget, setEditTarget] = useState<Stakeholder | null>(null);
+   333→  const [viewTarget, setViewTarget] = useState<Stakeholder | null>(null);
+   334→  const [deleteTarget, setDeleteTarget] = useState<Stakeholder | null>(null);
+   335→
+   336→  const filtered = useMemo(() => {
+   337→    if (!list) return [];
+   338→    const s = search.trim().toLowerCase();
+   339→    return list.filter((p) => {
+   340→      const cat = resolveCategory(p);
+   341→      if (categoryFilter !== "all" && cat !== categoryFilter) return false;
+   342→      if (deptFilter !== "all" && p.department !== deptFilter) return false;
+   343→      if (apptFilter !== "all" && p.appointment !== apptFilter) return false;
+   344→      if (roleFilter !== "all" && p.role !== roleFilter) return false;
+   345→      if (availFilter !== "all" && p.availability !== availFilter) return false;
+   346→      if (s) {
+   347→        const hay = `${p.name} ${p.svcNumber ?? ""} ${p.appointment ?? ""}`.toLowerCase();
+   348→        if (!hay.includes(s)) return false;
+   349→      }
+   350→      return true;
+   351→    });
+   352→  }, [list, search, deptFilter, apptFilter, roleFilter, availFilter, categoryFilter]);
+   353→
+   354→  // Group filtered records by category, preserving STAKEHOLDER_CATEGORIES order
+   355→  const grouped = useMemo(() => {
+   356→    const map: Record<string, Stakeholder[]> = {};
+   357→    for (const cat of STAKEHOLDER_CATEGORIES) map[cat] = [];
+   358→    for (const p of filtered) {
+   359→      const cat = resolveCategory(p);
+   360→      if (!map[cat]) map[cat] = [];
+   361→      map[cat].push(p);
+   362→    }
+   363→    return map;
+   364→  }, [filtered]);
+   365→
+   366→  const cslogCount = useMemo(
+   367→    () =>
+   368→      list?.filter((p) => resolveCategory(p).startsWith("CSLOG")).length ?? 0,
+   369→    [list]
+   370→  );
+   371→  const ceCount = useMemo(
+   372→    () => list?.filter((p) => resolveCategory(p).startsWith("CCED")).length ?? 0,
+   373→    [list]
+   374→  );
+   375→  const availableCount = useMemo(
+   376→    () => list?.filter((p) => p.availability === "Available").length ?? 0,
+   377→    [list]
+   378→  );
+   379→
+   380→  const filtersActive =
+   381→    search !== "" ||
+   382→    deptFilter !== "all" ||
+   383→    apptFilter !== "all" ||
+   384→    roleFilter !== "all" ||
+   385→    availFilter !== "all" ||
+   386→    categoryFilter !== "all";
+   387→
+   388→  function clearFilters() {
+   389→    setSearch("");
+   390→    setDeptFilter("all");
+   391→    setApptFilter("all");
+   392→    setRoleFilter("all");
+   393→    setAvailFilter("all");
+   394→    setCategoryFilter("all");
+   395→  }
+   396→
+   397→  async function handleDelete() {
+   398→    if (!deleteTarget) return;
+   399→    const res = await apiRequest(`/api/stakeholders/${deleteTarget.id}`, "DELETE");
+   400→    if (res.ok) {
+   401→      toast({ title: "Person deleted", description: deleteTarget.name });
+   402→      setDeleteTarget(null);
+   403→      refresh();
+   404→    } else {
+   405→      toast({
+   406→        title: "Failed to delete",
+   407→        description: res.error,
+   408→        variant: "destructive",
+   409→      });
+   410→    }
+   411→  }
+   412→
+   413→  if (loading) return <LoadingState label="Loading personnel..." />;
+   414→  if (error) return <ErrorState message={error} />;
+   415→
+   416→  return (
+   417→    <div className="space-y-4">
+   418→      {/* Stat cards */}
+   419→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   420→        <StatCard
+   421→          label="Total Personnel"
+   422→          value={list?.length ?? 0}
+   423→          icon={Users}
+   424→          accent="blue"
+   425→          sub="All departments"
+   426→        />
+   427→        <StatCard
+   428→          label="CSLOG Dept"
+   429→          value={cslogCount}
+   430→          icon={Anchor}
+   431→          accent="purple"
+   432→          sub="CSLOG officers & sailors"
+   433→        />
+   434→        <StatCard
+   435→          label="CE Dept"
+   436→          value={ceCount}
+   437→          icon={Wrench}
+   438→          accent="amber"
+   439→          sub="CCED officers & sailors"
+   440→        />
+   441→        <StatCard
+   442→          label="Available Now"
+   443→          value={availableCount}
+   444→          icon={ShieldCheck}
+   445→          accent="green"
+   446→          sub="On duty & reachable"
+   447→        />
+   448→      </div>
+   449→
+   450→      {/* Toolbar */}
+   451→      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+   452→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+   453→          <div className="flex-1 min-w-0">
+   454→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+   455→              Search (Name / SVC / Appointment)
+   456→            </Label>
+   457→            <div className="relative">
+   458→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   459→              <Input
+   460→                value={search}
+   461→                onChange={(e) => setSearch(e.target.value)}
+   462→                placeholder="Search personnel..."
+   463→                className="pl-9"
+   464→              />
+   465→            </div>
+   466→          </div>
+   467→          <div>
+   468→            <Label className="text-xs text-muted-foreground mb-1.5 block">Category</Label>
+   469→            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+   470→              <SelectTrigger className="w-full lg:w-48">
+   471→                <SelectValue />
+   472→              </SelectTrigger>
+   473→              <SelectContent>
+   474→                <SelectItem value="all">All Categories</SelectItem>
+   475→                {STAKEHOLDER_CATEGORIES.map((c) => (
+   476→                  <SelectItem key={c} value={c}>
+   477→                    {c}
+   478→                  </SelectItem>
+   479→                ))}
+   480→              </SelectContent>
+   481→            </Select>
+   482→          </div>
+   483→          <div>
+   484→            <Label className="text-xs text-muted-foreground mb-1.5 block">Department</Label>
+   485→            <Select value={deptFilter} onValueChange={setDeptFilter}>
+   486→              <SelectTrigger className="w-full lg:w-36">
+   487→                <SelectValue />
+   488→              </SelectTrigger>
+   489→              <SelectContent>
+   490→                <SelectItem value="all">All Departments</SelectItem>
+   491→                {STAKEHOLDER_DEPARTMENTS.map((d) => (
+   492→                  <SelectItem key={d} value={d}>
+   493→                    {d}
+   494→                  </SelectItem>
+   495→                ))}
+   496→              </SelectContent>
+   497→            </Select>
+   498→          </div>
+   499→          <div>
+   500→            <Label className="text-xs text-muted-foreground mb-1.5 block">Appointment</Label>
+   501→            <Select value={apptFilter} onValueChange={setApptFilter}>
+   502→              <SelectTrigger className="w-full lg:w-48">
+   503→                <SelectValue />
+   504→              </SelectTrigger>
+   505→              <SelectContent>
+   506→                <SelectItem value="all">All Appointments</SelectItem>
+   507→                <SelectItem value="__cslog" disabled className="text-muted-foreground">
+   508→                  — CSLOG —
+   509→                </SelectItem>
+   510→                {CSLOG_APPOINTMENTS.map((a) => (
+   511→                  <SelectItem key={a} value={a}>
+   512→                    {a}
+   513→                  </SelectItem>
+   514→                ))}
+   515→                <SelectItem value="__ce" disabled className="text-muted-foreground">
+   516→                  — CE —
+   517→                </SelectItem>
+   518→                {CE_APPOINTMENTS.map((a) => (
+   519→                  <SelectItem key={a} value={a}>
+   520→                    {a}
+   521→                  </SelectItem>
+   522→                ))}
+   523→              </SelectContent>
+   524→            </Select>
+   525→          </div>
+   526→          <div>
+   527→            <Label className="text-xs text-muted-foreground mb-1.5 block">Role</Label>
+   528→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+   529→              <SelectTrigger className="w-full lg:w-36">
+   530→                <SelectValue />
+   531→              </SelectTrigger>
+   532→              <SelectContent>
+   533→                <SelectItem value="all">All Roles</SelectItem>
+   534→                {STAKEHOLDER_ROLES.map((r) => (
+   535→                  <SelectItem key={r} value={r}>
+   536→                    {r}
+   537→                  </SelectItem>
+   538→                ))}
+   539→              </SelectContent>
+   540→            </Select>
+   541→          </div>
+   542→          <div>
+   543→            <Label className="text-xs text-muted-foreground mb-1.5 block">Availability</Label>
+   544→            <Select value={availFilter} onValueChange={setAvailFilter}>
+   545→              <SelectTrigger className="w-full lg:w-40">
+   546→                <SelectValue />
+   547→              </SelectTrigger>
+   548→              <SelectContent>
+   549→                <SelectItem value="all">All Statuses</SelectItem>
+   550→                {AVAILABILITY_STATUSES.map((a) => (
+   551→                  <SelectItem key={a} value={a}>
+   552→                    {a}
+   553→                  </SelectItem>
+   554→                ))}
+   555→              </SelectContent>
+   556→            </Select>
+   557→          </div>
+   558→          {filtersActive && (
+   559→            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9">
+   560→              <X className="h-4 w-4" /> Clear
+   561→            </Button>
+   562→          )}
+   563→          <Button onClick={() => setAddOpen(true)} className="h-9 lg:ml-auto">
+   564→            <Plus className="h-4 w-4" /> Add Person
+   565→          </Button>
+   566→        </div>
+   567→      </div>
+   568→
+   569→      {/* Categorised sections */}
+   570→      {!filtered.length ? (
+   571→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+   572→          <EmptyState
+   573→            icon={filtersActive ? Filter : Users}
+   574→            title={filtersActive ? "No matches" : "No personnel yet"}
+   575→            description={
+   576→              filtersActive
+   577→                ? "Try clearing filters to see everyone."
+   578→                : "Add officers and sailors to start building your directory."
+   579→            }
+   580→            action={
+   581→              filtersActive ? (
+   582→                <Button variant="outline" size="sm" onClick={clearFilters}>
+   583→                  Clear Filters
+   584→                </Button>
+   585→              ) : (
+   586→                <Button size="sm" onClick={() => setAddOpen(true)}>
+   587→                  <Plus className="h-4 w-4" /> Add Person
+   588→                </Button>
+   589→              )
+   590→            }
+   591→          />
+   592→        </div>
+   593→      ) : (
+   594→        <div className="space-y-5">
+   595→          {STAKEHOLDER_CATEGORIES.map((cat) => {
+   596→            const people = grouped[cat] ?? [];
+   597→            if (!people.length) return null;
+   598→            return (
+   599→              <CategorySection
+   600→                key={cat}
+   601→                category={cat}
+   602→                people={people}
+   603→                onView={(p) => setViewTarget(p)}
+   604→                onEdit={(p) => setEditTarget(p)}
+   605→                onDelete={(p) => setDeleteTarget(p)}
+   606→              />
+   607→            );
+   608→          })}
+   609→        </div>
+   610→      )}
+   611→
+   612→      {/* Add / Edit dialog */}
+   613→      {addOpen && (
+   614→        <StakeholderFormDialog
+   615→          open={addOpen}
+   616→          onOpenChange={setAddOpen}
+   617→          onSaved={() => {
+   618→            setAddOpen(false);
+   619→            refresh();
+   620→          }}
+   621→        />
+   622→      )}
+   623→      {editTarget && (
+   624→        <StakeholderFormDialog
+   625→          open={!!editTarget}
+   626→          onOpenChange={(o) => !o && setEditTarget(null)}
+   627→          initial={editTarget}
+   628→          onSaved={() => {
+   629→            setEditTarget(null);
+   630→            refresh();
+   631→          }}
+   632→        />
+   633→      )}
+   634→
+   635→      {/* View dialog */}
+   636→      {viewTarget && (
+   637→        <StakeholderViewDialog
+   638→          stakeholder={viewTarget}
+   639→          open={!!viewTarget}
+   640→          onOpenChange={(o) => !o && setViewTarget(null)}
+   641→          onEdit={() => {
+   642→            const p = viewTarget;
+   643→            setViewTarget(null);
+   644→            setEditTarget(p);
+   645→          }}
+   646→        />
+   647→      )}
+   648→
+   649→      {/* Delete confirm */}
+   650→      <AlertDialog
+   651→        open={!!deleteTarget}
+   652→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+   653→      >
+   654→        <AlertDialogContent>
+   655→          <AlertDialogHeader>
+   656→            <AlertDialogTitle>Delete personnel record?</AlertDialogTitle>
+   657→            <AlertDialogDescription>
+   658→              This will permanently delete{" "}
+   659→              <span className="text-foreground font-medium">{deleteTarget?.name}</span>{" "}
+   660→              from the directory. This action cannot be undone.
+   661→            </AlertDialogDescription>
+   662→          </AlertDialogHeader>
+   663→          <AlertDialogFooter>
+   664→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   665→            <AlertDialogAction
+   666→              className="bg-red-500 hover:bg-red-600 text-white"
+   667→              onClick={handleDelete}
+   668→            >
+   669→              <Trash2 className="h-4 w-4" /> Delete
+   670→            </AlertDialogAction>
+   671→          </AlertDialogFooter>
+   672→        </AlertDialogContent>
+   673→      </AlertDialog>
+   674→    </div>
+   675→  );
+   676→}
+   677→
+   678→// ─────────────────────────────────────────────────────────
+   679→// Category Section — coloured header + table for one category
+   680→// ─────────────────────────────────────────────────────────
+   681→interface CategorySectionProps {
+   682→  category: string;
+   683→  people: Stakeholder[];
+   684→  onView: (p: Stakeholder) => void;
+   685→  onEdit: (p: Stakeholder) => void;
+   686→  onDelete: (p: Stakeholder) => void;
+   687→}
+   688→
+   689→function CategorySection({
+   690→  category,
+   691→  people,
+   692→  onView,
+   693→  onEdit,
+   694→  onDelete,
+   695→}: CategorySectionProps) {
+   696→  const isSailor = isSailorCategory(category);
+   697→  // Officers: sort by seniority ascending (most senior first); nulls go last
+   698→  // Sailors: group by areaStoreLocation (sorted), then by name
+   699→  const sorted = useMemo(() => {
+   700→    if (!isSailor) {
+   701→      return people.slice().sort((a, b) => {
+   702→        const sa = a.seniority ?? Number.MAX_SAFE_INTEGER;
+   703→        const sb = b.seniority ?? Number.MAX_SAFE_INTEGER;
+   704→        if (sa !== sb) return sa - sb;
+   705→        return a.name.localeCompare(b.name);
+   706→      });
+   707→    }
+   708→    return people.slice().sort((a, b) => {
+   709→      const la = (a.areaStoreLocation ?? "Unassigned").toLowerCase();
+   710→      const lb = (b.areaStoreLocation ?? "Unassigned").toLowerCase();
+   711→      if (la !== lb) return la.localeCompare(lb);
+   712→      return a.name.localeCompare(b.name);
+   713→    });
+   714→  }, [people, isSailor]);
+   715→
+   716→  return (
+   717→    <div className="bg-card border border-border rounded-xl overflow-hidden">
+   718→      {/* Coloured section header */}
+   719→      <div
+   720→        className={cn(
+   721→          "flex items-center justify-between gap-3 px-4 py-3 border-b border-border",
+   722→          "bg-gradient-to-r from-muted/40 to-transparent"
+   723→        )}
+   724→      >
+   725→        <div className="flex items-center gap-2.5 min-w-0">
+   726→          <div
+   727→            className={cn(
+   728→              "h-9 w-9 rounded-lg flex items-center justify-center shrink-0 border",
+   729→              stakeholderCategoryColor(category)
+   730→            )}
+   731→          >
+   732→            {isSailor ? (
+   733→              <UserCircle className="h-5 w-5" />
+   734→            ) : (
+   735→              <Medal className="h-5 w-5" />
+   736→            )}
+   737→          </div>
+   738→          <div className="min-w-0">
+   739→            <h3 className="text-sm font-semibold text-foreground truncate">
+   740→              {category}
+   741→            </h3>
+   742→            <p className="text-xs text-muted-foreground">
+   743→              {isSailor
+   744→                ? "Sailors — area store location, subject clerk & ILMS CCED"
+   745→                : category === "Officer-in-Area"
+   746→                  ? "Officers assigned to area stores"
+   747→                  : "Officers — sorted by seniority (Navy List)"}
+   748→            </p>
+   749→          </div>
+   750→        </div>
+   751→        <CustomBadge
+   752→          className={cn("border", stakeholderCategoryColor(category))}
+   753→        >
+   754→          {sorted.length} {sorted.length === 1 ? "person" : "people"}
+   755→        </CustomBadge>
+   756→      </div>
+   757→
+   758→      {/* Table */}
+   759→      <div className="overflow-x-auto">
+   760→        <Table>
+   761→          <TableHeader>
+   762→            <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
+   763→              <TableHead className="min-w-[180px]">Name</TableHead>
+   764→              <TableHead>{isSailor ? "Rate" : "Rank"}</TableHead>
+   765→              <TableHead>Appointment</TableHead>
+   766→              <TableHead>SVC</TableHead>
+   767→              {isSailor ? (
+   768→                <>
+   769→                  <TableHead>Area Store</TableHead>
+   770→                  <TableHead>Subject Clerk</TableHead>
+   771→                  <TableHead>ILMS CCED</TableHead>
+   772→                </>
+   773→              ) : (
+   774→                <TableHead>Seniority</TableHead>
+   775→              )}
+   776→              <TableHead>{isSailor ? "Phone" : "Office"}</TableHead>
+   777→              {isSailor ? (
+   778→                <TableHead>WhatsApp</TableHead>
+   779→              ) : (
+   780→                <TableHead>Telephone</TableHead>
+   781→              )}
+   782→              {!isSailor && <TableHead>WhatsApp</TableHead>}
+   783→              <TableHead>Availability</TableHead>
+   784→              <TableHead className="text-right">Actions</TableHead>
+   785→            </TableRow>
+   786→          </TableHeader>
+   787→          <TableBody>
+   788→            {sorted.map((p) => (
+   789→              <TableRow
+   790→                key={p.id}
+   791→                className="border-border cursor-pointer"
+   792→                onClick={() => onView(p)}
+   793→              >
+   794→                <TableCell>
+   795→                  <div className="flex items-center gap-2">
+   796→                    <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+   797→                      <User className="h-4 w-4" />
+   798→                    </div>
+   799→                    <div className="min-w-0">
+   800→                      <p className="font-medium text-foreground truncate">
+   801→                        {p.name}
+   802→                      </p>
+   803→                      <p className="text-xs text-muted-foreground">{p.role}</p>
+   804→                    </div>
+   805→                  </div>
+   806→                </TableCell>
+   807→                <TableCell className="text-muted-foreground">
+   808→                  {p.rankOrRate || "—"}
+   809→                </TableCell>
+   810→                <TableCell>
+   811→                  {p.appointment ? (
+   812→                    <CustomBadge className={departmentColor(p.department)}>
+   813→                      {p.appointment}
+   814→                    </CustomBadge>
+   815→                  ) : (
+   816→                    <span className="text-muted-foreground">—</span>
+   817→                  )}
+   818→                </TableCell>
+   819→                <TableCell className="text-muted-foreground font-mono text-xs">
+   820→                  {p.svcNumber || "—"}
+   821→                </TableCell>
+   822→                {isSailor ? (
+   823→                  <>
+   824→                    <TableCell>
+   825→                      {p.areaStoreLocation ? (
+   826→                        <CustomBadge className="bg-secondary/70 text-foreground border-border">
+   827→                          <Store className="h-3 w-3 mr-1" />
+   828→                          {p.areaStoreLocation}
+   829→                        </CustomBadge>
+   830→                      ) : (
+   831→                        <span className="text-muted-foreground">—</span>
+   832→                      )}
+   833→                    </TableCell>
+   834→                    <TableCell className="text-muted-foreground text-xs">
+   835→                      {p.subjectClerk || "—"}
+   836→                    </TableCell>
+   837→                    <TableCell className="text-muted-foreground text-xs">
+   838→                      {p.ilmsCced || "—"}
+   839→                    </TableCell>
+   840→                  </>
+   841→                ) : (
+   842→                  <TableCell>
+   843→                    {p.seniority != null ? (
+   844→                      <CustomBadge className="bg-secondary/70 text-foreground border-border">
+   845→                        <Medal className="h-3 w-3 mr-1" />
+   846→                        #{p.seniority}
+   847→                      </CustomBadge>
+   848→                    ) : (
+   849→                      <span className="text-muted-foreground">—</span>
+   850→                    )}
+   851→                  </TableCell>
+   852→                )}
+   853→                <TableCell>
+   854→                  {isSailor ? (
+   855→                    telLink(p.telephone) ? (
+   856→                      <a
+   857→                        href={telLink(p.telephone)!}
+   858→                        onClick={(e) => e.stopPropagation()}
+   859→                        className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+   860→                      >
+   861→                        <Phone className="h-3 w-3" />
+   862→                        {p.telephone}
+   863→                      </a>
+   864→                    ) : (
+   865→                      <span className="text-muted-foreground">—</span>
+   866→                    )
+   867→                  ) : (
+   868→                    <span className="text-muted-foreground">
+   869→                      {p.officeNumber || "—"}
+   870→                    </span>
+   871→                  )}
+   872→                </TableCell>
+   873→                <TableCell>
+   874→                  {isSailor ? (
+   875→                    waMeLink(p.whatsapp) ? (
+   876→                      <a
+   877→                        href={waMeLink(p.whatsapp)!}
+   878→                        target="_blank"
+   879→                        rel="noopener noreferrer"
+   880→                        onClick={(e) => e.stopPropagation()}
+   881→                        className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+   882→                      >
+   883→                        <MessageCircle className="h-3 w-3" />
+   884→                        {p.whatsapp}
+   885→                      </a>
+   886→                    ) : (
+   887→                      <span className="text-muted-foreground">—</span>
+   888→                    )
+   889→                  ) : (
+   890→                    telLink(p.telephone) ? (
+   891→                      <a
+   892→                        href={telLink(p.telephone)!}
+   893→                        onClick={(e) => e.stopPropagation()}
+   894→                        className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+   895→                      >
+   896→                        <Phone className="h-3 w-3" />
+   897→                        {p.telephone}
+   898→                      </a>
+   899→                    ) : (
+   900→                      <span className="text-muted-foreground">—</span>
+   901→                    )
+   902→                  )}
+   903→                </TableCell>
+   904→                {!isSailor && (
+   905→                  <TableCell>
+   906→                    {waMeLink(p.whatsapp) ? (
+   907→                      <a
+   908→                        href={waMeLink(p.whatsapp)!}
+   909→                        target="_blank"
+   910→                        rel="noopener noreferrer"
+   911→                        onClick={(e) => e.stopPropagation()}
+   912→                        className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+   913→                      >
+   914→                        <MessageCircle className="h-3 w-3" />
+   915→                        {p.whatsapp}
+   916→                      </a>
+   917→                    ) : (
+   918→                      <span className="text-muted-foreground">—</span>
+   919→                    )}
+   920→                  </TableCell>
+   921→                )}
+   922→                <TableCell>
+   923→                  <CustomBadge className={availabilityColor(p.availability)}>
+   924→                    {p.availability}
+   925→                  </CustomBadge>
+   926→                </TableCell>
+   927→                <TableCell className="text-right">
+   928→                  <div
+   929→                    className="flex items-center justify-end gap-1"
+   930→                    onClick={(e) => e.stopPropagation()}
+   931→                  >
+   932→                    <Button
+   933→                      variant="ghost"
+   934→                      size="icon"
+   935→                      className="h-8 w-8"
+   936→                      onClick={() => onView(p)}
+   937→                      title="View"
+   938→                    >
+   939→                      <Eye className="h-4 w-4" />
+   940→                    </Button>
+   941→                    <Button
+   942→                      variant="ghost"
+   943→                      size="icon"
+   944→                      className="h-8 w-8"
+   945→                      onClick={() => onEdit(p)}
+   946→                      title="Edit"
+   947→                    >
+   948→                      <Pencil className="h-4 w-4" />
+   949→                    </Button>
+   950→                    <Button
+   951→                      variant="ghost"
+   952→                      size="icon"
+   953→                      className="h-8 w-8 text-red-400 hover:text-red-300"
+   954→                      onClick={() => onDelete(p)}
+   955→                      title="Delete"
+   956→                    >
+   957→                      <Trash2 className="h-4 w-4" />
+   958→                    </Button>
+   959→                  </div>
+   960→                </TableCell>
+   961→              </TableRow>
+   962→            ))}
+   963→          </TableBody>
+   964→        </Table>
+   965→      </div>
+   966→    </div>
+   967→  );
+   968→}
+   969→
+   970→// ─────────────────────────────────────────────────────────
+   971→// Stakeholder Form (Add / Edit)
+   972→// ─────────────────────────────────────────────────────────
+   973→interface StakeholderFormProps {
+   974→  open: boolean;
+   975→  onOpenChange: (o: boolean) => void;
+   976→  initial?: Stakeholder | null;
+   977→  onSaved: () => void;
+   978→}
+   979→
+   980→function StakeholderFormDialog({
+   981→  open,
+   982→  onOpenChange,
+   983→  initial,
+   984→  onSaved,
+   985→}: StakeholderFormProps) {
+   986→  const isEdit = !!initial;
+   987→  const { toast } = useToast();
+   988→  const [saving, setSaving] = useState(false);
+   989→
+   990→  // Form state (initialised once from `initial` — keyed remount via `key` prop on caller)
+   991→  const [name, setName] = useState(initial?.name ?? "");
+   992→  const [rankOrRate, setRankOrRate] = useState(initial?.rankOrRate ?? "");
+   993→  const [svcNumber, setSvcNumber] = useState(initial?.svcNumber ?? "");
+   994→  const [appointment, setAppointment] = useState(initial?.appointment ?? "");
+   995→  const [department, setDepartment] = useState(initial?.department ?? "CSLOG");
+   996→  const [category, setCategory] = useState(
+   997→    initial?.category && (STAKEHOLDER_CATEGORIES as readonly string[]).includes(initial.category)
+   998→      ? initial.category
+   999→      : initial?.department === "CE"
+  1000→        ? initial?.role === "Sailor"
+  1001→          ? "CCED Sailor"
+  1002→          : "CCED Officer"
+  1003→        : initial?.role === "Sailor"
+  1004→          ? "CSLOG Sailor"
+  1005→          : "CSLOG Officer"
+  1006→  );
+  1007→  const [seniority, setSeniority] = useState(
+  1008→    initial?.seniority != null ? String(initial.seniority) : ""
+  1009→  );
+  1010→  const [areaStoreLocation, setAreaStoreLocation] = useState(
+  1011→    initial?.areaStoreLocation ?? ""
+  1012→  );
+  1013→  const [subjectClerk, setSubjectClerk] = useState(initial?.subjectClerk ?? "");
+  1014→  const [ilmsCced, setIlmsCced] = useState(initial?.ilmsCced ?? "");
+  1015→  const [officeNumber, setOfficeNumber] = useState(initial?.officeNumber ?? "");
+  1016→  const [telephone, setTelephone] = useState(initial?.telephone ?? "");
+  1017→  const [whatsapp, setWhatsapp] = useState(initial?.whatsapp ?? "");
+  1018→  const [email, setEmail] = useState(initial?.email ?? "");
+  1019→  const [availability, setAvailability] = useState(
+  1020→    initial?.availability ?? "Available"
+  1021→  );
+  1022→  const [role, setRole] = useState(initial?.role ?? "Officer");
+  1023→
+  1024→  // Derive appointment options from department
+  1025→  const apptOptions =
+  1026→    department === "CE" ? CE_APPOINTMENTS : CSLOG_APPOINTMENTS;
+  1027→
+  1028→  // Whether the selected category is a sailor category (shows area-store fields)
+  1029→  const isSailor = isSailorCategory(category);
+  1030→  // Whether the selected category is an officer category (shows seniority)
+  1031→  const isOfficer = !isSailor;
+  1032→
+  1033→  // When the category changes, derive the matching role & department so legacy
+  1034→  // department/role filters stay consistent.
+  1035→  function onCategoryChange(cat: string) {
+  1036→    setCategory(cat);
+  1037→    if (cat.startsWith("CCED")) {
+  1038→      setDepartment("CE");
+  1039→      setRole(cat === "CCED Sailor" ? "Sailor" : "Officer");
+  1040→    } else if (cat.startsWith("CSLOG")) {
+  1041→      setDepartment("CSLOG");
+  1042→      setRole(cat === "CSLOG Sailor" ? "Sailor" : "Officer");
+  1043→    } else if (cat === "Officer-in-Area") {
+  1044→      setRole("Officer");
+  1045→    }
+  1046→  }
+  1047→
+  1048→  async function handleSubmit(e: React.FormEvent) {
+  1049→    e.preventDefault();
+  1050→    if (!name.trim()) {
+  1051→      toast({ title: "Name is required", variant: "destructive" });
+  1052→      return;
+  1053→    }
+  1054→    setSaving(true);
+  1055→    const body = {
+  1056→      name: name.trim(),
+  1057→      rankOrRate: rankOrRate.trim() || null,
+  1058→      svcNumber: svcNumber.trim() || null,
+  1059→      appointment: appointment || null,
+  1060→      department,
+  1061→      category,
+  1062→      seniority:
+  1063→        seniority !== "" && seniority != null ? Number(seniority) : null,
+  1064→      areaStoreLocation: areaStoreLocation || null,
+  1065→      subjectClerk: subjectClerk.trim() || null,
+  1066→      ilmsCced: ilmsCced.trim() || null,
+  1067→      officeNumber: officeNumber.trim() || null,
+  1068→      telephone: telephone.trim() || null,
+  1069→      whatsapp: whatsapp.trim() || null,
+  1070→      email: email.trim() || null,
+  1071→      availability,
+  1072→      role,
+  1073→    };
+  1074→    const res = isEdit
+  1075→      ? await apiRequest(`/api/stakeholders/${initial!.id}`, "PUT", body)
+  1076→      : await apiRequest("/api/stakeholders", "POST", body);
+  1077→    setSaving(false);
+  1078→    if (res.ok) {
+  1079→      toast({
+  1080→        title: isEdit ? "Person updated" : "Person added",
+  1081→        description: body.name,
+  1082→      });
+  1083→      onSaved();
+  1084→    } else {
+  1085→      toast({
+  1086→        title: "Failed to save",
+  1087→        description: res.error,
+  1088→        variant: "destructive",
+  1089→      });
+  1090→    }
+  1091→  }
+  1092→
+  1093→  return (
+  1094→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1095→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+  1096→        <DialogHeader>
+  1097→          <DialogTitle>{isEdit ? "Edit Personnel" : "Add Personnel"}</DialogTitle>
+  1098→          <DialogDescription>
+  1099→            Capture contact & appointment details for officers and sailors.
+  1100→          </DialogDescription>
+  1101→        </DialogHeader>
+  1102→        <form onSubmit={handleSubmit} className="space-y-4">
+  1103→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1104→            <Field label="Full Name" required>
+  1105→              <Input
+  1106→                value={name}
+  1107→                onChange={(e) => setName(e.target.value)}
+  1108→                placeholder="e.g. Cdr. R. Perera"
+  1109→                required
+  1110→              />
+  1111→            </Field>
+  1112→            <Field label="Rank / Rate">
+  1113→              <Input
+  1114→                value={rankOrRate}
+  1115→                onChange={(e) => setRankOrRate(e.target.value)}
+  1116→                placeholder="e.g. Commander / Leading Seaman"
+  1117→              />
+  1118→            </Field>
+  1119→            <Field label="SVC Number">
+  1120→              <Input
+  1121→                value={svcNumber}
+  1122→                onChange={(e) => setSvcNumber(e.target.value)}
+  1123→                placeholder="e.g. SVC/1234"
+  1124→              />
+  1125→            </Field>
+  1126→            <Field label="Category" required>
+  1127→              <Select value={category} onValueChange={onCategoryChange}>
+  1128→                <SelectTrigger className="w-full">
+  1129→                  <SelectValue placeholder="Select category" />
+  1130→                </SelectTrigger>
+  1131→                <SelectContent>
+  1132→                  {STAKEHOLDER_CATEGORIES.map((c) => (
+  1133→                    <SelectItem key={c} value={c}>
+  1134→                      {c}
+  1135→                    </SelectItem>
+  1136→                  ))}
+  1137→                </SelectContent>
+  1138→              </Select>
+  1139→            </Field>
+  1140→            <Field label="Department">
+  1141→              <Select
+  1142→                value={department}
+  1143→                onValueChange={(v) => {
+  1144→                  setDepartment(v);
+  1145→                  // Reset appointment when department changes (avoid mismatch)
+  1146→                  setAppointment("");
+  1147→                }}
+  1148→              >
+  1149→                <SelectTrigger className="w-full">
+  1150→                  <SelectValue />
+  1151→                </SelectTrigger>
+  1152→                <SelectContent>
+  1153→                  {STAKEHOLDER_DEPARTMENTS.map((d) => (
+  1154→                    <SelectItem key={d} value={d}>
+  1155→                      {d}
+  1156→                    </SelectItem>
+  1157→                  ))}
+  1158→                </SelectContent>
+  1159→              </Select>
+  1160→            </Field>
+  1161→            <Field label="Appointment">
+  1162→              <Select value={appointment} onValueChange={setAppointment}>
+  1163→                <SelectTrigger className="w-full">
+  1164→                  <SelectValue placeholder="Select appointment" />
+  1165→                </SelectTrigger>
+  1166→                <SelectContent>
+  1167→                  {apptOptions.map((a) => (
+  1168→                    <SelectItem key={a} value={a}>
+  1169→                      {a}
+  1170→                    </SelectItem>
+  1171→                  ))}
+  1172→                </SelectContent>
+  1173→              </Select>
+  1174→            </Field>
+  1175→            <Field label="Role">
+  1176→              <Select value={role} onValueChange={setRole}>
+  1177→                <SelectTrigger className="w-full">
+  1178→                  <SelectValue />
+  1179→                </SelectTrigger>
+  1180→                <SelectContent>
+  1181→                  {STAKEHOLDER_ROLES.map((r) => (
+  1182→                    <SelectItem key={r} value={r}>
+  1183→                      {r}
+  1184→                    </SelectItem>
+  1185→                  ))}
+  1186→                </SelectContent>
+  1187→              </Select>
+  1188→            </Field>
+  1189→            {isOfficer && (
+  1190→              <Field label="Seniority (Navy List — lower = more senior)">
+  1191→                <Input
+  1192→                  type="number"
+  1193→                  inputMode="numeric"
+  1194→                  value={seniority}
+  1195→                  onChange={(e) => setSeniority(e.target.value)}
+  1196→                  placeholder="e.g. 1"
+  1197→                  min="1"
+  1198→                />
+  1199→              </Field>
+  1200→            )}
+  1201→            {isSailor && (
+  1202→              <>
+  1203→                <Field label="Area Store Location">
+  1204→                  <Select
+  1205→                    value={areaStoreLocation || "__none__"}
+  1206→                    onValueChange={(v) =>
+  1207→                      setAreaStoreLocation(v === "__none__" ? "" : v)
+  1208→                    }
+  1209→                  >
+  1210→                    <SelectTrigger className="w-full">
+  1211→                      <SelectValue placeholder="Select area store" />
+  1212→                    </SelectTrigger>
+  1213→                    <SelectContent>
+  1214→                      <SelectItem value="__none__">— Unassigned —</SelectItem>
+  1215→                      {AREA_STORES.map((s) => (
+  1216→                        <SelectItem key={s} value={s}>
+  1217→                          {s}
+  1218→                        </SelectItem>
+  1219→                      ))}
+  1220→                    </SelectContent>
+  1221→                  </Select>
+  1222→                </Field>
+  1223→                <Field label="Subject Clerk">
+  1224→                  <Input
+  1225→                    value={subjectClerk}
+  1226→                    onChange={(e) => setSubjectClerk(e.target.value)}
+  1227→                    placeholder="e.g. BMS Clerk"
+  1228→                  />
+  1229→                </Field>
+  1230→                <Field label="ILMS CCED (Material & ILMS)">
+  1231→                  <Input
+  1232→                    value={ilmsCced}
+  1233→                    onChange={(e) => setIlmsCced(e.target.value)}
+  1234→                    placeholder="e.g. ILMS CCED"
+  1235→                  />
+  1236→                </Field>
+  1237→              </>
+  1238→            )}
+  1239→            <Field label="Office Number">
+  1240→              <Input
+  1241→                value={officeNumber}
+  1242→                onChange={(e) => setOfficeNumber(e.target.value)}
+  1243→                placeholder="e.g. Ext 2101"
+  1244→              />
+  1245→            </Field>
+  1246→            <Field label="Availability">
+  1247→              <Select value={availability} onValueChange={setAvailability}>
+  1248→                <SelectTrigger className="w-full">
+  1249→                  <SelectValue />
+  1250→                </SelectTrigger>
+  1251→                <SelectContent>
+  1252→                  {AVAILABILITY_STATUSES.map((a) => (
+  1253→                    <SelectItem key={a} value={a}>
+  1254→                      {a}
+  1255→                    </SelectItem>
+  1256→                  ))}
+  1257→                </SelectContent>
+  1258→              </Select>
+  1259→            </Field>
+  1260→            <Field label="Telephone">
+  1261→              <Input
+  1262→                value={telephone}
+  1263→                onChange={(e) => setTelephone(e.target.value)}
+  1264→                placeholder="e.g. 011-2345678"
+  1265→              />
+  1266→            </Field>
+  1267→            <Field label="WhatsApp">
+  1268→              <Input
+  1269→                value={whatsapp}
+  1270→                onChange={(e) => setWhatsapp(e.target.value)}
+  1271→                placeholder="e.g. 077-1234567"
+  1272→              />
+  1273→            </Field>
+  1274→            <Field label="Email" className="sm:col-span-2">
+  1275→              <Input
+  1276→                type="email"
+  1277→                value={email}
+  1278→                onChange={(e) => setEmail(e.target.value)}
+  1279→                placeholder="e.g. rperera@navy.lk"
+  1280→              />
+  1281→            </Field>
+  1282→          </div>
+  1283→          <DialogFooter>
+  1284→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+  1285→              Cancel
+  1286→            </Button>
+  1287→            <Button type="submit" disabled={saving}>
+  1288→              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1289→              {isEdit ? "Update" : "Add"} Personnel
+  1290→            </Button>
+  1291→          </DialogFooter>
+  1292→        </form>
+  1293→      </DialogContent>
+  1294→    </Dialog>
+  1295→  );
+  1296→}
+  1297→
+  1298→// ─────────────────────────────────────────────────────────
+  1299→// Stakeholder View Dialog (Contact Card)
+  1300→// ─────────────────────────────────────────────────────────
+  1301→function StakeholderViewDialog({
+  1302→  stakeholder,
+  1303→  open,
+  1304→  onOpenChange,
+  1305→  onEdit,
+  1306→}: {
+  1307→  stakeholder: Stakeholder;
+  1308→  open: boolean;
+  1309→  onOpenChange: (o: boolean) => void;
+  1310→  onEdit: () => void;
+  1311→}) {
+  1312→  const s = stakeholder;
+  1313→  const cat = resolveCategory(s);
+  1314→  const isSailor = isSailorCategory(cat);
+  1315→  return (
+  1316→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1317→      <DialogContent className="sm:max-w-lg">
+  1318→        <DialogHeader>
+  1319→          <DialogTitle className="flex items-center gap-2">
+  1320→            <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+  1321→              <User className="h-5 w-5" />
+  1322→            </div>
+  1323→            <div>
+  1324→              <div>{s.name}</div>
+  1325→              <div className="text-xs text-muted-foreground font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
+  1326→                {s.rankOrRate && <span>{s.rankOrRate}</span>}
+  1327→                {s.appointment && (
+  1328→                  <>
+  1329→                    <span>·</span>
+  1330→                    <CustomBadge className={departmentColor(s.department)}>
+  1331→                      {s.appointment}
+  1332→                    </CustomBadge>
+  1333→                  </>
+  1334→                )}
+  1335→              </div>
+  1336→            </div>
+  1337→          </DialogTitle>
+  1338→        </DialogHeader>
+  1339→
+  1340→        <div className="space-y-4">
+  1341→          {/* Category / Department / Role / Availability chips */}
+  1342→          <div className="flex flex-wrap gap-2">
+  1343→            <CustomBadge className={stakeholderCategoryColor(cat)}>
+  1344→              {isSailor ? (
+  1345→                <UserCircle className="h-3 w-3 mr-1" />
+  1346→              ) : (
+  1347→                <Medal className="h-3 w-3 mr-1" />
+  1348→              )}
+  1349→              {cat}
+  1350→            </CustomBadge>
+  1351→            <CustomBadge className={departmentColor(s.department)}>
+  1352→              <Building2 className="h-3 w-3 mr-1" /> {s.department} Dept
+  1353→            </CustomBadge>
+  1354→            <CustomBadge className="bg-secondary text-secondary-foreground border-border">
+  1355→              <Briefcase className="h-3 w-3 mr-1" /> {s.role}
+  1356→            </CustomBadge>
+  1357→            <CustomBadge className={availabilityColor(s.availability)}>
+  1358→              <ShieldCheck className="h-3 w-3 mr-1" /> {s.availability}
+  1359→            </CustomBadge>
+  1360→          </div>
+  1361→
+  1362→          {/* Officer-specific info row (seniority) */}
+  1363→          {!isSailor && (
+  1364→            <div className="rounded-lg border border-border bg-muted/30 p-3 flex items-center justify-between gap-3">
+  1365→              <div className="flex items-center gap-2 min-w-0">
+  1366→                <Medal className="h-4 w-4 text-violet-400 shrink-0" />
+  1367→                <div className="min-w-0">
+  1368→                  <p className="text-xs text-muted-foreground">Seniority (Navy List)</p>
+  1369→                  <p className="text-sm text-foreground">
+  1370→                    {s.seniority != null
+  1371→                      ? `#${s.seniority} (lower = more senior)`
+  1372→                      : "—"}
+  1373→                  </p>
+  1374→                </div>
+  1375→              </div>
+  1376→            </div>
+  1377→          )}
+  1378→
+  1379→          {/* Sailor-specific info: area store + subject clerk + ILMS CCED */}
+  1380→          {isSailor && (
+  1381→            <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+  1382→              <ContactRow
+  1383→                icon={Store}
+  1384→                label="Area Store Location"
+  1385→                value={s.areaStoreLocation}
+  1386→              />
+  1387→              <ContactRow
+  1388→                icon={ClipboardList}
+  1389→                label="Subject Clerk"
+  1390→                value={s.subjectClerk}
+  1391→              />
+  1392→              <ContactRow
+  1393→                icon={Briefcase}
+  1394→                label="ILMS CCED (Material & ILMS)"
+  1395→                value={s.ilmsCced}
+  1396→              />
+  1397→            </div>
+  1398→          )}
+  1399→
+  1400→          {/* Contact rows */}
+  1401→          <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+  1402→            <ContactRow
+  1403→              icon={IdCard}
+  1404→              label="SVC Number"
+  1405→              value={s.svcNumber}
+  1406→              mono
+  1407→            />
+  1408→            <ContactRow icon={Building2} label="Office Number" value={s.officeNumber} />
+  1409→            <ContactRow
+  1410→              icon={Phone}
+  1411→              label="Telephone"
+  1412→              value={s.telephone}
+  1413→              href={telLink(s.telephone)}
+  1414→              hrefLabel="Call"
+  1415→              accent="blue"
+  1416→            />
+  1417→            <ContactRow
+  1418→              icon={MessageCircle}
+  1419→              label="WhatsApp"
+  1420→              value={s.whatsapp}
+  1421→              href={waMeLink(s.whatsapp)}
+  1422→              hrefLabel="Open chat"
+  1423→              external
+  1424→              accent="green"
+  1425→            />
+  1426→            <ContactRow
+  1427→              icon={Mail}
+  1428→              label="Email"
+  1429→              value={s.email}
+  1430→              href={s.email ? `mailto:${s.email}` : null}
+  1431→              hrefLabel="Send"
+  1432→              accent="blue"
+  1433→            />
+  1434→          </div>
+  1435→
+  1436→          <div className="flex justify-end gap-2">
+  1437→            <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1438→              Close
+  1439→            </Button>
+  1440→            <Button onClick={onEdit}>
+  1441→              <Pencil className="h-4 w-4" /> Edit
+  1442→            </Button>
+  1443→          </div>
+  1444→        </div>
+  1445→      </DialogContent>
+  1446→    </Dialog>
+  1447→  );
+  1448→}
+  1449→
+  1450→function ContactRow({
+  1451→  icon: Icon,
+  1452→  label,
+  1453→  value,
+  1454→  href,
+  1455→  hrefLabel,
+  1456→  external,
+  1457→  accent = "default",
+  1458→  mono,
+  1459→}: {
+  1460→  icon: React.ComponentType<{ className?: string }>;
+  1461→  label: string;
+  1462→  value: string | null;
+  1463→  href?: string | null;
+  1464→  hrefLabel?: string;
+  1465→  external?: boolean;
+  1466→  accent?: "default" | "blue" | "green";
+  1467→  mono?: boolean;
+  1468→}) {
+  1469→  const accentClass =
+  1470→    accent === "blue"
+  1471→      ? "text-blue-400"
+  1472→      : accent === "green"
+  1473→        ? "text-emerald-400"
+  1474→        : "text-muted-foreground";
+  1475→  return (
+  1476→    <div className="flex items-center justify-between gap-3 p-3">
+  1477→      <div className="flex items-center gap-2.5 min-w-0">
+  1478→        <Icon className={cn("h-4 w-4 shrink-0", accentClass)} />
+  1479→        <div className="min-w-0">
+  1480→          <p className="text-xs text-muted-foreground">{label}</p>
+  1481→          <p
+  1482→            className={cn(
+  1483→              "text-sm text-foreground truncate",
+  1484→              mono && "font-mono"
+  1485→            )}
+  1486→          >
+  1487→            {value || "—"}
+  1488→          </p>
+  1489→        </div>
+  1490→      </div>
+  1491→      {href && value && (
+  1492→        <a
+  1493→          href={href}
+  1494→          target={external ? "_blank" : undefined}
+  1495→          rel={external ? "noopener noreferrer" : undefined}
+  1496→          className={cn(
+  1497→            "inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border hover:bg-accent transition-colors",
+  1498→            accent === "blue" && "border-blue-500/30 text-blue-400 hover:bg-blue-500/10",
+  1499→            accent === "green" &&
+  1500→              "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10",
+  1501→            accent === "default" &&
+  1502→              "border-border text-muted-foreground hover:bg-muted"
+  1503→          )}
+  1504→        >
+  1505→          {hrefLabel || "Open"}
+  1506→          <ChevronRight className="h-3 w-3" />
+  1507→        </a>
+  1508→      )}
+  1509→    </div>
+  1510→  );
+  1511→}
+  1512→
+  1513→// ═════════════════════════════════════════════════════════
+  1514→// TAB 2 — Suppliers Directory & Ratings Dashboard
+  1515→// ═════════════════════════════════════════════════════════
+  1516→function SuppliersTab() {
+  1517→  const { data: list, loading, error, refresh } = useFetch<Supplier[]>(
+  1518→    "/api/suppliers"
+  1519→  );
+  1520→  const { toast } = useToast();
+  1521→
+  1522→  const [search, setSearch] = useState("");
+  1523→  const [minRating, setMinRating] = useState("0");
+  1524→
+  1525→  const [addOpen, setAddOpen] = useState(false);
+  1526→  const [editTarget, setEditTarget] = useState<Supplier | null>(null);
+  1527→  const [viewTarget, setViewTarget] = useState<Supplier | null>(null);
+  1528→  const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
+  1529→
+  1530→  const filtered = useMemo(() => {
+  1531→    if (!list) return [];
+  1532→    const s = search.trim().toLowerCase();
+  1533→    const min = parseFloat(minRating);
+  1534→    return list.filter((sup) => {
+  1535→      if (!isNaN(min) && (sup.avgRating || 0) < min) return false;
+  1536→      if (s) {
+  1537→        const hay = `${sup.name} ${sup.contactPerson ?? ""} ${
+  1538→          sup.telephone ?? ""
+  1539→        }`.toLowerCase();
+  1540→        if (!hay.includes(s)) return false;
+  1541→      }
+  1542→      return true;
+  1543→    });
+  1544→  }, [list, search, minRating]);
+  1545→
+  1546→  const dashboard = useMemo(() => {
+  1547→    if (!list || !list.length)
+  1548→      return { total: 0, avg: 0, topName: "—", underReview: 0 };
+  1549→    const total = list.length;
+  1550→    const rated = list.filter((s) => s.ratingCount > 0);
+  1551→    const avg =
+  1552→      rated.length > 0
+  1553→        ? rated.reduce((sum, s) => sum + (s.avgRating || 0), 0) / rated.length
+  1554→        : 0;
+  1555→    const top = rated.length
+  1556→      ? rated.reduce((a, b) => ((b.avgRating || 0) > (a.avgRating || 0) ? b : a))
+  1557→      : null;
+  1558→    const underReview = list.filter(
+  1559→      (s) => s.ratingCount > 0 && (s.avgRating || 0) < 2.5
+  1560→    ).length;
+  1561→    return {
+  1562→      total,
+  1563→      avg,
+  1564→      topName: top?.name ?? "—",
+  1565→      underReview,
+  1566→    };
+  1567→  }, [list]);
+  1568→
+  1569→  const chartData = useMemo(() => {
+  1570→    if (!list) return [];
+  1571→    return list
+  1572→      .map((s) => ({
+  1573→        name: s.name.length > 18 ? s.name.slice(0, 16) + "…" : s.name,
+  1574→        rating: Math.round((s.avgRating || 0) * 100) / 100,
+  1575→        color: ratingBarColor(s.avgRating || 0),
+  1576→      }))
+  1577→      .sort((a, b) => b.rating - a.rating);
+  1578→  }, [list]);
+  1579→
+  1580→  const filtersActive = search !== "" || minRating !== "0";
+  1581→
+  1582→  function clearFilters() {
+  1583→    setSearch("");
+  1584→    setMinRating("0");
+  1585→  }
+  1586→
+  1587→  async function handleDelete() {
+  1588→    if (!deleteTarget) return;
+  1589→    const res = await apiRequest(`/api/suppliers/${deleteTarget.id}`, "DELETE");
+  1590→    if (res.ok) {
+  1591→      toast({ title: "Supplier deleted", description: deleteTarget.name });
+  1592→      setDeleteTarget(null);
+  1593→      refresh();
+  1594→    } else {
+  1595→      toast({
+  1596→        title: "Failed to delete",
+  1597→        description: res.error,
+  1598→        variant: "destructive",
+  1599→      });
+  1600→    }
+  1601→  }
+  1602→
+  1603→  if (loading) return <LoadingState label="Loading suppliers..." />;
+  1604→  if (error) return <ErrorState message={error} />;
+  1605→
+  1606→  return (
+  1607→    <div className="space-y-4">
+  1608→      {/* Dashboard summary cards */}
+  1609→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  1610→        <StatCard
+  1611→          label="Total Suppliers"
+  1612→          value={dashboard.total}
+  1613→          icon={Building2}
+  1614→          accent="blue"
+  1615→          sub="Registered vendors"
+  1616→        />
+  1617→        <StatCard
+  1618→          label="Avg Rating"
+  1619→          value={dashboard.avg ? `${dashboard.avg.toFixed(2)} / 5` : "—"}
+  1620→          icon={Star}
+  1621→          accent="purple"
+  1622→          sub="Across all rated suppliers"
+  1623→        />
+  1624→        <StatCard
+  1625→          label="Top Rated"
+  1626→          value={dashboard.topName}
+  1627→          icon={Award}
+  1628→          accent="green"
+  1629→          sub="Highest overall score"
+  1630→        />
+  1631→        <StatCard
+  1632→          label="Under Review"
+  1633→          value={dashboard.underReview}
+  1634→          icon={AlertTriangle}
+  1635→          accent="red"
+  1636→          sub="Avg rating below 2.5"
+  1637→        />
+  1638→      </div>
+  1639→
+  1640→      {/* Ratings overview chart */}
+  1641→      <div className="bg-card border border-border rounded-xl p-4">
+  1642→        <div className="flex items-center justify-between mb-3">
+  1643→          <div className="flex items-center gap-2">
+  1644→            <TrendingUp className="h-4 w-4 text-primary" />
+  1645→            <h3 className="text-sm font-semibold text-foreground">
+  1646→              Supplier Ratings Overview
+  1647→            </h3>
+  1648→          </div>
+  1649→          <span className="text-xs text-muted-foreground">
+  1650→            Avg score per supplier (color-coded by rating band)
+  1651→          </span>
+  1652→        </div>
+  1653→        {chartData.length === 0 ? (
+  1654→          <EmptyState
+  1655→            icon={TrendingUp}
+  1656→            title="No supplier ratings yet"
+  1657→            description="Add ratings to suppliers to see the overview chart."
+  1658→          />
+  1659→        ) : (
+  1660→          <div className="w-full h-72">
+  1661→            <ResponsiveContainer width="100%" height="100%">
+  1662→              <BarChart
+  1663→                data={chartData}
+  1664→                margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+  1665→              >
+  1666→                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" vertical={false} />
+  1667→                <XAxis
+  1668→                  dataKey="name"
+  1669→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1670→                  axisLine={{ stroke: "#2d3548" }}
+  1671→                  interval={0}
+  1672→                  angle={-15}
+  1673→                  textAnchor="end"
+  1674→                  height={60}
+  1675→                />
+  1676→                <YAxis
+  1677→                  domain={[0, 5]}
+  1678→                  ticks={[0, 1, 2, 3, 4, 5]}
+  1679→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1680→                  axisLine={{ stroke: "#2d3548" }}
+  1681→                />
+  1682→                <Tooltip
+  1683→                  cursor={{ fill: "#2d354833" }}
+  1684→                  contentStyle={{
+  1685→                    background: "#1a1f2e",
+  1686→                    border: "1px solid #2d3548",
+  1687→                    borderRadius: 8,
+  1688→                    fontSize: 12,
+  1689→                  }}
+  1690→                  labelStyle={{ color: "#e2e8f0" }}
+  1691→                />
+  1692→                <Bar dataKey="rating" radius={[4, 4, 0, 0]}>
+  1693→                  {chartData.map((entry, idx) => (
+  1694→                    <Cell key={idx} fill={entry.color} />
+  1695→                  ))}
+  1696→                </Bar>
+  1697→              </BarChart>
+  1698→            </ResponsiveContainer>
+  1699→          </div>
+  1700→        )}
+  1701→      </div>
+  1702→
+  1703→      {/* Filters toolbar */}
+  1704→      <div className="bg-card border border-border rounded-xl p-4">
+  1705→        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+  1706→          <div className="flex-1 min-w-0">
+  1707→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+  1708→              Search (Name / Contact / Phone)
+  1709→            </Label>
+  1710→            <div className="relative">
+  1711→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+  1712→              <Input
+  1713→                value={search}
+  1714→                onChange={(e) => setSearch(e.target.value)}
+  1715→                placeholder="Search suppliers..."
+  1716→                className="pl-9"
+  1717→              />
+  1718→            </div>
+  1719→          </div>
+  1720→          <div>
+  1721→            <Label className="text-xs text-muted-foreground mb-1.5 block">
+  1722→              Minimum Rating
+  1723→            </Label>
+  1724→            <Select value={minRating} onValueChange={setMinRating}>
+  1725→              <SelectTrigger className="w-full lg:w-48">
+  1726→                <SelectValue />
+  1727→              </SelectTrigger>
+  1728→              <SelectContent>
+  1729→                <SelectItem value="0">All Ratings</SelectItem>
+  1730→                <SelectItem value="4.5">4.5+ (Excellent)</SelectItem>
+  1731→                <SelectItem value="3.5">3.5+ (Good)</SelectItem>
+  1732→                <SelectItem value="2.5">2.5+ (Satisfactory)</SelectItem>
+  1733→                <SelectItem value="1.5">1.5+ (Below Average)</SelectItem>
+  1734→              </SelectContent>
+  1735→            </Select>
+  1736→          </div>
+  1737→          {filtersActive && (
+  1738→            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9">
+  1739→              <X className="h-4 w-4" /> Clear
+  1740→            </Button>
+  1741→          )}
+  1742→          <Button onClick={() => setAddOpen(true)} className="h-9 lg:ml-auto">
+  1743→            <Plus className="h-4 w-4" /> Add Supplier
+  1744→          </Button>
+  1745→        </div>
+  1746→      </div>
+  1747→
+  1748→      {/* Suppliers table */}
+  1749→      <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1750→        {!filtered.length ? (
+  1751→          <EmptyState
+  1752→            icon={filtersActive ? Filter : Building2}
+  1753→            title={filtersActive ? "No matches" : "No suppliers yet"}
+  1754→            description={
+  1755→              filtersActive
+  1756→                ? "Try clearing filters to see all suppliers."
+  1757→                : "Add suppliers to start tracking contracts and ratings."
+  1758→            }
+  1759→            action={
+  1760→              filtersActive ? (
+  1761→                <Button variant="outline" size="sm" onClick={clearFilters}>
+  1762→                  Clear Filters
+  1763→                </Button>
+  1764→              ) : (
+  1765→                <Button size="sm" onClick={() => setAddOpen(true)}>
+  1766→                  <Plus className="h-4 w-4" /> Add Supplier
+  1767→                </Button>
+  1768→              )
+  1769→            }
+  1770→          />
+  1771→        ) : (
+  1772→          <div className="overflow-x-auto">
+  1773→            <Table>
+  1774→              <TableHeader>
+  1775→                <TableRow className="border-border bg-muted/30 hover:bg-muted/30">
+  1776→                  <TableHead className="min-w-[200px]">Supplier</TableHead>
+  1777→                  <TableHead>Contact Person</TableHead>
+  1778→                  <TableHead>Telephone</TableHead>
+  1779→                  <TableHead>WhatsApp</TableHead>
+  1780→                  <TableHead className="text-center">Nominated Items</TableHead>
+  1781→                  <TableHead className="text-center">Avg Rating</TableHead>
+  1782→                  <TableHead className="text-center">Ratings</TableHead>
+  1783→                  <TableHead className="text-right">Actions</TableHead>
+  1784→                </TableRow>
+  1785→              </TableHeader>
+  1786→              <TableBody>
+  1787→                {filtered.map((sup) => (
+  1788→                  <TableRow key={sup.id} className="border-border">
+  1789→                    <TableCell>
+  1790→                      <div className="flex items-center gap-2">
+  1791→                        <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+  1792→                          <Building2 className="h-4 w-4" />
+  1793→                        </div>
+  1794→                        <div className="min-w-0">
+  1795→                          <p className="font-medium text-foreground truncate">{sup.name}</p>
+  1796→                          {sup.contractDetails && (
+  1797→                            <p className="text-xs text-muted-foreground truncate max-w-[260px]">
+  1798→                              {sup.contractDetails}
+  1799→                            </p>
+  1800→                          )}
+  1801→                        </div>
+  1802→                      </div>
+  1803→                    </TableCell>
+  1804→                    <TableCell className="text-muted-foreground">
+  1805→                      {sup.contactPerson || "—"}
+  1806→                    </TableCell>
+  1807→                    <TableCell>
+  1808→                      {telLink(sup.telephone) ? (
+  1809→                        <a
+  1810→                          href={telLink(sup.telephone)!}
+  1811→                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline"
+  1812→                        >
+  1813→                          <Phone className="h-3 w-3" />
+  1814→                          {sup.telephone}
+  1815→                        </a>
+  1816→                      ) : (
+  1817→                        <span className="text-muted-foreground">—</span>
+  1818→                      )}
+  1819→                    </TableCell>
+  1820→                    <TableCell>
+  1821→                      {waMeLink(sup.whatsapp) ? (
+  1822→                        <a
+  1823→                          href={waMeLink(sup.whatsapp)!}
+  1824→                          target="_blank"
+  1825→                          rel="noopener noreferrer"
+  1826→                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline"
+  1827→                        >
+  1828→                          <MessageCircle className="h-3 w-3" />
+  1829→                          {sup.whatsapp}
+  1830→                        </a>
+  1831→                      ) : (
+  1832→                        <span className="text-muted-foreground">—</span>
+  1833→                      )}
+  1834→                    </TableCell>
+  1835→                    <TableCell className="text-center">
+  1836→                      <CustomBadge className="bg-secondary text-secondary-foreground border-border">
+  1837→                        {sup.nominations?.length ?? 0}
+  1838→                      </CustomBadge>
+  1839→                    </TableCell>
+  1840→                    <TableCell className="text-center">
+  1841→                      {sup.ratingCount > 0 ? (
+  1842→                        <CustomBadge className={ratingColor(sup.avgRating)}>
+  1843→                          <Star className="h-3 w-3 mr-1" />
+  1844→                          {sup.avgRating.toFixed(2)} · {ratingLabel(sup.avgRating)}
+  1845→                        </CustomBadge>
+  1846→                      ) : (
+  1847→                        <span className="text-muted-foreground text-xs">Not rated</span>
+  1848→                      )}
+  1849→                    </TableCell>
+  1850→                    <TableCell className="text-center text-muted-foreground">
+  1851→                      {sup.ratingCount}
+  1852→                    </TableCell>
+  1853→                    <TableCell className="text-right">
+  1854→                      <div className="flex items-center justify-end gap-1">
+  1855→                        <Button
+  1856→                          variant="ghost"
+  1857→                          size="icon"
+  1858→                          className="h-8 w-8"
+  1859→                          onClick={() => setViewTarget(sup)}
+  1860→                          title="View Details"
+  1861→                        >
+  1862→                          <Eye className="h-4 w-4" />
+  1863→                        </Button>
+  1864→                        <Button
+  1865→                          variant="ghost"
+  1866→                          size="icon"
+  1867→                          className="h-8 w-8"
+  1868→                          onClick={() => setEditTarget(sup)}
+  1869→                          title="Edit"
+  1870→                        >
+  1871→                          <Pencil className="h-4 w-4" />
+  1872→                        </Button>
+  1873→                        <Button
+  1874→                          variant="ghost"
+  1875→                          size="icon"
+  1876→                          className="h-8 w-8 text-red-400 hover:text-red-300"
+  1877→                          onClick={() => setDeleteTarget(sup)}
+  1878→                          title="Delete"
+  1879→                        >
+  1880→                          <Trash2 className="h-4 w-4" />
+  1881→                        </Button>
+  1882→                      </div>
+  1883→                    </TableCell>
+  1884→                  </TableRow>
+  1885→                ))}
+  1886→              </TableBody>
+  1887→            </Table>
+  1888→          </div>
+  1889→        )}
+  1890→      </div>
+  1891→
+  1892→      {/* Add / Edit supplier dialog */}
+  1893→      {addOpen && (
+  1894→        <SupplierFormDialog
+  1895→          key="add"
+  1896→          open={addOpen}
+  1897→          onOpenChange={setAddOpen}
+  1898→          onSaved={() => {
+  1899→            setAddOpen(false);
+  1900→            refresh();
+  1901→          }}
+  1902→        />
+  1903→      )}
+  1904→      {editTarget && (
+  1905→        <SupplierFormDialog
+  1906→          key={`edit-${editTarget.id}`}
+  1907→          open={!!editTarget}
+  1908→          onOpenChange={(o) => !o && setEditTarget(null)}
+  1909→          initial={editTarget}
+  1910→          onSaved={() => {
+  1911→            setEditTarget(null);
+  1912→            refresh();
+  1913→          }}
+  1914→        />
+  1915→      )}
+  1916→
+  1917→      {/* Details dialog (centerpiece) */}
+  1918→      {viewTarget && (
+  1919→        <SupplierDetailsDialog
+  1920→          key={`view-${viewTarget.id}`}
+  1921→          supplierId={viewTarget.id}
+  1922→          open={!!viewTarget}
+  1923→          onOpenChange={(o) => !o && setViewTarget(null)}
+  1924→          onEdit={() => {
+  1925→            const sup = viewTarget;
+  1926→            setViewTarget(null);
+  1927→            setEditTarget(sup);
+  1928→          }}
+  1929→          onChanged={refresh}
+  1930→        />
+  1931→      )}
+  1932→
+  1933→      {/* Delete confirm */}
+  1934→      <AlertDialog
+  1935→        open={!!deleteTarget}
+  1936→        onOpenChange={(o) => !o && setDeleteTarget(null)}
+  1937→      >
+  1938→        <AlertDialogContent>
+  1939→          <AlertDialogHeader>
+  1940→            <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
+  1941→            <AlertDialogDescription>
+  1942→              This will permanently delete{" "}
+  1943→              <span className="text-foreground font-medium">{deleteTarget?.name}</span>{" "}
+  1944→              and all related contacts, nominations, and ratings. This cannot be undone.
+  1945→            </AlertDialogDescription>
+  1946→          </AlertDialogHeader>
+  1947→          <AlertDialogFooter>
+  1948→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1949→            <AlertDialogAction
+  1950→              className="bg-red-500 hover:bg-red-600 text-white"
+  1951→              onClick={handleDelete}
+  1952→            >
+  1953→              <Trash2 className="h-4 w-4" /> Delete
+  1954→            </AlertDialogAction>
+  1955→          </AlertDialogFooter>
+  1956→        </AlertDialogContent>
+  1957→      </AlertDialog>
+  1958→    </div>
+  1959→  );
+  1960→}
+  1961→
+  1962→// ─────────────────────────────────────────────────────────
+  1963→// Supplier Form (Add / Edit)
+  1964→// ─────────────────────────────────────────────────────────
+  1965→interface SupplierFormProps {
+  1966→  open: boolean;
+  1967→  onOpenChange: (o: boolean) => void;
+  1968→  initial?: Supplier | null;
+  1969→  onSaved: () => void;
+  1970→}
+  1971→
+  1972→function SupplierFormDialog({
+  1973→  open,
+  1974→  onOpenChange,
+  1975→  initial,
+  1976→  onSaved,
+  1977→}: SupplierFormProps) {
+  1978→  const isEdit = !!initial;
+  1979→  const { toast } = useToast();
+  1980→  const [saving, setSaving] = useState(false);
+  1981→
+  1982→  const [name, setName] = useState(initial?.name ?? "");
+  1983→  const [contactPerson, setContactPerson] = useState(initial?.contactPerson ?? "");
+  1984→  const [telephone, setTelephone] = useState(initial?.telephone ?? "");
+  1985→  const [whatsapp, setWhatsapp] = useState(initial?.whatsapp ?? "");
+  1986→  const [email, setEmail] = useState(initial?.email ?? "");
+  1987→  const [address, setAddress] = useState(initial?.address ?? "");
+  1988→  const [contractDetails, setContractDetails] = useState(
+  1989→    initial?.contractDetails ?? ""
+  1990→  );
+  1991→  const [registrationNo, setRegistrationNo] = useState(
+  1992→    initial?.registrationNo ?? ""
+  1993→  );
+  1994→  const [vatNo, setVatNo] = useState(initial?.vatNo ?? "");
+  1995→  const [bankDetails, setBankDetails] = useState(initial?.bankDetails ?? "");
+  1996→
+  1997→  async function handleSubmit(e: React.FormEvent) {
+  1998→    e.preventDefault();
+  1999→    if (!name.trim()) {
+  2000→      toast({ title: "Supplier name is required", variant: "destructive" });
+
+[showing lines 1-2000 of 3228; use offset=2001 with limit to continue reading]

@@ -1,0 +1,1277 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import {
+     5→  Table,
+     6→  TableBody,
+     7→  TableCell,
+     8→  TableHead,
+     9→  TableHeader,
+    10→  TableRow,
+    11→} from "@/components/ui/table";
+    12→import { Button } from "@/components/ui/button";
+    13→import { Input } from "@/components/ui/input";
+    14→import { Label } from "@/components/ui/label";
+    15→import { Checkbox } from "@/components/ui/checkbox";
+    16→import {
+    17→  Dialog,
+    18→  DialogContent,
+    19→  DialogHeader,
+    20→  DialogTitle,
+    21→  DialogFooter,
+    22→  DialogDescription,
+    23→} from "@/components/ui/dialog";
+    24→import {
+    25→  Select,
+    26→  SelectContent,
+    27→  SelectItem,
+    28→  SelectTrigger,
+    29→  SelectValue,
+    30→} from "@/components/ui/select";
+    31→import { CustomBadge } from "@/components/erp/badges";
+    32→import { LoadingState, EmptyState } from "@/components/erp/states";
+    33→import { InitiateFileDialog, EstimateItem } from "./initiate-file";
+    34→import { formatCurrency, estimateStatusColor } from "@/lib/constants";
+    35→import { useToast } from "@/hooks/use-toast";
+    36→import {
+    37→  Loader2,
+    38→  Sparkles,
+    39→  FileSignature,
+    40→  CheckCircle2,
+    41→  PackageSearch,
+    42→  AlertCircle,
+    43→  ShieldCheck,
+    44→  FileText,
+    45→  ScrollText,
+    46→  ChevronUp,
+    47→  ChevronDown,
+    48→  ChevronsUpDown,
+    49→  Group as GroupIcon,
+    50→  Files,
+    51→  ChevronRight,
+    52→  CheckSquare,
+    53→  ListChecks,
+    54→  X,
+    55→  UserCheck,
+    56→  User,
+    57→  Layers,
+    58→  Info,
+    59→  RotateCcw,
+    60→} from "lucide-react";
+    61→import { cn } from "@/lib/utils";
+    62→
+    63→interface Props {
+    64→  estimateId: string;
+    65→  /** whether to show the AI "Process" button (wizard step 2) or just the table (PR from Estimate tab) */
+    66→  showProcessButton?: boolean;
+    67→  onChanged?: () => void;
+    68→}
+    69→
+    70→interface EstimateWithProject {
+    71→  id: string;
+    72→  status: string;
+    73→  items: EstimateItem[];
+    74→  project?: {
+    75→    id?: string;
+    76→    name?: string;
+    77→    nameAbbreviation?: string | null;
+    78→    projectType?: string | null;
+    79→    financialMean?: string | null;
+    80→  } | null;
+    81→}
+    82→
+    83→interface Stakeholder {
+    84→  id: string;
+    85→  name: string;
+    86→  rankOrRate?: string | null;
+    87→  svcNumber?: string | null;
+    88→  appointment?: string | null;
+    89→  department?: string | null;
+    90→  category?: string | null;
+    91→  seniority?: number | null;
+    92→}
+    93→
+    94→interface NumberPrefix {
+    95→  id: string;
+    96→  docType: string;
+    97→  prefix: string;
+    98→  suffix: string | null;
+    99→  nextNumber: number;
+   100→  description: string | null;
+   101→}
+   102→
+   103→type SectionVariant = "rc" | "non-rate" | "contractual";
+   104→type ThemeKey = "emerald" | "amber" | "violet";
+   105→type SortKey = "srNo" | "itemName" | "itemCode" | "qty" | "unitCost" | "totalCost";
+   106→type SortDir = "asc" | "desc";
+   107→
+   108→const SECTION_THEME: Record<SectionVariant, { key: ThemeKey; bar: string; title: string; summary: string; desc: string }> = {
+   109→  rc: {
+   110→    key: "emerald",
+   111→    bar: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+   112→    title: "text-emerald-300",
+   113→    summary: "text-emerald-400",
+   114→    desc: "bg-emerald-500/5 text-emerald-400/90",
+   115→  },
+   116→  "non-rate": {
+   117→    key: "amber",
+   118→    bar: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+   119→    title: "text-amber-300",
+   120→    summary: "text-amber-400",
+   121→    desc: "bg-amber-500/5 text-amber-400/90",
+   122→  },
+   123→  contractual: {
+   124→    key: "violet",
+   125→    bar: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+   126→    title: "text-violet-300",
+   127→    summary: "text-violet-400",
+   128→    desc: "bg-violet-500/5 text-violet-400/90",
+   129→  },
+   130→};
+   131→
+   132→export function EstimateItemsTable({ estimateId, showProcessButton = false, onChanged }: Props) {
+   133→  const { data: estimate, loading, refresh } = useFetch<EstimateWithProject>(
+   134→    `/api/estimates/${estimateId}`
+   135→  );
+   136→  const { data: prefixes } = useFetch<NumberPrefix[]>("/api/number-prefixes");
+   137→  const { data: stakeholders } = useFetch<Stakeholder[]>("/api/stakeholders");
+   138→  const [processing, setProcessing] = useState(false);
+   139→  const [initiateItem, setInitiateItem] = useState<EstimateItem | null>(null);
+   140→  // Multi-select for bulk "Initiate Selected" — tracks selected EstimateItem IDs.
+   141→  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+   142→  const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
+   143→  const { toast } = useToast();
+   144→
+   145→  // Sorting state — shared across all 3 sections (single preference)
+   146→  const [sortKey, setSortKey] = useState<SortKey>("srNo");
+   147→  const [sortDir, setSortDir] = useState<SortDir>("asc");
+   148→  // Group-by-file toggle — applies within each section
+   149→  const [groupByFile, setGroupByFile] = useState(false);
+   150→
+   151→  const handleSort = (key: SortKey) => {
+   152→    if (key === sortKey) {
+   153→      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+   154→    } else {
+   155→      setSortKey(key);
+   156→      setSortDir("asc");
+   157→    }
+   158→  };
+   159→
+   160→  const items = estimate?.items || [];
+   161→  const pendingItems = items.filter((i) => i.status === "Pending");
+   162→  const initiatedItems = items.filter((i) => i.status === "Initiated");
+   163→
+   164→  // Determine if the project context is contractual — infer from project type OR financial mean.
+   165→  const projectType = estimate?.project?.projectType;
+   166→  const financialMean = estimate?.project?.financialMean;
+   167→  const isProjectContractual =
+   168→    projectType === "Contractual Job" || financialMean === "Contractual";
+   169→
+   170→  // Split items into 3 groups according to type
+   171→  const rcItems = items.filter((i) => i.isRC);
+   172→  const contractualItems = items.filter((i) => !i.isRC && isProjectContractual);
+   173→  const nonRateItems = items.filter((i) => !i.isRC && !isProjectContractual);
+   174→
+   175→  // ─── Multi-select helpers ───
+   176→  const toggleSelect = (id: string) => {
+   177→    setSelectedIds((prev) => {
+   178→      const next = new Set(prev);
+   179→      if (next.has(id)) next.delete(id);
+   180→      else next.add(id);
+   181→      return next;
+   182→    });
+   183→  };
+   184→  const selectMany = (ids: string[], on: boolean) => {
+   185→    setSelectedIds((prev) => {
+   186→      const next = new Set(prev);
+   187→      if (on) ids.forEach((id) => next.add(id));
+   188→      else ids.forEach((id) => next.delete(id));
+   189→      return next;
+   190→    });
+   191→  };
+   192→  const clearSelection = () => setSelectedIds(new Set());
+   193→  // All pending item IDs (only Pending items are eligible for PR initiation).
+   194→  // Computed inline (no useMemo) since pendingItems is itself derived from items.
+   195→  const allPendingIds = pendingItems.map((i) => i.id);
+   196→  const visibleSelectedCount = allPendingIds.filter((id) => selectedIds.has(id)).length;
+   197→  const allPendingSelected =
+   198→    allPendingIds.length > 0 && visibleSelectedCount === allPendingIds.length;
+   199→  const somePendingSelected =
+   200→    visibleSelectedCount > 0 && visibleSelectedCount < allPendingIds.length;
+   201→  const toggleSelectAllPending = () =>
+   202→    selectMany(allPendingIds, !allPendingSelected);
+   203→
+   204→  // Officers + sailors for the BulkInitiatePRDialog selects (sorted by seniority)
+   205→  const officers = useMemo(
+   206→    () =>
+   207→      (stakeholders || [])
+   208→        .filter((s) => (s.category || "").toLowerCase().includes("officer"))
+   209→        .sort((a, b) => {
+   210→          const sa = a.seniority ?? 99;
+   211→          const sb = b.seniority ?? 99;
+   212→          if (sa !== sb) return sa - sb;
+   213→          return (a.name || "").localeCompare(b.name || "");
+   214→        }),
+   215→    [stakeholders]
+   216→  );
+   217→  const sailors = useMemo(
+   218→    () =>
+   219→      (stakeholders || [])
+   220→        .filter((s) => (s.category || "").toLowerCase().includes("sailor"))
+   221→        .sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+   222→    [stakeholders]
+   223→  );
+   224→
+   225→  // PR prefix auto-suggest — find the "PR" doc type in the number prefixes
+   226→  const prPrefix = useMemo(
+   227→    () => (prefixes || []).find((p) => p.docType === "PR"),
+   228→    [prefixes]
+   229→  );
+   230→  const suggestedPrNumber = useMemo(() => {
+   231→    if (!prPrefix) return "";
+   232→    const num = String(prPrefix.nextNumber).padStart(3, "0");
+   233→    return `${prPrefix.prefix}${num}${prPrefix.suffix || ""}`;
+   234→  }, [prPrefix]);
+   235→
+   236→  // Bulk initiate: creates a PR for every selected estimate item via
+   237→  // POST /api/estimates/{estimateId}/items/{itemId}. The same PR number, file
+   238→  // number, authorized-by and created-by are reused across all items so they
+   239→  // share a fileGroupKey (and thus collapse into a single grouped row in the
+   240→  // PR Raised Files window).
+   241→  const handleBulkInitiate = async (input: {
+   242→    prNumber: string;
+   243→    fileNumber: string;
+   244→    fileGroupKey: string;
+   245→    authorizedById: string;
+   246→    createdById: string;
+   247→  }) => {
+   248→    const selected = pendingItems.filter((it) => selectedIds.has(it.id));
+   249→    if (selected.length === 0) {
+   250→      toast({ title: "No items selected", variant: "destructive" });
+   251→      return;
+   252→    }
+   253→    const officer = officers.find((o) => o.id === input.authorizedById);
+   254→    const sailor = sailors.find((s) => s.id === input.createdById);
+   255→    const authorizedBy = officer
+   256→      ? `${officer.name}${officer.appointment ? ` (${officer.appointment})` : ""}`
+   257→      : input.authorizedById;
+   258→    const createdBy = sailor
+   259→      ? `${sailor.name}${sailor.appointment ? ` (${sailor.appointment})` : ""}`
+   260→      : input.createdById;
+   261→    const effectiveGroupKey = input.fileGroupKey.trim() || input.prNumber;
+   262→    const results = await Promise.all(
+   263→      selected.map((it) =>
+   264→        apiRequest(`/api/estimates/${estimateId}/items/${it.id}`, "POST", {
+   265→          prNumber: input.prNumber,
+   266→          fileNumber: input.fileNumber,
+   267→          fileGroupKey: effectiveGroupKey,
+   268→          createdBy,
+   269→          authorizedBy,
+   270→          responsiblePerson: authorizedBy,
+   271→        })
+   272→      )
+   273→    );
+   274→    const failed = results.filter((r) => !r.ok);
+   275→    if (failed.length === 0) {
+   276→      toast({
+   277→        title: `Initiated ${selected.length} file${selected.length === 1 ? "" : "s"} — ${input.prNumber}`,
+   278→        description: "PR raised successfully. Item statuses updated below.",
+   279→      });
+   280→    } else {
+   281→      toast({
+   282→        title: `${failed.length} of ${selected.length} initiate(s) failed`,
+   283→        description: failed[0]?.error,
+   284→        variant: "destructive",
+   285→      });
+   286→    }
+   287→    clearSelection();
+   288→    setBulkInitiateOpen(false);
+   289→    refresh();
+   290→    onChanged?.();
+   291→  };
+   292→
+   293→  const handleProcess = async () => {
+   294→    setProcessing(true);
+   295→    const res = await apiRequest(`/api/estimates/${estimateId}/process`, "POST");
+   296→    setProcessing(false);
+   297→    if (res.ok) {
+   298→      toast({ title: "Estimate processed with AI", description: `${items.length} items matched to RC list & inventory` });
+   299→      refresh();
+   300→      onChanged?.();
+   301→    } else {
+   302→      toast({ title: "AI processing failed", description: res.error, variant: "destructive" });
+   303→    }
+   304→  };
+   305→
+   306→  if (loading) return <LoadingState label="Loading estimate..." />;
+   307→
+   308→  return (
+   309→    <div className="space-y-3">
+   310→      {showProcessButton && (
+   311→        <div className="flex items-center justify-between gap-3 flex-wrap">
+   312→          <div className="flex items-center gap-2">
+   313→            <CustomBadge className={cn("border-0", estimateStatusColor(estimate?.status || "Draft"))}>
+   314→              {estimate?.status || "Draft"}
+   315→            </CustomBadge>
+   316→            <span className="text-xs text-muted-foreground">
+   317→              {items.length} items · {pendingItems.length} pending · {initiatedItems.length} initiated
+   318→            </span>
+   319→          </div>
+   320→          {estimate?.status !== "Processed" && (
+   321→            <Button onClick={handleProcess} disabled={processing} size="sm" className="gap-1.5">
+   322→              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   323→              Process with AI
+   324→            </Button>
+   325→          )}
+   326→        </div>
+   327→      )}
+   328→
+   329→      {/* summary tiles — Total Cost now correctly sums (Unit Cost × Qty) per row,
+   330→          where Unit Cost = rcRate for RC items and approxCost for non-RC items */}
+   331→      {items.length > 0 && (
+   332→        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+   333→          <SummaryTile
+   334→            label="Total Cost"
+   335→            value={formatCurrency(items.reduce((s, i) => s + (i.isRC ? i.rcRate : i.approxCost) * (i.qty || 0), 0))}
+   336→            tone="text-blue-400"
+   337→            icon={<PackageSearch className="h-4 w-4" />}
+   338→          />
+   339→          <SummaryTile
+   340→            label="RC Items"
+   341→            value={String(rcItems.length)}
+   342→            tone="text-emerald-400"
+   343→            icon={<CheckCircle2 className="h-4 w-4" />}
+   344→          />
+   345→          <SummaryTile
+   346→            label="Stock Available"
+   347→            value={String(items.filter((i) => i.availableStock > 0).length)}
+   348→            tone="text-amber-400"
+   349→            icon={<AlertCircle className="h-4 w-4" />}
+   350→          />
+   351→          <SummaryTile
+   352→            label="Initiated PRs"
+   353→            value={String(initiatedItems.length)}
+   354→            tone="text-violet-400"
+   355→            icon={<FileSignature className="h-4 w-4" />}
+   356→          />
+   357→        </div>
+   358→      )}
+   359→
+   360→      {/* Selection bar — appears when at least one pending item is selected */}
+   361→      {selectedIds.size > 0 && (
+   362→        <div className="flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/[0.06] px-4 py-2.5">
+   363→          <div className="flex items-center gap-2 text-sm text-foreground">
+   364→            <ListChecks className="h-4 w-4 text-primary" />
+   365→            <span className="font-medium">{selectedIds.size} item{selectedIds.size > 1 ? "s" : ""} selected</span>
+   366→            <span className="text-xs text-muted-foreground">· ready to initiate</span>
+   367→          </div>
+   368→          <div className="flex items-center gap-2 ml-auto">
+   369→            <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-xs gap-1.5">
+   370→              <X className="h-3.5 w-3.5" /> Clear
+   371→            </Button>
+   372→            <Button
+   373→              size="sm"
+   374→              onClick={() => setBulkInitiateOpen(true)}
+   375→              className="gap-1.5"
+   376→              title="Raise a single PR covering all selected estimate items"
+   377→            >
+   378→              <CheckSquare className="h-4 w-4" /> Initiate Selected
+   379→            </Button>
+   380→          </div>
+   381→        </div>
+   382→      )}
+   383→
+   384→      {/* Group-by-file toggle — only enabled when at least one item has been initiated */}
+   385→      {items.length > 0 && (
+   386→        <div className="flex items-center justify-between gap-3 flex-wrap">
+   387→          <div className="flex items-center gap-2">
+   388→            {pendingItems.length > 0 && (
+   389→              <Checkbox
+   390→                checked={
+   391→                  allPendingSelected
+   392→                    ? true
+   393→                    : somePendingSelected
+   394→                    ? "indeterminate"
+   395→                    : false
+   396→                }
+   397→                onCheckedChange={toggleSelectAllPending}
+   398→                aria-label="Select all pending items"
+   399→                className="mr-1"
+   400→              />
+   401→            )}
+   402→            <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+   403→              <GroupIcon className="h-3 w-3" />
+   404→              Sortable headers · {initiatedItems.length > 0
+   405→                ? "Toggle to group multiple items sharing the same PR/File number"
+   406→                : "Initiate files to enable the group-by-file view"}
+   407→            </p>
+   408→          </div>
+   409→          <Button
+   410→            size="sm"
+   411→            variant={groupByFile ? "default" : "outline"}
+   412→            onClick={() => setGroupByFile((v) => !v)}
+   413→            disabled={initiatedItems.length === 0}
+   414→            className="gap-1.5"
+   415→            title={initiatedItems.length === 0 ? "No initiated items to group" : "Toggle group-by-file view"}
+   416→          >
+   417→            <GroupIcon className="h-4 w-4" />
+   418→            {groupByFile ? "Ungroup View" : "Group by File"}
+   419→          </Button>
+   420→        </div>
+   421→      )}
+   422→
+   423→      {items.length === 0 ? (
+   424→        <EmptyState
+   425→          icon={PackageSearch}
+   426→          title="No estimate items"
+   427→          description="Add material estimate items in Step 1, then process with AI."
+   428→        />
+   429→      ) : (
+   430→        <div className="space-y-4">
+   431→          {rcItems.length > 0 && (
+   432→            <ItemsSection
+   433→              title="RC (Rate Contract) Items"
+   434→              icon={<ShieldCheck className="h-4 w-4" />}
+   435→              variant="rc"
+   436→              description="Items matched to an active Rate Contract — procurement can proceed at the locked RC rate."
+   437→              items={rcItems}
+   438→              onInitiate={(it) => setInitiateItem(it)}
+   439→              sortKey={sortKey}
+   440→              sortDir={sortDir}
+   441→              onSort={handleSort}
+   442→              groupByFile={groupByFile}
+   443→              selectedIds={selectedIds}
+   444→              onToggleSelect={toggleSelect}
+   445→            />
+   446→          )}
+   447→          {nonRateItems.length > 0 && (
+   448→            <ItemsSection
+   449→              title="Non-Rate Items (Tender/Quotation Required)"
+   450→              icon={<FileText className="h-4 w-4" />}
+   451→              variant="non-rate"
+   452→              description="These items are not on an active Rate Contract — they require a tender or quotation process."
+   453→              items={nonRateItems}
+   454→              onInitiate={(it) => setInitiateItem(it)}
+   455→              sortKey={sortKey}
+   456→              sortDir={sortDir}
+   457→              onSort={handleSort}
+   458→              groupByFile={groupByFile}
+   459→              selectedIds={selectedIds}
+   460→              onToggleSelect={toggleSelect}
+   461→            />
+   462→          )}
+   463→          {contractualItems.length > 0 && (
+   464→            <ItemsSection
+   465→              title="Contractual Items (ARO Flow)"
+   466→              icon={<ScrollText className="h-4 w-4" />}
+   467→              variant="contractual"
+   468→              description="These items follow the ARO (Annual Requirement Order) contractual process flow."
+   469→              items={contractualItems}
+   470→              onInitiate={(it) => setInitiateItem(it)}
+   471→              sortKey={sortKey}
+   472→              sortDir={sortDir}
+   473→              onSort={handleSort}
+   474→              groupByFile={groupByFile}
+   475→              selectedIds={selectedIds}
+   476→              onToggleSelect={toggleSelect}
+   477→            />
+   478→          )}
+   479→        </div>
+   480→      )}
+   481→
+   482→      {initiateItem && (
+   483→        <InitiateFileDialog
+   484→          key={initiateItem.id}
+   485→          item={initiateItem}
+   486→          open
+   487→          onOpenChange={(o) => !o && setInitiateItem(null)}
+   488→          onInitiated={() => {
+   489→            setInitiateItem(null);
+   490→            refresh();
+   491→            onChanged?.();
+   492→          }}
+   493→          projectAbbreviation={estimate?.project?.nameAbbreviation}
+   494→        />
+   495→      )}
+   496→
+   497→      {/* Bulk Initiate PR dialog — creates a single PR covering all selected estimate items.
+   498→          The `key` forces a fresh mount whenever the user opens the dialog with a
+   499→          different set of selections so the suggested PR number refreshes. */}
+   500→      {bulkInitiateOpen && (
+   501→        <BulkInitiatePRDialog
+   502→          key={`bulk-${selectedIds.size}-${suggestedPrNumber}`}
+   503→          open={bulkInitiateOpen}
+   504→          onOpenChange={setBulkInitiateOpen}
+   505→          selectedCount={selectedIds.size}
+   506→          suggestedPrNumber={suggestedPrNumber}
+   507→          officers={officers}
+   508→          sailors={sailors}
+   509→          onConfirm={handleBulkInitiate}
+   510→        />
+   511→      )}
+   512→    </div>
+   513→  );
+   514→}
+   515→
+   516→/** Sortable column header with chevron indicator. */
+   517→function SortHeader({
+   518→  label,
+   519→  sortKey,
+   520→  currentSortKey,
+   521→  currentSortDir,
+   522→  onSort,
+   523→  className,
+   524→  align,
+   525→}: {
+   526→  label: string;
+   527→  sortKey: SortKey;
+   528→  currentSortKey: SortKey;
+   529→  currentSortDir: SortDir;
+   530→  onSort: (key: SortKey) => void;
+   531→  className?: string;
+   532→  align?: "left" | "right";
+   533→}) {
+   534→  const active = sortKey === currentSortKey;
+   535→  return (
+   536→    <TableHead className={cn("text-muted-foreground", className)}>
+   537→      <button
+   538→        type="button"
+   539→        onClick={() => onSort(sortKey)}
+   540→        className={cn(
+   541→          "inline-flex items-center gap-1 hover:text-foreground transition-colors",
+   542→          align === "right" && "flex-row-reverse",
+   543→          active && "text-foreground"
+   544→        )}
+   545→      >
+   546→        {label}
+   547→        {active ? (
+   548→          currentSortDir === "asc" ? (
+   549→            <ChevronUp className="h-3 w-3" />
+   550→          ) : (
+   551→            <ChevronDown className="h-3 w-3" />
+   552→          )
+   553→        ) : (
+   554→          <ChevronsUpDown className="h-3 w-3 opacity-40" />
+   555→        )}
+   556→      </button>
+   557→    </TableHead>
+   558→  );
+   559→}
+   560→
+   561→function ItemsSection({
+   562→  title,
+   563→  icon,
+   564→  variant,
+   565→  description,
+   566→  items,
+   567→  onInitiate,
+   568→  sortKey,
+   569→  sortDir,
+   570→  onSort,
+   571→  groupByFile,
+   572→  selectedIds,
+   573→  onToggleSelect,
+   574→}: {
+   575→  title: string;
+   576→  icon: React.ReactNode;
+   577→  variant: SectionVariant;
+   578→  description: string;
+   579→  items: EstimateItem[];
+   580→  onInitiate: (item: EstimateItem) => void;
+   581→  sortKey: SortKey;
+   582→  sortDir: SortDir;
+   583→  onSort: (key: SortKey) => void;
+   584→  groupByFile: boolean;
+   585→  selectedIds: Set<string>;
+   586→  onToggleSelect: (id: string) => void;
+   587→}) {
+   588→  const theme = SECTION_THEME[variant];
+   589→  const showRcCols = variant === "rc";
+   590→  const DescIcon = variant === "rc" ? CheckCircle2 : AlertCircle;
+   591→
+   592→  // Per-item unit cost — approxCost is already per-unit (RC rate or estimateCost).
+   593→  // No "divided by qty" here.
+   594→  const unitCostOf = (it: EstimateItem) => (it.isRC ? it.rcRate : it.approxCost) || 0;
+   595→  const totalCostOf = (it: EstimateItem) => unitCostOf(it) * (it.qty || 0);
+   596→
+   597→  // Sort items — sort is applied within each section
+   598→  const sortedItems = useMemo(() => {
+   599→    const arr = [...items];
+   600→    arr.sort((a, b) => {
+   601→      let cmp = 0;
+   602→      switch (sortKey) {
+   603→        case "srNo":
+   604→          cmp = a.srNo - b.srNo;
+   605→          break;
+   606→        case "itemName":
+   607→          cmp = (a.itemName || "").localeCompare(b.itemName || "");
+   608→          break;
+   609→        case "itemCode":
+   610→          cmp = (a.itemCode || "").localeCompare(b.itemCode || "");
+   611→          break;
+   612→        case "qty":
+   613→          cmp = a.qty - b.qty;
+   614→          break;
+   615→        case "unitCost":
+   616→          cmp = unitCostOf(a) - unitCostOf(b);
+   617→          break;
+   618→        case "totalCost":
+   619→          cmp = totalCostOf(a) - totalCostOf(b);
+   620→          break;
+   621→      }
+   622→      return sortDir === "asc" ? cmp : -cmp;
+   623→    });
+   624→    return arr;
+   625→  }, [items, sortKey, sortDir]);
+   626→
+   627→  // Group items by prNumber (or fileNumber) when groupByFile is enabled.
+   628→  // Items without a prNumber/fileNumber remain as individual rows.
+   629→  // Groups of 2+ items become expandable group cards; single-initiated items
+   630→  // render as individual rows so the user still sees the PR badge inline.
+   631→  const groupedView = useMemo(() => {
+   632→    if (!groupByFile) {
+   633→      return { groups: [] as { key: string; items: EstimateItem[] }[], individuals: sortedItems };
+   634→    }
+   635→    const groupsMap = new Map<string, EstimateItem[]>();
+   636→    const individuals: EstimateItem[] = [];
+   637→    for (const it of sortedItems) {
+   638→      const key = it.prNumber || it.fileNumber;
+   639→      if (key) {
+   640→        const existing = groupsMap.get(key);
+   641→        if (existing) existing.push(it);
+   642→        else groupsMap.set(key, [it]);
+   643→      } else {
+   644→        individuals.push(it);
+   645→      }
+   646→    }
+   647→    const realGroups: { key: string; items: EstimateItem[] }[] = [];
+   648→    for (const [key, groupItems] of groupsMap) {
+   649→      if (groupItems.length >= 2) {
+   650→        realGroups.push({ key, items: groupItems });
+   651→      } else {
+   652→        individuals.push(groupItems[0]);
+   653→      }
+   654→    }
+   655→    return { groups: realGroups, individuals };
+   656→  }, [sortedItems, groupByFile]);
+   657→
+   658→  const totalCost = items.reduce((s, i) => s + totalCostOf(i), 0);
+   659→  const groupedItemCount = groupedView.groups.reduce((s, g) => s + g.items.length, 0);
+   660→
+   661→  return (
+   662→    <div className="border border-border rounded-lg overflow-hidden">
+   663→      {/* Colored header bar — icon + title + count + total cost */}
+   664→      <div className={cn("flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border flex-wrap", theme.bar)}>
+   665→        <div className="flex items-center gap-2 min-w-0">
+   666→          <span className="shrink-0">{icon}</span>
+   667→          <h4 className={cn("text-sm font-semibold", theme.title)}>{title}</h4>
+   668→          <span className="text-[11px] px-1.5 py-0.5 rounded bg-background/40 font-mono">
+   669→            {items.length}
+   670→          </span>
+   671→        </div>
+   672→        <div className="text-xs">
+   673→          <span className="opacity-80">Total Cost: </span>
+   674→          <span className={cn("font-semibold", theme.summary)}>{formatCurrency(totalCost)}</span>
+   675→        </div>
+   676→      </div>
+   677→
+   678→      {/* Variant description strip */}
+   679→      <div className={cn("px-4 py-1.5 border-b border-border flex items-center gap-1.5 text-[11px]", theme.desc)}>
+   680→        <DescIcon className="h-3 w-3 shrink-0" />
+   681→        {description}
+   682→      </div>
+   683→
+   684→      {/* Group cards — only when groupByFile is enabled and there are multi-item groups */}
+   685→      {groupByFile && groupedView.groups.length > 0 && (
+   686→        <div className="p-3 space-y-2 bg-secondary/10 border-b border-border">
+   687→          <p className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+   688→            <Files className="h-3 w-3" />
+   689→            {groupedView.groups.length} grouped file(s) · {groupedItemCount} items
+   690→          </p>
+   691→          {groupedView.groups.map((g) => (
+   692→            <GroupCard
+   693→              key={g.key}
+   694→              groupKey={g.key}
+   695→              items={g.items}
+   696→              variant={variant}
+   697→              onInitiate={onInitiate}
+   698→            />
+   699→          ))}
+   700→        </div>
+   701→      )}
+   702→
+   703→      {/* Individual items table — show ALL items (no pagination limit) in a scrollable container */}
+   704→      {groupedView.individuals.length > 0 ? (
+   705→        <div className="max-h-[60vh] overflow-auto scrollbar-thin">
+   706→          <Table>
+   707→            <TableHeader className="sticky top-0 z-10 bg-secondary/95 backdrop-blur">
+   708→              <TableRow className="hover:bg-transparent border-border">
+   709→                <TableHead className="text-muted-foreground w-10">Select</TableHead>
+   710→                <SortHeader
+   711→                  label="Sr"
+   712→                  sortKey="srNo"
+   713→                  currentSortKey={sortKey}
+   714→                  currentSortDir={sortDir}
+   715→                  onSort={onSort}
+   716→                  className="w-12"
+   717→                />
+   718→                <SortHeader
+   719→                  label="Item Name"
+   720→                  sortKey="itemName"
+   721→                  currentSortKey={sortKey}
+   722→                  currentSortDir={sortDir}
+   723→                  onSort={onSort}
+   724→                />
+   725→                <SortHeader
+   726→                  label="Item Code"
+   727→                  sortKey="itemCode"
+   728→                  currentSortKey={sortKey}
+   729→                  currentSortDir={sortDir}
+   730→                  onSort={onSort}
+   731→                />
+   732→                <SortHeader
+   733→                  label="Qty"
+   734→                  sortKey="qty"
+   735→                  currentSortKey={sortKey}
+   736→                  currentSortDir={sortDir}
+   737→                  onSort={onSort}
+   738→                  className="text-right"
+   739→                  align="right"
+   740→                />
+   741→                <TableHead className="text-muted-foreground">Deno</TableHead>
+   742→                <SortHeader
+   743→                  label="Unit Cost"
+   744→                  sortKey="unitCost"
+   745→                  currentSortKey={sortKey}
+   746→                  currentSortDir={sortDir}
+   747→                  onSort={onSort}
+   748→                  className="text-right"
+   749→                  align="right"
+   750→                />
+   751→                <SortHeader
+   752→                  label="Total Cost"
+   753→                  sortKey="totalCost"
+   754→                  currentSortKey={sortKey}
+   755→                  currentSortDir={sortDir}
+   756→                  onSort={onSort}
+   757→                  className="text-right"
+   758→                  align="right"
+   759→                />
+   760→                {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+   761→                {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+   762→                <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
+   763→                <TableHead className="text-muted-foreground">Available Stock</TableHead>
+   764→                <TableHead className="text-muted-foreground text-right">Action</TableHead>
+   765→              </TableRow>
+   766→            </TableHeader>
+   767→            <TableBody>
+   768→              {groupedView.individuals.map((it) => (
+   769→                <ItemRow
+   770→                  key={it.id}
+   771→                  it={it}
+   772→                  showRcCols={showRcCols}
+   773→                  onInitiate={onInitiate}
+   774→                  isSelected={selectedIds.has(it.id)}
+   775→                  onToggleSelect={onToggleSelect}
+   776→                />
+   777→              ))}
+   778→            </TableBody>
+   779→          </Table>
+   780→        </div>
+   781→      ) : (
+   782→        groupByFile &&
+   783→        groupedView.groups.length > 0 && (
+   784→          <div className="p-6 text-center text-xs text-muted-foreground">
+   785→            All items in this section are part of file groups above.
+   786→          </div>
+   787→        )
+   788→      )}
+   789→    </div>
+   790→  );
+   791→}
+   792→
+   793→/** Expandable group card — multiple items sharing a single PR/File number. */
+   794→function GroupCard({
+   795→  groupKey,
+   796→  items,
+   797→  variant,
+   798→  onInitiate,
+   799→}: {
+   800→  groupKey: string;
+   801→  items: EstimateItem[];
+   802→  variant: SectionVariant;
+   803→  onInitiate: (item: EstimateItem) => void;
+   804→}) {
+   805→  const [expanded, setExpanded] = useState(false);
+   806→  const theme = SECTION_THEME[variant];
+   807→  const showRcCols = variant === "rc";
+   808→
+   809→  const totalCost = items.reduce((s, i) => s + (i.isRC ? i.rcRate : i.approxCost) * (i.qty || 0), 0);
+   810→  const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
+   811→
+   812→  // Common attributes across the group (only show if all items share the same value)
+   813→  const suppliers = new Set(items.map((i) => i.rcSupplier).filter(Boolean));
+   814→  const commonSupplier = suppliers.size === 1 ? Array.from(suppliers)[0] : null;
+   815→  const rcNumbers = new Set(items.map((i) => i.rcNumber).filter(Boolean));
+   816→  const commonRcNumber = rcNumbers.size === 1 ? Array.from(rcNumbers)[0] : null;
+   817→  const units = new Set(items.map((i) => i.unit));
+   818→  const commonUnit = units.size === 1 ? Array.from(units)[0] : null;
+   819→  const fileNumbers = new Set(items.map((i) => i.fileNumber).filter(Boolean));
+   820→  const commonFileNumber = fileNumbers.size === 1 ? Array.from(fileNumbers)[0] : null;
+   821→
+   822→  return (
+   823→    <div className="border border-border rounded-lg overflow-hidden bg-background">
+   824→      {/* Group header — clickable to expand/collapse */}
+   825→      <button
+   826→        type="button"
+   827→        onClick={() => setExpanded((e) => !e)}
+   828→        className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40 transition-colors text-left"
+   829→      >
+   830→        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+   831→          <Files className={cn("h-4 w-4 shrink-0", theme.title)} />
+   832→          <CustomBadge className={cn("border-0 bg-primary/15 text-primary font-mono")}>
+   833→            {groupKey}
+   834→          </CustomBadge>
+   835→          <span className="text-xs text-muted-foreground">
+   836→            {items.length} items · {totalQty} {commonUnit || "units"} total
+   837→          </span>
+   838→          {commonSupplier && (
+   839→            <span className="text-xs text-muted-foreground hidden sm:inline truncate">
+   840→              · Supplier: <span className="text-foreground/80">{commonSupplier}</span>
+   841→            </span>
+   842→          )}
+   843→          {commonRcNumber && showRcCols && (
+   844→            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400 font-mono">
+   845→              {commonRcNumber}
+   846→            </CustomBadge>
+   847→          )}
+   848→          {commonFileNumber && (
+   849→            <span className="text-[11px] text-muted-foreground hidden md:inline font-mono">
+   850→              · {commonFileNumber}
+   851→            </span>
+   852→          )}
+   853→        </div>
+   854→        <div className="flex items-center gap-3 shrink-0">
+   855→          <div className="text-right">
+   856→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">File Total</p>
+   857→            <p className={cn("text-sm font-semibold", theme.summary)}>{formatCurrency(totalCost)}</p>
+   858→          </div>
+   859→          {expanded ? (
+   860→            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   861→          ) : (
+   862→            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   863→          )}
+   864→        </div>
+   865→      </button>
+   866→
+   867→      {/* Expanded individual items */}
+   868→      {expanded && (
+   869→        <div className="border-t border-border bg-secondary/20">
+   870→          <div className="overflow-x-auto scrollbar-thin">
+   871→            <Table>
+   872→              <TableHeader>
+   873→                <TableRow className="hover:bg-transparent border-border">
+   874→                  <TableHead className="text-muted-foreground w-12">Sr</TableHead>
+   875→                  <TableHead className="text-muted-foreground">Item Name</TableHead>
+   876→                  <TableHead className="text-muted-foreground">Item Code</TableHead>
+   877→                  <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+   878→                  <TableHead className="text-muted-foreground">Deno</TableHead>
+   879→                  <TableHead className="text-muted-foreground text-right">Unit Cost</TableHead>
+   880→                  <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+   881→                  {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
+   882→                  {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+   883→                  <TableHead className="text-muted-foreground text-right">Action</TableHead>
+   884→                </TableRow>
+   885→              </TableHeader>
+   886→              <TableBody>
+   887→                {items.map((it) => (
+   888→                  <ItemRow
+   889→                    key={it.id}
+   890→                    it={it}
+   891→                    showRcCols={showRcCols}
+   892→                    onInitiate={onInitiate}
+   893→                    compact
+   894→                  />
+   895→                ))}
+   896→              </TableBody>
+   897→            </Table>
+   898→          </div>
+   899→        </div>
+   900→      )}
+   901→    </div>
+   902→  );
+   903→}
+   904→
+   905→/** Single item row — shared between the main table and the expanded group view. */
+   906→function ItemRow({
+   907→  it,
+   908→  showRcCols,
+   909→  onInitiate,
+   910→  compact,
+   911→  isSelected,
+   912→  onToggleSelect,
+   913→}: {
+   914→  it: EstimateItem;
+   915→  showRcCols: boolean;
+   916→  onInitiate: (item: EstimateItem) => void;
+   917→  compact?: boolean;
+   918→  isSelected?: boolean;
+   919→  onToggleSelect?: (id: string) => void;
+   920→}) {
+   921→  // Per-unit cost — approxCost is already per-unit (RC rate if RC, else estimateCost).
+   922→  // The previous code divided approxCost by qty, which was incorrect.
+   923→  const unitCost = it.isRC ? it.rcRate : it.approxCost;
+   924→  const totalCost = (unitCost || 0) * (it.qty || 0);
+   925→  // Selection is only available for Pending items (Initiated items are already raised)
+   926→  const canSelect = it.status === "Pending" && !!onToggleSelect;
+   927→  return (
+   928→    <TableRow className={cn("border-border", isSelected && "bg-primary/[0.06]")}>
+   929→      {/* Checkbox cell — only rendered for non-compact (main) view + Pending items */}
+   930→      {!compact && (
+   931→        <TableCell className="w-10">
+   932→          {canSelect ? (
+   933→            <Checkbox
+   934→              checked={!!isSelected}
+   935→              onCheckedChange={() => onToggleSelect!(it.id)}
+   936→              aria-label={`Select ${it.itemName}`}
+   937→            />
+   938→          ) : (
+   939→            <span className="text-muted-foreground/40 text-xs">—</span>
+   940→          )}
+   941→        </TableCell>
+   942→      )}
+   943→      <TableCell className="text-xs text-muted-foreground font-mono">{it.srNo}</TableCell>
+   944→      <TableCell className="text-foreground font-medium">{it.itemName}</TableCell>
+   945→      <TableCell className="font-mono text-xs">
+   946→        {it.itemCode ? (
+   947→          <span className="text-blue-400">{it.itemCode}</span>
+   948→        ) : (
+   949→          <span className="text-muted-foreground italic">TBC</span>
+   950→        )}
+   951→      </TableCell>
+   952→      <TableCell className="text-right">{it.qty}</TableCell>
+   953→      <TableCell className="text-xs">{it.unit}</TableCell>
+   954→      <TableCell className="text-right font-medium text-foreground">
+   955→        {formatCurrency(unitCost)}
+   956→        {it.isRC && (
+   957→          <span className="block text-[10px] text-emerald-400">@RC rate</span>
+   958→        )}
+   959→      </TableCell>
+   960→      <TableCell className="text-right font-semibold text-foreground">
+   961→        {formatCurrency(totalCost)}
+   962→      </TableCell>
+   963→      {showRcCols && (
+   964→        <TableCell>
+   965→          {it.isRC ? (
+   966→            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
+   967→          ) : (
+   968→            <span className="text-muted-foreground text-xs">—</span>
+   969→          )}
+   970→        </TableCell>
+   971→      )}
+   972→      {showRcCols && (
+   973→        <TableCell className="text-xs text-muted-foreground">
+   974→          {it.rcSupplier || "—"}
+   975→        </TableCell>
+   976→      )}
+   977→      {!compact && (
+   978→        <>
+   979→          <TableCell className="text-right text-xs">
+   980→            {it.lastPurchasePrice > 0 ? formatCurrency(it.lastPurchasePrice) : "—"}
+   981→          </TableCell>
+   982→          <TableCell>
+   983→            {it.availableStock > 0 ? (
+   984→              <div className="text-xs">
+   985→                <span className="text-emerald-400 font-medium">{it.availableStock} {it.unit}</span>
+   986→                {it.stockLocation && (
+   987→                  <span className="block text-[10px] text-muted-foreground">@ {it.stockLocation}</span>
+   988→                )}
+   989→                {it.nonMovingStock > 0 && (
+   990→                  <span className="block text-[10px] text-amber-400">⚠ {it.nonMovingStock} non-moving</span>
+   991→                )}
+   992→              </div>
+   993→            ) : (
+   994→              <span className="text-muted-foreground text-xs">0</span>
+   995→            )}
+   996→          </TableCell>
+   997→        </>
+   998→      )}
+   999→      <TableCell className="text-right">
+  1000→        {it.status === "Initiated" ? (
+  1001→          <div className="flex flex-col items-end gap-0.5">
+  1002→            <CustomBadge className="border-0 bg-violet-500/15 text-violet-400">
+  1003→              <CheckCircle2 className="h-3 w-3 mr-1" /> {it.prNumber}
+  1004→            </CustomBadge>
+  1005→            {it.fileNumber && (
+  1006→              <span className="text-[10px] text-muted-foreground">{it.fileNumber}</span>
+  1007→            )}
+  1008→          </div>
+  1009→        ) : (
+  1010→          <Button
+  1011→            size="sm"
+  1012→            variant="outline"
+  1013→            onClick={() => onInitiate(it)}
+  1014→            className="gap-1.5 h-7"
+  1015→          >
+  1016→            <FileSignature className="h-3.5 w-3.5" /> Initiate File
+  1017→          </Button>
+  1018→        )}
+  1019→      </TableCell>
+  1020→    </TableRow>
+  1021→  );
+  1022→}
+  1023→
+  1024→function SummaryTile({
+  1025→  label,
+  1026→  value,
+  1027→  tone,
+  1028→  icon,
+  1029→}: {
+  1030→  label: string;
+  1031→  value: string;
+  1032→  tone: string;
+  1033→  icon: React.ReactNode;
+  1034→}) {
+  1035→  return (
+  1036→    <div className="bg-secondary/40 rounded-lg p-3 flex items-center gap-2.5">
+  1037→      <div className={cn("h-8 w-8 rounded-md flex items-center justify-center bg-background/50", tone)}>
+  1038→        {icon}
+  1039→      </div>
+  1040→      <div className="min-w-0">
+  1041→        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+  1042→        <p className={cn("text-sm font-semibold truncate", tone)}>{value}</p>
+  1043→      </div>
+  1044→    </div>
+  1045→  );
+  1046→}
+  1047→
+  1048→// ─── Bulk Initiate PR Dialog (multi-select → raise a single PR covering all selected estimate items) ───
+  1049→// Reuses the same shape as InitiateFileDialog (PR number + file number + group key + officer + sailor)
+  1050→// but applies the SAME values to every selected estimate item, so they collapse into a single grouped
+  1051→// file in the PR Raised Files window.
+  1052→function BulkInitiatePRDialog({
+  1053→  open,
+  1054→  onOpenChange,
+  1055→  selectedCount,
+  1056→  suggestedPrNumber,
+  1057→  officers,
+  1058→  sailors,
+  1059→  onConfirm,
+  1060→}: {
+  1061→  open: boolean;
+  1062→  onOpenChange: (o: boolean) => void;
+  1063→  selectedCount: number;
+  1064→  suggestedPrNumber: string;
+  1065→  officers: Stakeholder[];
+  1066→  sailors: Stakeholder[];
+  1067→  onConfirm: (input: {
+  1068→    prNumber: string;
+  1069→    fileNumber: string;
+  1070→    fileGroupKey: string;
+  1071→    authorizedById: string;
+  1072→    createdById: string;
+  1073→  }) => Promise<void>;
+  1074→}) {
+  1075→  const today = new Date().toISOString().slice(0, 10);
+  1076→  const [prNumber, setPrNumber] = useState(suggestedPrNumber || "");
+  1077→  const [fileNumber, setFileNumber] = useState(`FILE/${today}`);
+  1078→  const [fileGroupKey, setFileGroupKey] = useState("");
+  1079→  const [usePrAsGroupKey, setUsePrAsGroupKey] = useState(true);
+  1080→  const [authorizedById, setAuthorizedById] = useState("");
+  1081→  const [createdById, setCreatedById] = useState("");
+  1082→  const [saving, setSaving] = useState(false);
+  1083→  const { toast } = useToast();
+  1084→
+  1085→  const selectedOfficer = officers.find((o) => o.id === authorizedById);
+  1086→  const selectedSailor = sailors.find((s) => s.id === createdById);
+  1087→
+  1088→  const submit = async () => {
+  1089→    if (!prNumber.trim()) {
+  1090→      toast({ title: "PR/GORF Number is required", variant: "destructive" });
+  1091→      return;
+  1092→    }
+  1093→    if (!authorizedById) {
+  1094→      toast({ title: "Authorized By (Officer) is required", variant: "destructive" });
+  1095→      return;
+  1096→    }
+  1097→    if (!createdById) {
+  1098→      toast({ title: "Created By (Sailor) is required", variant: "destructive" });
+  1099→      return;
+  1100→    }
+  1101→    setSaving(true);
+  1102→    await onConfirm({
+  1103→      prNumber: prNumber.trim(),
+  1104→      fileNumber: fileNumber.trim(),
+  1105→      fileGroupKey: usePrAsGroupKey ? prNumber.trim() : fileGroupKey.trim(),
+  1106→      authorizedById,
+  1107→      createdById,
+  1108→    });
+  1109→    setSaving(false);
+  1110→    // Reset form after submit (parent closes the dialog)
+  1111→    setFileGroupKey("");
+  1112→    setUsePrAsGroupKey(true);
+  1113→  };
+  1114→
+  1115→  return (
+  1116→    <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+  1117→      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1118→        <DialogHeader>
+  1119→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1120→            <CheckSquare className="h-5 w-5 text-primary" />
+  1121→            Initiate {selectedCount} Selected Item{selectedCount === 1 ? "" : "s"} as a Single PR
+  1122→          </DialogTitle>
+  1123→          <DialogDescription className="text-muted-foreground">
+  1124→            Raise one PR/GORF covering all {selectedCount} selected estimate item{selectedCount === 1 ? "" : "s"}. They will share the same PR number, file number, and file group key — collapsing into a single grouped row in the PR Raised Files window. Status updates in place; you stay on this tab.
+  1125→          </DialogDescription>
+  1126→        </DialogHeader>
+  1127→
+  1128→        <div className="space-y-3">
+  1129→          <div className="grid grid-cols-2 gap-3">
+  1130→            <div className="space-y-1.5">
+  1131→              <Label className="text-xs">PR / GORF Number *</Label>
+  1132→              <Input
+  1133→                value={prNumber}
+  1134→                onChange={(e) => setPrNumber(e.target.value)}
+  1135→                placeholder={suggestedPrNumber || "e.g. PR/2025/001"}
+  1136→                className="bg-background border-border"
+  1137→              />
+  1138→              {suggestedPrNumber && (
+  1139→                <p className="text-[11px] text-muted-foreground">
+  1140→                  Suggested: <span className="font-mono text-foreground">{suggestedPrNumber}</span> (from Settings → Number Prefixes)
+  1141→                </p>
+  1142→              )}
+  1143→            </div>
+  1144→            <div className="space-y-1.5">
+  1145→              <Label className="text-xs">File Number (with date)</Label>
+  1146→              <Input
+  1147→                value={fileNumber}
+  1148→                onChange={(e) => setFileNumber(e.target.value)}
+  1149→                className="bg-background border-border"
+  1150→              />
+  1151→            </div>
+  1152→          </div>
+  1153→
+  1154→          {/* File Group Key (optional) — defaults to PR number so multiple items share a file */}
+  1155→          <div className="space-y-1.5">
+  1156→            <Label className="text-xs flex items-center gap-1">
+  1157→              <Layers className="h-3 w-3 text-primary" />
+  1158→              File Group Key (optional)
+  1159→            </Label>
+  1160→            <div className="flex items-center gap-2">
+  1161→              <Input
+  1162→                value={usePrAsGroupKey ? prNumber : fileGroupKey}
+  1163→                onChange={(e) => {
+  1164→                  setUsePrAsGroupKey(false);
+  1165→                  setFileGroupKey(e.target.value);
+  1166→                }}
+  1167→                placeholder={prNumber || "Defaults to PR Number"}
+  1168→                className="bg-background border-border"
+  1169→              />
+  1170→              {!usePrAsGroupKey && (
+  1171→                <Button
+  1172→                  type="button"
+  1173→                  variant="outline"
+  1174→                  size="sm"
+  1175→                  onClick={() => {
+  1176→                    setUsePrAsGroupKey(true);
+  1177→                    setFileGroupKey("");
+  1178→                  }}
+  1179→                  className="gap-1.5 shrink-0"
+  1180→                >
+  1181→                  <RotateCcw className="h-3 w-3" /> Reset
+  1182→                </Button>
+  1183→              )}
+  1184→            </div>
+  1185→            <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+  1186→              <Info className="h-3 w-3 mt-0.5 shrink-0" />
+  1187→              {usePrAsGroupKey
+  1188→                ? `Currently mirroring the PR Number (${prNumber || "—"}). All ${selectedCount} selected items will be grouped under one file.`
+  1189→                : "Custom group key set. Items initiated with the same key will be grouped together in the file register."}
+  1190→            </p>
+  1191→          </div>
+  1192→
+  1193→          {/* Authorized By (Officer) */}
+  1194→          <div className="space-y-1.5">
+  1195→            <Label className="text-xs flex items-center gap-1">
+  1196→              <UserCheck className="h-3 w-3 text-primary" />
+  1197→              Authorized By (Officer) *
+  1198→            </Label>
+  1199→            <Select
+  1200→              value={authorizedById}
+  1201→              onValueChange={setAuthorizedById}
+  1202→            >
+  1203→              <SelectTrigger className="bg-background border-border">
+  1204→                <SelectValue placeholder="Select authorizing officer" />
+  1205→              </SelectTrigger>
+  1206→              <SelectContent>
+  1207→                {officers.length === 0 ? (
+  1208→                  <SelectItem value="_none" disabled>No officers found</SelectItem>
+  1209→                ) : (
+  1210→                  officers.map((o) => (
+  1211→                    <SelectItem key={o.id} value={o.id}>
+  1212→                      {o.name}
+  1213→                      {o.rankOrRate ? ` — ${o.rankOrRate}` : ""}
+  1214→                      {o.appointment ? ` (${o.appointment})` : ""}
+  1215→                    </SelectItem>
+  1216→                  ))
+  1217→                )}
+  1218→              </SelectContent>
+  1219→            </Select>
+  1220→            {selectedOfficer && (
+  1221→              <p className="text-[11px] text-muted-foreground">
+  1222→                {selectedOfficer.name}
+  1223→                {selectedOfficer.appointment ? ` (${selectedOfficer.appointment})` : ""}
+  1224→                {selectedOfficer.department ? ` · ${selectedOfficer.department}` : ""}
+  1225→              </p>
+  1226→            )}
+  1227→          </div>
+  1228→
+  1229→          {/* Created By (Sailor) */}
+  1230→          <div className="space-y-1.5">
+  1231→            <Label className="text-xs flex items-center gap-1">
+  1232→              <User className="h-3 w-3 text-primary" />
+  1233→              Created By (Sailor) *
+  1234→            </Label>
+  1235→            <Select
+  1236→              value={createdById}
+  1237→              onValueChange={setCreatedById}
+  1238→            >
+  1239→              <SelectTrigger className="bg-background border-border">
+  1240→                <SelectValue placeholder="Select creating sailor" />
+  1241→              </SelectTrigger>
+  1242→              <SelectContent>
+  1243→                {sailors.length === 0 ? (
+  1244→                  <SelectItem value="_none" disabled>No sailors found</SelectItem>
+  1245→                ) : (
+  1246→                  sailors.map((s) => (
+  1247→                    <SelectItem key={s.id} value={s.id}>
+  1248→                      {s.name}
+  1249→                      {s.rankOrRate ? ` — ${s.rankOrRate}` : ""}
+  1250→                      {s.appointment ? ` (${s.appointment})` : ""}
+  1251→                    </SelectItem>
+  1252→                  ))
+  1253→                )}
+  1254→              </SelectContent>
+  1255→            </Select>
+  1256→            {selectedSailor && (
+  1257→              <p className="text-[11px] text-muted-foreground">
+  1258→                {selectedSailor.name}
+  1259→                {selectedSailor.appointment ? ` (${selectedSailor.appointment})` : ""}
+  1260→                {selectedSailor.department ? ` · ${selectedSailor.department}` : ""}
+  1261→              </p>
+  1262→            )}
+  1263→          </div>
+  1264→        </div>
+  1265→
+  1266→        <DialogFooter>
+  1267→          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+  1268→          <Button onClick={submit} disabled={saving || selectedCount === 0} className="gap-1.5">
+  1269→            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+  1270→            Initiate {selectedCount} PR{selectedCount === 1 ? "" : "s"}
+  1271→          </Button>
+  1272→        </DialogFooter>
+  1273→      </DialogContent>
+  1274→    </Dialog>
+  1275→  );
+  1276→}
+  1277→

@@ -1,0 +1,2002 @@
+     1→"use client";
+     2→import { useMemo, useState } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { CustomBadge, PositionBadge } from "@/components/erp/badges";
+     8→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→  DialogDescription,
+    15→  DialogFooter,
+    16→} from "@/components/ui/dialog";
+    17→import {
+    18→  AlertDialog,
+    19→  AlertDialogContent,
+    20→  AlertDialogHeader,
+    21→  AlertDialogFooter,
+    22→  AlertDialogTitle,
+    23→  AlertDialogDescription,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→} from "@/components/ui/alert-dialog";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Input } from "@/components/ui/input";
+    29→import { Label } from "@/components/ui/label";
+    30→import { Textarea } from "@/components/ui/textarea";
+    31→import { Checkbox } from "@/components/ui/checkbox";
+    32→import { Progress } from "@/components/ui/progress";
+    33→import {
+    34→  Select,
+    35→  SelectContent,
+    36→  SelectItem,
+    37→  SelectTrigger,
+    38→  SelectValue,
+    39→} from "@/components/ui/select";
+    40→import {
+    41→  Table,
+    42→  TableHeader,
+    43→  TableBody,
+    44→  TableHead,
+    45→  TableRow,
+    46→  TableCell,
+    47→} from "@/components/ui/table";
+    48→import { useToast } from "@/hooks/use-toast";
+    49→import {
+    50→  formatNumber,
+    51→  formatCurrency,
+    52→  COLLECTION_STATUSES,
+    53→  PART_SUPPLY_STATUSES,
+    54→  FILE_CATEGORIES,
+    55→  QC_LEVELS,
+    56→  qcLevelColor,
+    57→  AREA_STORES,
+    58→  AREA_STORE_CATEGORIES,
+    59→  NAV_REFERENCES,
+    60→  navRefColor,
+    61→  DIMENSION_UNITS,
+    62→} from "@/lib/constants";
+    63→import { cn } from "@/lib/utils";
+    64→import {
+    65→  PackageCheck,
+    66→  PackageX,
+    67→  Layers,
+    68→  Plus,
+    69→  Calendar,
+    70→  Download,
+    71→  Truck,
+    72→  Printer,
+    73→  ChevronDown,
+    74→  ChevronRight,
+    75→  ClipboardList,
+    76→  CalendarDays,
+    77→  CalendarRange,
+    78→  Boxes,
+    79→  BarChart3,
+    80→  User,
+    81→  ShieldCheck,
+    82→  ClipboardCheck,
+    83→  Pencil,
+    84→  Trash2,
+    85→  Loader2,
+    86→  Filter,
+    87→  AlertCircle,
+    88→  Star,
+    89→  X,
+    90→  Send,
+    91→  Store,
+    92→  MapPin,
+    93→  FileText,
+    94→  ShoppingCart,
+    95→  Calculator,
+    96→  Ruler,
+    97→  Anchor,
+    98→} from "lucide-react";
+    99→import {
+   100→  LineChart,
+   101→  Line,
+   102→  XAxis,
+   103→  YAxis,
+   104→  Tooltip,
+   105→  ResponsiveContainer,
+   106→  PieChart,
+   107→  Pie,
+   108→  Cell,
+   109→  Legend,
+   110→  CartesianGrid,
+   111→} from "recharts";
+   112→
+   113→// ─────────────────────────────────────────────────────────
+   114→// Types
+   115→// ─────────────────────────────────────────────────────────
+   116→interface CollectionItem {
+   117→  id: string;
+   118→  name: string;
+   119→  expectedQty: number;
+   120→  status: string;
+   121→  dueDate: string | null;
+   122→  supplier: string | null;
+   123→  createdAt: string;
+   124→}
+   125→
+   126→interface PartSupplyEntry {
+   127→  id: string;
+   128→  srNo: number;
+   129→  date: string;
+   130→  vehicleNumber: string | null;
+   131→  qty: number;
+   132→  qcCheckedBy: string | null;
+   133→  sailorCount: number;
+   134→  driverName: string | null;
+   135→  driverLicense: string | null;
+   136→  driverPhone: string | null;
+   137→  cumulativeBalance: number;
+   138→}
+   139→
+   140→interface PartSupplyOrder {
+   141→  id: string;
+   142→  itemName: string;
+   143→  orderedQty: number;
+   144→  receivedQty: number;
+   145→  balance: number;
+   146→  startDate: string | null;
+   147→  expectedEndDate: string | null;
+   148→  status: string;
+   149→  supplier: string | null;
+   150→  createdAt: string;
+   151→  entries: PartSupplyEntry[];
+   152→}
+   153→
+   154→interface DailyCollection {
+   155→  id: string;
+   156→  date: string;
+   157→  itemName: string;
+   158→  qty: number;
+   159→  receivedFrom: string | null;
+   160→  recordedBy: string | null;
+   161→  recordedAt: string;
+   162→}
+   163→
+   164→interface Project {
+   165→  id: string;
+   166→  name: string;
+   167→  voteNumber: string;
+   168→  voteAllocation?: number;
+   169→  status?: string;
+   170→}
+   171→
+   172→interface StoreItem {
+   173→  id: string;
+   174→  description: string;
+   175→  category: string;
+   176→  unit?: string;
+   177→  qty: number;
+   178→  unitCost: number;
+   179→  totalCost?: number;
+   180→  supplier?: string | null;
+   181→  itemCode?: string | null;
+   182→}
+   183→
+   184→interface AreaStoreRecord {
+   185→  id: string;
+   186→  storeName: string;
+   187→  itemCode: string | null;
+   188→  itemName: string;
+   189→  category: string;
+   190→  unit: string;
+   191→  qty: number;
+   192→  unitCost: number;
+   193→  totalCost: number;
+   194→  recordType: string; // "Oncharge" | "OffCharge"
+   195→  navReference: string | null;
+   196→  qcInspectionId: string | null;
+   197→  fileNumber: string | null;
+   198→  location: string | null;
+   199→  date: string | null;
+   200→  remarks: string | null;
+   201→  createdAt: string;
+   202→}
+   203→
+   204→interface QCInspection {
+   205→  id: string;
+   206→  refType: string;
+   207→  refId: string;
+   208→  itemName: string;
+   209→  supplier: string | null;
+   210→  qty: number;
+   211→  qcLevel: string;
+   212→  qcOfficer: string | null;
+   213→  qcOfficerDetails: string | null;
+   214→  remarks: string | null;
+   215→  inspectedAt: string;
+   216→}
+   217→
+   218→interface ProcurementFile {
+   219→  id: string;
+   220→  projectId: string | null;
+   221→  projectName: string | null;
+   222→  voteNumber: string | null;
+   223→  prNumber: string;
+   224→  itemCode: string;
+   225→  itemName: string;
+   226→  unit: string;
+   227→  qty: number;
+   228→  unitPrice: number;
+   229→  fileCost: number;
+   230→  supplier: string | null;
+   231→  presentPosition: string;
+   232→  fileCategory: string;
+   233→  createdBy: string | null;
+   234→  authorizedBy: string | null;
+   235→  createdAt: string;
+   236→  updatedAt: string;
+   237→  logs?: unknown[];
+   238→}
+   239→
+   240→interface Stakeholder {
+   241→  id: string;
+   242→  name: string;
+   243→  rankOrRate: string | null;
+   244→  svcNumber: string | null;
+   245→  appointment: string | null;
+   246→  department: string;
+   247→  category: string;
+   248→  seniority: number | null;
+   249→  areaStoreLocation: string | null;
+   250→  subjectClerk: string | null;
+   251→  ilmsCced: string | null;
+   252→  officeNumber: string | null;
+   253→  telephone: string | null;
+   254→  whatsapp: string | null;
+   255→  email: string | null;
+   256→  availability: string;
+   257→  role: string;
+   258→  createdAt: string;
+   259→  updatedAt: string;
+   260→}
+   261→
+   262→interface Stats {
+   263→  collection: {
+   264→    partSupplyActive: number;
+   265→    dailyToday: number;
+   266→    dailyTotal: number;
+   267→  };
+   268→}
+   269→
+   270→// Procurement present-positions where a PO is processed and items are on
+   271→// their way for collection. Files at these stages show up in the
+   272→// "Files to be Collected" dashboard card and the PO-item dropdowns.
+   273→const PO_PROCESSED_POSITIONS = [
+   274→  "PO Placed",
+   275→  "Order Placed",
+   276→  "Items Dispatched",
+   277→  "In Transit",
+   278→] as const;
+   279→
+   280→function isPoProcessed(position: string): boolean {
+   281→  return (PO_PROCESSED_POSITIONS as readonly string[]).includes(position);
+   282→}
+   283→
+   284→/** Format a stakeholder's name + rank for display in dropdowns. */
+   285→function formatStakeholder(s: Stakeholder): string {
+   286→  const rank = (s.rankOrRate || "").trim();
+   287→  const appt = (s.appointment || "").trim();
+   288→  const parts = [s.name];
+   289→  if (rank) parts.push(`(${rank})`);
+   290→  if (appt) parts.push(`· ${appt}`);
+   291→  return parts.join(" ");
+   292→}
+   293→
+   294→// ─────────────────────────────────────────────────────────
+   295→// Helpers
+   296→// ─────────────────────────────────────────────────────────
+   297→const PIE_STATUS_COLORS: Record<string, string> = COLLECTION_STATUSES.reduce(
+   298→  (acc, status, i) => {
+   299→    acc[status] = ["#f59e0b", "#3b82f6", "#22c55e"][i] ?? "#64748b";
+   300→    return acc;
+   301→  },
+   302→  {} as Record<string, string>
+   303→);
+   304→const DEFAULT_PIE_COLOR = "#64748b";
+   305→
+   306→function todayISO(): string {
+   307→  return new Date().toISOString().slice(0, 10);
+   308→}
+   309→function yesterdayISO(): string {
+   310→  return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+   311→}
+   312→function getLast7Days(): string[] {
+   313→  const days: string[] = [];
+   314→  const t = new Date();
+   315→  for (let i = 6; i >= 0; i--) {
+   316→    const d = new Date(t);
+   317→    d.setDate(d.getDate() - i);
+   318→    days.push(d.toISOString().slice(0, 10));
+   319→  }
+   320→  return days;
+   321→}
+   322→function formatDateLabel(dateStr: string): string {
+   323→  const d = new Date(dateStr + "T00:00:00");
+   324→  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+   325→}
+   326→function formatFullDate(dateStr?: string | null): string {
+   327→  if (!dateStr) return "—";
+   328→  const d = new Date(dateStr + "T00:00:00");
+   329→  if (isNaN(d.getTime())) return dateStr;
+   330→  return d.toLocaleDateString("en-IN", {
+   331→    day: "2-digit",
+   332→    month: "short",
+   333→    year: "numeric",
+   334→  });
+   335→}
+   336→function formatDateTime(iso: string): string {
+   337→  const d = new Date(iso);
+   338→  if (isNaN(d.getTime())) return iso;
+   339→  return d.toLocaleString("en-IN", {
+   340→    day: "2-digit",
+   341→    month: "short",
+   342→    year: "numeric",
+   343→    hour: "2-digit",
+   344→    minute: "2-digit",
+   345→  });
+   346→}
+   347→function progressColor(pct: number): string {
+   348→  if (pct > 90) return "bg-emerald-500";
+   349→  if (pct >= 50) return "bg-amber-500";
+   350→  return "bg-red-500";
+   351→}
+   352→function statusColor(status: string): string {
+   353→  if (
+   354→    status === "Collected" ||
+   355→    (PART_SUPPLY_STATUSES as readonly string[]).includes(status) &&
+   356→      status === "Completed"
+   357→  ) {
+   358→    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   359→  }
+   360→  if (status === "In Progress" || status === "Active") {
+   361→    return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   362→  }
+   363→  if (status === "Pending") {
+   364→    return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   365→  }
+   366→  return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+   367→}
+   368→
+   369→// Loose case-insensitive partial match between a row's supplier/receivedFrom
+   370→// and a project name. Used for project / vote filters on the dashboard.
+   371→function looselyMatches(supplier: string | null | undefined, name: string): boolean {
+   372→  if (!supplier || !name) return false;
+   373→  const a = supplier.toLowerCase().trim();
+   374→  const b = name.toLowerCase().trim();
+   375→  if (!a || !b) return false;
+   376→  return a.includes(b) || b.includes(a);
+   377→}
+   378→
+   379→// Maps a QC level to a numeric score for supplier aggregation.
+   380→function qcLevelToScore(level: string): number {
+   381→  switch (level) {
+   382→    case "Fail":
+   383→      return 1;
+   384→    case "Below Average":
+   385→      return 2;
+   386→    case "Satisfactory":
+   387→      return 3;
+   388→    case "Good":
+   389→      return 4;
+   390→    case "Excellent":
+   391→      return 5;
+   392→    default:
+   393→      return 0;
+   394→  }
+   395→}
+   396→
+   397→function supplierRatingColor(avg: number): string {
+   398→  if (avg >= 4.5)
+   399→    return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+   400→  if (avg >= 3.5) return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+   401→  if (avg >= 2.5) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+   402→  if (avg >= 1.5)
+   403→    return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+   404→  return "bg-red-500/15 text-red-400 border-red-500/30";
+   405→}
+   406→
+   407→function supplierRatingLabel(avg: number): string {
+   408→  if (avg >= 4.5) return "Excellent";
+   409→  if (avg >= 3.5) return "Good";
+   410→  if (avg >= 2.5) return "Satisfactory";
+   411→  if (avg >= 1.5) return "Below Average";
+   412→  return "Fail";
+   413→}
+   414→
+   415→/**
+   416→ * Suggest an area store based on the item's store category.
+   417→ * Falls back to "General" when no mapping matches.
+   418→ *   BMS / Plumbing      → BMS
+   419→ *   Metal / Aluminium   → Metal
+   420→ *   Paint               → Paint
+   421→ *   Lubricant Oil       → Oil & Lubricant
+   422→ *   Tools               → General
+   423→ *   (default)           → General
+   424→ */
+   425→function suggestStoreForCategory(category: string | null | undefined): string {
+   426→  if (!category) return "General";
+   427→  const cat = category.trim();
+   428→  for (const [store, cats] of Object.entries(AREA_STORE_CATEGORIES)) {
+   429→    if (cats.includes(cat)) return store;
+   430→  }
+   431→  return "General";
+   432→}
+   433→
+   434→/** Whether a QC level is considered "passing" (eligible for transfer to a store). */
+   435→function isPassingQc(level: string): boolean {
+   436→  return level === "Satisfactory" || level === "Good" || level === "Excellent";
+   437→}
+   438→
+   439→// Reference Type options for QC Inspection dialog
+   440→const QC_REF_TYPES = [
+   441→  "Daily Collection",
+   442→  "Part Supply Entry",
+   443→  "Collection Item",
+   444→] as const;
+   445→type QCRefType = (typeof QC_REF_TYPES)[number];
+   446→
+   447→// Generic project/vote filter applied to any row that has a supplier-like field.
+   448→// Pure helper (module-level) so the React Compiler can preserve manual memoization.
+   449→function applyProjVoteFilter<
+   450→  T extends { receivedFrom?: string | null; supplier?: string | null }
+   451→>(
+   452→  rows: T[],
+   453→  refField: "receivedFrom" | "supplier",
+   454→  projFilter: string,
+   455→  voteFilt: string,
+   456→  projectById: Map<string, Project>,
+   457→  projectByVote: Map<string, Project>
+   458→): T[] {
+   459→  let out = rows;
+   460→  if (projFilter !== "all") {
+   461→    const p = projectById.get(projFilter);
+   462→    if (p) {
+   463→      const matches = out.filter((r) =>
+   464→        looselyMatches(r[refField] ?? null, p.name)
+   465→      );
+   466→      if (matches.length > 0) out = matches;
+   467→    }
+   468→  }
+   469→  if (voteFilt !== "all") {
+   470→    const p = projectByVote.get(voteFilt);
+   471→    if (p) {
+   472→      const matches = out.filter((r) =>
+   473→        looselyMatches(r[refField] ?? null, p.name)
+   474→      );
+   475→      if (matches.length > 0) out = matches;
+   476→    }
+   477→  }
+   478→  return out;
+   479→}
+   480→
+   481→// Type filter — looks up the item in stores by name; only includes rows whose
+   482→// store category matches. Items not in stores are excluded when a type is set.
+   483→function applyTypeFilter<
+   484→  T extends { itemName?: string; name?: string }
+   485→>(
+   486→  rows: T[],
+   487→  nameField: "itemName" | "name",
+   488→  tFilter: string,
+   489→  storeByName: Map<string, StoreItem>
+   490→): T[] {
+   491→  if (tFilter === "all") return rows;
+   492→  return rows.filter((r) => {
+   493→    const name = r[nameField];
+   494→    const s = storeByName.get((name || "").toLowerCase().trim());
+   495→    return s?.category === tFilter;
+   496→  });
+   497→}
+   498→
+   499→function unitCostFor(
+   500→  itemName: string,
+   501→  storeByName: Map<string, StoreItem>
+   502→): number {
+   503→  const s = storeByName.get((itemName || "").toLowerCase().trim());
+   504→  return s?.unitCost ?? 0;
+   505→}
+   506→
+   507→function valueFor(
+   508→  qty: number,
+   509→  itemName: string,
+   510→  storeByName: Map<string, StoreItem>
+   511→): number {
+   512→  return (qty || 0) * unitCostFor(itemName, storeByName);
+   513→}
+   514→
+   515→// ─────────────────────────────────────────────────────────
+   516→// Main Component
+   517→// ─────────────────────────────────────────────────────────
+   518→export function CollectionModule() {
+   519→  return (
+   520→    <div>
+   521→      <PageHeader
+   522→        title="Collection"
+   523→        description="Track part-supply orders, daily collections & delivery receipts"
+   524→        icon={PackageCheck}
+   525→      />
+   526→      <Tabs defaultValue="dashboard" className="space-y-4">
+   527→        <TabsList className="grid w-full grid-cols-4 max-w-2xl">
+   528→          <TabsTrigger value="dashboard" className="gap-1.5">
+   529→            <BarChart3 className="h-4 w-4" /> Dashboard
+   530→          </TabsTrigger>
+   531→          <TabsTrigger value="part-supply" className="gap-1.5">
+   532→            <Layers className="h-4 w-4" /> Part Supply
+   533→          </TabsTrigger>
+   534→          <TabsTrigger value="daily" className="gap-1.5">
+   535→            <CalendarDays className="h-4 w-4" /> Daily Collection
+   536→          </TabsTrigger>
+   537→          <TabsTrigger value="qc" className="gap-1.5">
+   538→            <ShieldCheck className="h-4 w-4" /> QC Inspection
+   539→          </TabsTrigger>
+   540→        </TabsList>
+   541→        <TabsContent value="dashboard">
+   542→          <DashboardTab />
+   543→        </TabsContent>
+   544→        <TabsContent value="part-supply">
+   545→          <PartSupplyTab />
+   546→        </TabsContent>
+   547→        <TabsContent value="daily">
+   548→          <DailyCollectionTab />
+   549→        </TabsContent>
+   550→        <TabsContent value="qc">
+   551→          <QCInspectionTab />
+   552→        </TabsContent>
+   553→      </Tabs>
+   554→    </div>
+   555→  );
+   556→}
+   557→
+   558→// ─────────────────────────────────────────────────────────
+   559→// Dashboard Tab
+   560→// ─────────────────────────────────────────────────────────
+   561→function DashboardTab() {
+   562→  const { data: stats } = useFetch<Stats>("/api/stats");
+   563→  const {
+   564→    data: items,
+   565→    loading: itemsLoading,
+   566→    error: itemsError,
+   567→  } = useFetch<CollectionItem[]>("/api/collection/items");
+   568→  const { data: partSupply } = useFetch<PartSupplyOrder[]>(
+   569→    "/api/collection/part-supply"
+   570→  );
+   571→  const { data: daily } = useFetch<DailyCollection[]>(
+   572→    "/api/collection/daily"
+   573→  );
+   574→  const { data: projects } = useFetch<Project[]>("/api/projects");
+   575→  const { data: stores } = useFetch<StoreItem[]>("/api/stores");
+   576→  const { data: procurementFiles } =
+   577→    useFetch<ProcurementFile[]>("/api/procurement");
+   578→
+   579→  // Filter state
+   580→  const [projectFilter, setProjectFilter] = useState<string>("all");
+   581→  const [voteFilter, setVoteFilter] = useState<string>("all");
+   582→  const [typeFilter, setTypeFilter] = useState<string>("all");
+   583→  const [viewMode, setViewMode] = useState<"numbers" | "value">("numbers");
+   584→
+   585→  // Lookups
+   586→  const storeByName = useMemo(() => {
+   587→    const m = new Map<string, StoreItem>();
+   588→    (stores ?? []).forEach((s) => {
+   589→      const key = (s.description || "").toLowerCase().trim();
+   590→      if (key && !m.has(key)) m.set(key, s);
+   591→    });
+   592→    return m;
+   593→  }, [stores]);
+   594→
+   595→  const projectById = useMemo(
+   596→    () => new Map((projects ?? []).map((p) => [p.id, p])),
+   597→    [projects]
+   598→  );
+   599→  const projectByVote = useMemo(
+   600→    () =>
+   601→      new Map(
+   602→        (projects ?? [])
+   603→          .filter((p) => !!p.voteNumber)
+   604→          .map((p) => [p.voteNumber, p])
+   605→      ),
+   606→    [projects]
+   607→  );
+   608→  const votes = useMemo(
+   609→    () =>
+   610→      Array.from(
+   611→        new Set((projects ?? []).map((p) => p.voteNumber).filter(Boolean))
+   612→      ).sort(),
+   613→    [projects]
+   614→  );
+   615→
+   616→  // Filtered datasets
+   617→  const filteredDaily = useMemo(() => {
+   618→    let rows = applyProjVoteFilter(
+   619→      daily ?? [],
+   620→      "receivedFrom",
+   621→      projectFilter,
+   622→      voteFilter,
+   623→      projectById,
+   624→      projectByVote
+   625→    );
+   626→    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+   627→    return rows;
+   628→  }, [
+   629→    daily,
+   630→    projectFilter,
+   631→    voteFilter,
+   632→    typeFilter,
+   633→    projectById,
+   634→    projectByVote,
+   635→    storeByName,
+   636→  ]);
+   637→
+   638→  const filteredItems = useMemo(() => {
+   639→    let rows = applyProjVoteFilter(
+   640→      items ?? [],
+   641→      "supplier",
+   642→      projectFilter,
+   643→      voteFilter,
+   644→      projectById,
+   645→      projectByVote
+   646→    );
+   647→    rows = applyTypeFilter(rows, "name", typeFilter, storeByName);
+   648→    return rows;
+   649→  }, [
+   650→    items,
+   651→    projectFilter,
+   652→    voteFilter,
+   653→    typeFilter,
+   654→    projectById,
+   655→    projectByVote,
+   656→    storeByName,
+   657→  ]);
+   658→
+   659→  const filteredPartSupply = useMemo(() => {
+   660→    let rows = applyProjVoteFilter(
+   661→      partSupply ?? [],
+   662→      "supplier",
+   663→      projectFilter,
+   664→      voteFilter,
+   665→      projectById,
+   666→      projectByVote
+   667→    );
+   668→    rows = applyTypeFilter(rows, "itemName", typeFilter, storeByName);
+   669→    return rows;
+   670→  }, [
+   671→    partSupply,
+   672→    projectFilter,
+   673→    voteFilter,
+   674→    typeFilter,
+   675→    projectById,
+   676→    projectByVote,
+   677→    storeByName,
+   678→  ]);
+   679→
+   680→  // Stat figures (derived from filtered datasets)
+   681→  const pendingItems = filteredItems.filter(
+   682→    (i) => i.status === "Pending" || i.status === "In Progress"
+   683→  );
+   684→  const pendingQty = pendingItems.reduce(
+   685→    (s, i) => s + (i.expectedQty || 0),
+   686→    0
+   687→  );
+   688→  const pendingValue = pendingItems.reduce(
+   689→    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+   690→    0
+   691→  );
+   692→
+   693→  const activePartSupplyOrders = filteredPartSupply.filter(
+   694→    (o) => o.status === "Active"
+   695→  );
+   696→  const activePartSupplyCount =
+   697→    stats?.collection?.partSupplyActive != null &&
+   698→    projectFilter === "all" &&
+   699→    voteFilter === "all" &&
+   700→    typeFilter === "all"
+   701→      ? stats.collection.partSupplyActive
+   702→      : activePartSupplyOrders.length;
+   703→  const activePartSupplyValue = activePartSupplyOrders.reduce(
+   704→    (s, o) => s + valueFor(o.receivedQty, o.itemName, storeByName),
+   705→    0
+   706→  );
+   707→
+   708→  const collectedItems = filteredItems.filter(
+   709→    (i) => i.status === "Collected"
+   710→  );
+   711→  const collectedValue = collectedItems.reduce(
+   712→    (s, i) => s + valueFor(i.expectedQty, i.name, storeByName),
+   713→    0
+   714→  );
+   715→
+   716→  const todayStr = todayISO();
+   717→  const todayDaily = filteredDaily.filter((d) => d.date === todayStr);
+   718→  const todayDailyCount = todayDaily.length;
+   719→  const todayDailyValue = todayDaily.reduce(
+   720→    (s, d) => s + valueFor(d.qty, d.itemName, storeByName),
+   721→    0
+   722→  );
+   723→
+   724→  // Trend chart — last 7 days (qty or value depending on viewMode)
+   725→  const trendData = useMemo(() => {
+   726→    const days = getLast7Days();
+   727→    const map = new Map<string, number>();
+   728→    filteredDaily.forEach((d) => {
+   729→      const v =
+   730→        viewMode === "value" ? valueFor(d.qty, d.itemName, storeByName) : d.qty || 0;
+   731→      map.set(d.date, (map.get(d.date) || 0) + v);
+   732→    });
+   733→    return days.map((date) => ({
+   734→      name: formatDateLabel(date),
+   735→      qty: map.get(date) || 0,
+   736→    }));
+   737→  }, [filteredDaily, viewMode, storeByName]);
+   738→
+   739→  // Status breakdown (counts or values depending on viewMode)
+   740→  const statusBreakdown = useMemo(() => {
+   741→    const counts: Record<string, number> = {};
+   742→    filteredItems.forEach((i) => {
+   743→      const v =
+   744→        viewMode === "value"
+   745→          ? valueFor(i.expectedQty, i.name, storeByName)
+   746→          : 1;
+   747→      counts[i.status] = (counts[i.status] || 0) + v;
+   748→    });
+   749→    return COLLECTION_STATUSES.filter((s) => counts[s] > 0).map((name) => ({
+   750→      name,
+   751→      value: counts[name],
+   752→    }));
+   753→  }, [filteredItems, viewMode, storeByName]);
+   754→
+   755→  const recentDaily = filteredDaily.slice(0, 5);
+   756→
+   757→  // Files with a processed PO — these items are on the way and ready to
+   758→  // be collected (PO Placed / Order Placed / Items Dispatched / In Transit).
+   759→  const poProcessedFiles = useMemo(() => {
+   760→    return (procurementFiles ?? []).filter((f) =>
+   761→      isPoProcessed(f.presentPosition)
+   762→    );
+   763→  }, [procurementFiles]);
+   764→
+   765→  const poProcessedQty = poProcessedFiles.reduce((s, f) => s + (f.qty || 0), 0);
+   766→  const poProcessedValue = poProcessedFiles.reduce(
+   767→    (s, f) => s + (f.fileCost || 0),
+   768→    0
+   769→  );
+   770→
+   771→  if (itemsLoading) return <LoadingState label="Loading dashboard..." />;
+   772→  if (itemsError) return <ErrorState message={itemsError} />;
+   773→
+   774→  const filtersActive =
+   775→    projectFilter !== "all" ||
+   776→    voteFilter !== "all" ||
+   777→    typeFilter !== "all";
+   778→
+   779→  function clearFilters() {
+   780→    setProjectFilter("all");
+   781→    setVoteFilter("all");
+   782→    setTypeFilter("all");
+   783→  }
+   784→
+   785→  return (
+   786→    <div className="space-y-5">
+   787→      {/* Filter bar */}
+   788→      <div className="bg-card border border-border rounded-xl p-4">
+   789→        <div className="flex items-center justify-between gap-2 mb-3">
+   790→          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+   791→            <Filter className="h-4 w-4" /> Filters
+   792→          </div>
+   793→          {filtersActive && (
+   794→            <Button
+   795→              size="sm"
+   796→              variant="ghost"
+   797→              className="h-7 text-xs gap-1.5"
+   798→              onClick={clearFilters}
+   799→            >
+   800→              <X className="h-3.5 w-3.5" /> Clear
+   801→            </Button>
+   802→          )}
+   803→        </div>
+   804→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   805→          <div className="space-y-1.5">
+   806→            <Label className="text-xs text-muted-foreground">By Project</Label>
+   807→            <Select value={projectFilter} onValueChange={setProjectFilter}>
+   808→              <SelectTrigger className="w-full">
+   809→                <SelectValue placeholder="All Projects" />
+   810→              </SelectTrigger>
+   811→              <SelectContent>
+   812→                <SelectItem value="all">All Projects</SelectItem>
+   813→                {(projects ?? []).map((p) => (
+   814→                  <SelectItem key={p.id} value={p.id}>
+   815→                    {p.name}
+   816→                  </SelectItem>
+   817→                ))}
+   818→              </SelectContent>
+   819→            </Select>
+   820→          </div>
+   821→          <div className="space-y-1.5">
+   822→            <Label className="text-xs text-muted-foreground">By Vote</Label>
+   823→            <Select value={voteFilter} onValueChange={setVoteFilter}>
+   824→              <SelectTrigger className="w-full">
+   825→                <SelectValue placeholder="All Votes" />
+   826→              </SelectTrigger>
+   827→              <SelectContent>
+   828→                <SelectItem value="all">All Votes</SelectItem>
+   829→                {votes.map((v) => (
+   830→                  <SelectItem key={v} value={v}>
+   831→                    {v}
+   832→                  </SelectItem>
+   833→                ))}
+   834→              </SelectContent>
+   835→            </Select>
+   836→          </div>
+   837→          <div className="space-y-1.5">
+   838→            <Label className="text-xs text-muted-foreground">By Type</Label>
+   839→            <Select value={typeFilter} onValueChange={setTypeFilter}>
+   840→              <SelectTrigger className="w-full">
+   841→                <SelectValue placeholder="All Types" />
+   842→              </SelectTrigger>
+   843→              <SelectContent>
+   844→                <SelectItem value="all">All Types</SelectItem>
+   845→                {FILE_CATEGORIES.filter((c) => c !== "GEN").map((c) => (
+   846→                  <SelectItem key={c} value={c}>
+   847→                    {c}
+   848→                  </SelectItem>
+   849→                ))}
+   850→              </SelectContent>
+   851→            </Select>
+   852→          </div>
+   853→          <div className="space-y-1.5">
+   854→            <Label className="text-xs text-muted-foreground">View</Label>
+   855→            <div className="flex rounded-md border border-border overflow-hidden h-9">
+   856→              <button
+   857→                type="button"
+   858→                onClick={() => setViewMode("numbers")}
+   859→                className={cn(
+   860→                  "flex-1 text-xs font-medium transition-colors px-3",
+   861→                  viewMode === "numbers"
+   862→                    ? "bg-primary text-primary-foreground"
+   863→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+   864→                )}
+   865→              >
+   866→                By Numbers
+   867→              </button>
+   868→              <button
+   869→                type="button"
+   870→                onClick={() => setViewMode("value")}
+   871→                className={cn(
+   872→                  "flex-1 text-xs font-medium transition-colors px-3 border-l border-border",
+   873→                  viewMode === "value"
+   874→                    ? "bg-primary text-primary-foreground"
+   875→                    : "bg-transparent text-muted-foreground hover:bg-secondary"
+   876→                )}
+   877→              >
+   878→                By Value
+   879→              </button>
+   880→            </div>
+   881→          </div>
+   882→        </div>
+   883→      </div>
+   884→
+   885→      {/* Stat cards */}
+   886→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   887→        <StatCard
+   888→          label="Items to be Received"
+   889→          value={
+   890→            viewMode === "value"
+   891→              ? formatCurrency(pendingValue)
+   892→              : pendingItems.length
+   893→          }
+   894→          icon={PackageX}
+   895→          accent="blue"
+   896→          sub={
+   897→            viewMode === "value"
+   898→              ? `${formatCurrency(pendingValue)} expected value`
+   899→              : `${formatNumber(pendingQty)} qty expected`
+   900→          }
+   901→        />
+   902→        <StatCard
+   903→          label="Part Supply Items"
+   904→          value={
+   905→            viewMode === "value"
+   906→              ? formatCurrency(activePartSupplyValue)
+   907→              : activePartSupplyCount
+   908→          }
+   909→          icon={Layers}
+   910→          accent="amber"
+   911→          sub={
+   912→            viewMode === "value"
+   913→              ? `${formatCurrency(activePartSupplyValue)} received value`
+   914→              : "Active part-supply orders"
+   915→          }
+   916→        />
+   917→        <StatCard
+   918→          label="Collected Items"
+   919→          value={
+   920→            viewMode === "value"
+   921→              ? formatCurrency(todayDailyValue)
+   922→              : collectedItems.length
+   923→          }
+   924→          icon={PackageCheck}
+   925→          accent="green"
+   926→          sub={
+   927→            viewMode === "value"
+   928→              ? `${formatCurrency(todayDailyValue)} collected today`
+   929→              : `${todayDailyCount} collected today`
+   930→          }
+   931→        />
+   932→      </div>
+   933→
+   934→      {/* Charts */}
+   935→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   936→        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
+   937→          <div className="flex items-center justify-between mb-4">
+   938→            <h3 className="text-sm font-semibold text-foreground">
+   939→              Collection Trend — Last 7 Days
+   940→            </h3>
+   941→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+   942→              {viewMode === "value" ? "By Value" : "By Numbers"}
+   943→            </CustomBadge>
+   944→          </div>
+   945→          {trendData.length > 0 ? (
+   946→            <ResponsiveContainer width="100%" height={280}>
+   947→              <LineChart
+   948→                data={trendData}
+   949→                margin={{ top: 5, right: 16, left: 0, bottom: 5 }}
+   950→              >
+   951→                <CartesianGrid
+   952→                  strokeDasharray="3 3"
+   953→                  stroke="#2d3548"
+   954→                  vertical={false}
+   955→                />
+   956→                <XAxis
+   957→                  dataKey="name"
+   958→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+   959→                  axisLine={{ stroke: "#2d3548" }}
+   960→                  tickLine={{ stroke: "#2d3548" }}
+   961→                />
+   962→                <YAxis
+   963→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+   964→                  axisLine={{ stroke: "#2d3548" }}
+   965→                  tickLine={{ stroke: "#2d3548" }}
+   966→                  tickFormatter={(v: number) =>
+   967→                    viewMode === "value"
+   968→                      ? v >= 1000
+   969→                        ? `${(v / 1000).toFixed(0)}k`
+   970→                        : String(v)
+   971→                      : formatNumber(v)
+   972→                  }
+   973→                  width={48}
+   974→                />
+   975→                <Tooltip
+   976→                  contentStyle={{
+   977→                    background: "#1a1f2e",
+   978→                    border: "1px solid #2d3548",
+   979→                    borderRadius: 8,
+   980→                    fontSize: 12,
+   981→                  }}
+   982→                  formatter={(value: number) => [
+   983→                    viewMode === "value"
+   984→                      ? formatCurrency(value)
+   985→                      : formatNumber(value),
+   986→                    viewMode === "value" ? "Value" : "Qty",
+   987→                  ]}
+   988→                />
+   989→                <Line
+   990→                  type="monotone"
+   991→                  dataKey="qty"
+   992→                  name={viewMode === "value" ? "Value Collected" : "Qty Collected"}
+   993→                  stroke="#3b82f6"
+   994→                  strokeWidth={2}
+   995→                  dot={{ fill: "#3b82f6", r: 3 }}
+   996→                  activeDot={{ r: 5 }}
+   997→                />
+   998→              </LineChart>
+   999→            </ResponsiveContainer>
+  1000→          ) : (
+  1001→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1002→              No collection data
+  1003→            </p>
+  1004→          )}
+  1005→        </div>
+  1006→
+  1007→        <div className="bg-card border border-border rounded-xl p-5">
+  1008→          <div className="flex items-center justify-between mb-4">
+  1009→            <h3 className="text-sm font-semibold text-foreground">
+  1010→              Items by Status
+  1011→            </h3>
+  1012→            <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1013→              {viewMode === "value" ? "Value" : "Count"}
+  1014→            </CustomBadge>
+  1015→          </div>
+  1016→          {statusBreakdown.length > 0 ? (
+  1017→            <ResponsiveContainer width="100%" height={280}>
+  1018→              <PieChart>
+  1019→                <Pie
+  1020→                  data={statusBreakdown}
+  1021→                  dataKey="value"
+  1022→                  nameKey="name"
+  1023→                  cx="50%"
+  1024→                  cy="50%"
+  1025→                  outerRadius={90}
+  1026→                  innerRadius={45}
+  1027→                  paddingAngle={2}
+  1028→                >
+  1029→                  {statusBreakdown.map((entry, i) => (
+  1030→                    <Cell
+  1031→                      key={i}
+  1032→                      fill={
+  1033→                        PIE_STATUS_COLORS[entry.name] || DEFAULT_PIE_COLOR
+  1034→                      }
+  1035→                    />
+  1036→                  ))}
+  1037→                </Pie>
+  1038→                <Tooltip
+  1039→                  contentStyle={{
+  1040→                    background: "#1a1f2e",
+  1041→                    border: "1px solid #2d3548",
+  1042→                    borderRadius: 8,
+  1043→                    fontSize: 12,
+  1044→                  }}
+  1045→                  formatter={(value: number) =>
+  1046→                    viewMode === "value"
+  1047→                      ? formatCurrency(value)
+  1048→                      : formatNumber(value)
+  1049→                  }
+  1050→                />
+  1051→                <Legend wrapperStyle={{ fontSize: 10 }} />
+  1052→              </PieChart>
+  1053→            </ResponsiveContainer>
+  1054→          ) : (
+  1055→            <p className="text-sm text-muted-foreground py-10 text-center">
+  1056→              No items
+  1057→            </p>
+  1058→          )}
+  1059→        </div>
+  1060→      </div>
+  1061→
+  1062→      {/* Recent activity */}
+  1063→      <div className="bg-card border border-border rounded-xl p-5">
+  1064→        <div className="flex items-center justify-between mb-4">
+  1065→          <h3 className="text-sm font-semibold text-foreground">
+  1066→            Recent Collection Activity
+  1067→          </h3>
+  1068→          <CustomBadge className="bg-secondary border-border text-muted-foreground">
+  1069→            Last {recentDaily.length || 0}
+  1070→          </CustomBadge>
+  1071→        </div>
+  1072→        {recentDaily.length === 0 ? (
+  1073→          <EmptyState
+  1074→            icon={CalendarDays}
+  1075→            title="No recent collections"
+  1076→            description={
+  1077→              filtersActive
+  1078→                ? "No collections match the current filters."
+  1079→                : "Daily collections will appear here once recorded."
+  1080→            }
+  1081→          />
+  1082→        ) : (
+  1083→          <ul className="space-y-3">
+  1084→            {recentDaily.map((d) => (
+  1085→              <li
+  1086→                key={d.id}
+  1087→                className="flex items-start gap-3 pb-3 border-b border-border last:border-0 last:pb-0"
+  1088→              >
+  1089→                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+  1090→                  <PackageCheck className="h-4 w-4" />
+  1091→                </div>
+  1092→                <div className="min-w-0 flex-1">
+  1093→                  <p className="text-sm font-medium text-foreground truncate">
+  1094→                    {d.itemName}
+  1095→                  </p>
+  1096→                  <p className="text-xs text-muted-foreground">
+  1097→                    {viewMode === "value"
+  1098→                      ? `${formatCurrency(valueFor(d.qty, d.itemName, storeByName))} value`
+  1099→                      : `${formatNumber(d.qty)} qty`}{" "}
+  1100→                    · {d.receivedFrom || "—"} · {formatFullDate(d.date)}
+  1101→                  </p>
+  1102→                </div>
+  1103→                <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+  1104→                  {formatDateTime(d.recordedAt)}
+  1105→                </span>
+  1106→              </li>
+  1107→            ))}
+  1108→          </ul>
+  1109→        )}
+  1110→      </div>
+  1111→    </div>
+  1112→  );
+  1113→}
+  1114→
+  1115→// ─────────────────────────────────────────────────────────
+  1116→// Part Supply Tab
+  1117→// ─────────────────────────────────────────────────────────
+  1118→function PartSupplyTab() {
+  1119→  const { data: orders, loading, error, refresh } = useFetch<
+  1120→    PartSupplyOrder[]
+  1121→  >("/api/collection/part-supply");
+  1122→  const [expandedId, setExpandedId] = useState<string | null>(null);
+  1123→  const [addOpen, setAddOpen] = useState(false);
+  1124→  const [entryDialogOrder, setEntryDialogOrder] =
+  1125→    useState<PartSupplyOrder | null>(null);
+  1126→  const [printOrder, setPrintOrder] = useState<PartSupplyOrder | null>(null);
+  1127→  const { toast } = useToast();
+  1128→
+  1129→  function toggle(id: string) {
+  1130→    setExpandedId((cur) => (cur === id ? null : id));
+  1131→  }
+  1132→
+  1133→  if (loading) return <LoadingState label="Loading part-supply orders..." />;
+  1134→  if (error) return <ErrorState message={error} />;
+  1135→
+  1136→  return (
+  1137→    <div className="space-y-4">
+  1138→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+  1139→        <p className="text-sm text-muted-foreground">
+  1140→          Track multi-day deliveries (Ready-mix concrete, Quarry items, TMT
+  1141→          bars, etc.)
+  1142→        </p>
+  1143→        <Button
+  1144→          onClick={() => setAddOpen(true)}
+  1145→          size="sm"
+  1146→          className="gap-1.5 shrink-0"
+  1147→        >
+  1148→          <Plus className="h-4 w-4" /> Add Part Supply Order
+  1149→        </Button>
+  1150→      </div>
+  1151→
+  1152→      {!orders || orders.length === 0 ? (
+  1153→        <EmptyState
+  1154→          icon={Layers}
+  1155→          title="No part-supply orders"
+  1156→          description="Create an order to start tracking multi-day deliveries."
+  1157→          action={
+  1158→            <Button
+  1159→              onClick={() => setAddOpen(true)}
+  1160→              size="sm"
+  1161→              className="gap-1.5"
+  1162→            >
+  1163→              <Plus className="h-4 w-4" /> Add Part Supply Order
+  1164→            </Button>
+  1165→          }
+  1166→        />
+  1167→      ) : (
+  1168→        <div className="space-y-3">
+  1169→          {orders.map((order) => {
+  1170→            const pct =
+  1171→              order.orderedQty > 0
+  1172→                ? Math.min(
+  1173→                    (order.receivedQty / order.orderedQty) * 100,
+  1174→                    100
+  1175→                  )
+  1176→                : 0;
+  1177→            const expanded = expandedId === order.id;
+  1178→            const isCompleted =
+  1179→              order.status === "Completed" || order.balance <= 0;
+  1180→            return (
+  1181→              <div
+  1182→                key={order.id}
+  1183→                className={cn(
+  1184→                  "bg-card border border-border rounded-xl overflow-hidden transition-all",
+  1185→                  isCompleted && "opacity-70"
+  1186→                )}
+  1187→              >
+  1188→                {/* Header (always visible) */}
+  1189→                <button
+  1190→                  onClick={() => toggle(order.id)}
+  1191→                  className="w-full p-4 text-left hover:bg-secondary/30 transition-colors"
+  1192→                  aria-expanded={expanded}
+  1193→                >
+  1194→                  <div className="flex items-start gap-3">
+  1195→                    <div className="shrink-0 text-muted-foreground mt-0.5">
+  1196→                      {expanded ? (
+  1197→                        <ChevronDown className="h-4 w-4" />
+  1198→                      ) : (
+  1199→                        <ChevronRight className="h-4 w-4" />
+  1200→                      )}
+  1201→                    </div>
+  1202→                    <div className="min-w-0 flex-1">
+  1203→                      <div className="flex items-start justify-between gap-2">
+  1204→                        <div className="min-w-0">
+  1205→                          <p className="font-semibold text-foreground truncate">
+  1206→                            {order.itemName}
+  1207→                          </p>
+  1208→                          <p className="text-xs text-muted-foreground truncate">
+  1209→                            {order.supplier || "—"} · Started{" "}
+  1210→                            {formatFullDate(order.startDate)}
+  1211→                          </p>
+  1212→                        </div>
+  1213→                        <CustomBadge
+  1214→                          className={cn(
+  1215→                            "border-0 shrink-0",
+  1216→                            statusColor(order.status)
+  1217→                          )}
+  1218→                        >
+  1219→                          {order.status}
+  1220→                        </CustomBadge>
+  1221→                      </div>
+  1222→                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+  1223→                        <MiniStat
+  1224→                          label="Ordered"
+  1225→                          value={formatNumber(order.orderedQty)}
+  1226→                        />
+  1227→                        <MiniStat
+  1228→                          label="Received"
+  1229→                          value={formatNumber(order.receivedQty)}
+  1230→                          valueClass="text-emerald-400"
+  1231→                        />
+  1232→                        <MiniStat
+  1233→                          label="Balance"
+  1234→                          value={formatNumber(order.balance)}
+  1235→                          valueClass="text-amber-400"
+  1236→                        />
+  1237→                        <div className="col-span-2 sm:col-span-1">
+  1238→                          <p className="text-[10px] uppercase text-muted-foreground">
+  1239→                            Complete ({pct.toFixed(0)}%)
+  1240→                          </p>
+  1241→                          <div className="h-2 w-full bg-secondary rounded-full overflow-hidden mt-1">
+  1242→                            <div
+  1243→                              className={cn(
+  1244→                                "h-full rounded-full transition-all",
+  1245→                                progressColor(pct)
+  1246→                              )}
+  1247→                              style={{ width: `${pct}%` }}
+  1248→                            />
+  1249→                          </div>
+  1250→                        </div>
+  1251→                      </div>
+  1252→                    </div>
+  1253→                  </div>
+  1254→                </button>
+  1255→
+  1256→                {/* Expanded body */}
+  1257→                {expanded && (
+  1258→                  <div className="border-t border-border p-4 space-y-4 bg-secondary/10">
+  1259→                    {/* Order summary bar */}
+  1260→                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 bg-card border border-border rounded-lg p-3">
+  1261→                      <SummaryCell
+  1262→                        label="Item"
+  1263→                        value={order.itemName}
+  1264→                      />
+  1265→                      <SummaryCell
+  1266→                        label="Ordered Qty"
+  1267→                        value={formatNumber(order.orderedQty)}
+  1268→                      />
+  1269→                      <SummaryCell
+  1270→                        label="Received Qty"
+  1271→                        value={formatNumber(order.receivedQty)}
+  1272→                        accent="text-emerald-400"
+  1273→                      />
+  1274→                      <SummaryCell
+  1275→                        label="Balance"
+  1276→                        value={formatNumber(order.balance)}
+  1277→                        accent="text-amber-400"
+  1278→                      />
+  1279→                      <div className="col-span-2 sm:col-span-4 lg:col-span-1">
+  1280→                        <p className="text-[10px] uppercase text-muted-foreground mb-1">
+  1281→                          Complete ({pct.toFixed(0)}%)
+  1282→                        </p>
+  1283→                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+  1284→                          <div
+  1285→                            className={cn(
+  1286→                              "h-full rounded-full transition-all",
+  1287→                              progressColor(pct)
+  1288→                            )}
+  1289→                            style={{ width: `${pct}%` }}
+  1290→                          />
+  1291→                        </div>
+  1292→                      </div>
+  1293→                    </div>
+  1294→
+  1295→                    {/* Delivery entries table */}
+  1296→                    <div>
+  1297→                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+  1298→                        <h4 className="text-sm font-semibold text-foreground">
+  1299→                          Delivery Entries ({order.entries.length})
+  1300→                        </h4>
+  1301→                        <div className="flex items-center gap-2">
+  1302→                          <Button
+  1303→                            variant="outline"
+  1304→                            size="sm"
+  1305→                            className="gap-1.5"
+  1306→                            onClick={() => setPrintOrder(order)}
+  1307→                          >
+  1308→                            <Printer className="h-4 w-4" /> Print Receipt
+  1309→                          </Button>
+  1310→                          {!isCompleted && (
+  1311→                            <Button
+  1312→                              size="sm"
+  1313→                              className="gap-1.5"
+  1314→                              onClick={() => setEntryDialogOrder(order)}
+  1315→                            >
+  1316→                              <Plus className="h-4 w-4" /> Add Entry
+  1317→                            </Button>
+  1318→                          )}
+  1319→                        </div>
+  1320→                      </div>
+  1321→                      {order.entries.length === 0 ? (
+  1322→                        <div className="py-6 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+  1323→                          No deliveries recorded yet. Click “Add Entry” to
+  1324→                          record the first delivery.
+  1325→                        </div>
+  1326→                      ) : (
+  1327→                        <div className="overflow-x-auto rounded-lg border border-border [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
+  1328→                          <Table>
+  1329→                            <TableHeader>
+  1330→                              <TableRow className="border-border hover:bg-transparent">
+  1331→                                <TableHead className="text-muted-foreground">
+  1332→                                  Sr.
+  1333→                                </TableHead>
+  1334→                                <TableHead className="text-muted-foreground">
+  1335→                                  Date
+  1336→                                </TableHead>
+  1337→                                <TableHead className="text-muted-foreground">
+  1338→                                  Vehicle
+  1339→                                </TableHead>
+  1340→                                <TableHead className="text-muted-foreground text-right">
+  1341→                                  Qty
+  1342→                                </TableHead>
+  1343→                                <TableHead className="text-muted-foreground">
+  1344→                                  QC By
+  1345→                                </TableHead>
+  1346→                                <TableHead className="text-muted-foreground">
+  1347→                                  Provost Sailor
+  1348→                                </TableHead>
+  1349→                                <TableHead className="text-muted-foreground text-right">
+  1350→                                  Cum. Bal.
+  1351→                                </TableHead>
+  1352→                              </TableRow>
+  1353→                            </TableHeader>
+  1354→                            <TableBody>
+  1355→                              {order.entries.map((e) => (
+  1356→                                <TableRow
+  1357→                                  key={e.id}
+  1358→                                  className="border-border"
+  1359→                                >
+  1360→                                  <TableCell className="font-medium text-foreground">
+  1361→                                    {e.srNo}
+  1362→                                  </TableCell>
+  1363→                                  <TableCell className="text-foreground whitespace-nowrap">
+  1364→                                    {formatFullDate(e.date)}
+  1365→                                  </TableCell>
+  1366→                                  <TableCell className="text-foreground">
+  1367→                                    {e.vehicleNumber || "—"}
+  1368→                                  </TableCell>
+  1369→                                  <TableCell className="text-foreground text-right whitespace-nowrap">
+  1370→                                    {formatNumber(e.qty)}
+  1371→                                  </TableCell>
+  1372→                                  <TableCell className="text-foreground">
+  1373→                                    {e.qcCheckedBy || "—"}
+  1374→                                  </TableCell>
+  1375→                                  <TableCell className="text-foreground">
+  1376→                                    {e.driverName || "—"}
+  1377→                                  </TableCell>
+  1378→                                  <TableCell className="text-foreground text-right font-medium whitespace-nowrap">
+  1379→                                    {formatNumber(e.cumulativeBalance)}
+  1380→                                  </TableCell>
+  1381→                                </TableRow>
+  1382→                              ))}
+  1383→                            </TableBody>
+  1384→                          </Table>
+  1385→                        </div>
+  1386→                      )}
+  1387→                    </div>
+  1388→                  </div>
+  1389→                )}
+  1390→              </div>
+  1391→            );
+  1392→          })}
+  1393→        </div>
+  1394→      )}
+  1395→
+  1396→      {/* Add Order Dialog */}
+  1397→      <AddPartSupplyDialog
+  1398→        open={addOpen}
+  1399→        onOpenChange={setAddOpen}
+  1400→        onCreated={() => {
+  1401→          setAddOpen(false);
+  1402→          toast({ title: "Part supply order created" });
+  1403→          refresh();
+  1404→        }}
+  1405→      />
+  1406→
+  1407→      {/* Add Entry Dialog */}
+  1408→      {entryDialogOrder && (
+  1409→        <AddEntryDialog
+  1410→          order={entryDialogOrder}
+  1411→          open={!!entryDialogOrder}
+  1412→          onOpenChange={(o) => !o && setEntryDialogOrder(null)}
+  1413→          onCreated={() => {
+  1414→            setEntryDialogOrder(null);
+  1415→            toast({ title: "Delivery entry added" });
+  1416→            refresh();
+  1417→          }}
+  1418→        />
+  1419→      )}
+  1420→
+  1421→      {/* Print Receipt Dialog */}
+  1422→      {printOrder && (
+  1423→        <PrintReceiptDialog
+  1424→          order={printOrder}
+  1425→          open={!!printOrder}
+  1426→          onOpenChange={(o) => !o && setPrintOrder(null)}
+  1427→        />
+  1428→      )}
+  1429→    </div>
+  1430→  );
+  1431→}
+  1432→
+  1433→function MiniStat({
+  1434→  label,
+  1435→  value,
+  1436→  valueClass,
+  1437→}: {
+  1438→  label: string;
+  1439→  value: string;
+  1440→  valueClass?: string;
+  1441→}) {
+  1442→  return (
+  1443→    <div>
+  1444→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+  1445→      <p
+  1446→        className={cn(
+  1447→          "text-sm font-medium text-foreground",
+  1448→          valueClass
+  1449→        )}
+  1450→      >
+  1451→        {value}
+  1452→      </p>
+  1453→    </div>
+  1454→  );
+  1455→}
+  1456→
+  1457→function SummaryCell({
+  1458→  label,
+  1459→  value,
+  1460→  accent,
+  1461→}: {
+  1462→  label: string;
+  1463→  value: string;
+  1464→  accent?: string;
+  1465→}) {
+  1466→  return (
+  1467→    <div>
+  1468→      <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
+  1469→      <p
+  1470→        className={cn(
+  1471→          "text-sm font-medium truncate",
+  1472→          accent ?? "text-foreground"
+  1473→        )}
+  1474→      >
+  1475→        {value}
+  1476→      </p>
+  1477→    </div>
+  1478→  );
+  1479→}
+  1480→
+  1481→// ─────────────────────────────────────────────────────────
+  1482→// Add Part Supply Order Dialog
+  1483→// ─────────────────────────────────────────────────────────
+  1484→function AddPartSupplyDialog({
+  1485→  open,
+  1486→  onOpenChange,
+  1487→  onCreated,
+  1488→}: {
+  1489→  open: boolean;
+  1490→  onOpenChange: (o: boolean) => void;
+  1491→  onCreated: () => void;
+  1492→}) {
+  1493→  const [itemName, setItemName] = useState("");
+  1494→  const [orderedQty, setOrderedQty] = useState("");
+  1495→  const [startDate, setStartDate] = useState(todayISO());
+  1496→  const [expectedEndDate, setExpectedEndDate] = useState("");
+  1497→  const [supplier, setSupplier] = useState("");
+  1498→  const [selectedPoId, setSelectedPoId] = useState<string>("");
+  1499→  const [submitting, setSubmitting] = useState(false);
+  1500→  const { toast } = useToast();
+  1501→
+  1502→  // Fetch PO-processed procurement files (only when the dialog is open) so
+  1503→  // the user can pick an item and auto-fill its details.
+  1504→  const { data: procurementFiles, loading: poLoading } =
+  1505→    useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+  1506→
+  1507→  const poOptions = useMemo(() => {
+  1508→    return (procurementFiles ?? []).filter((f) =>
+  1509→      isPoProcessed(f.presentPosition)
+  1510→    );
+  1511→  }, [procurementFiles]);
+  1512→
+  1513→  function handlePoSelect(id: string) {
+  1514→    setSelectedPoId(id);
+  1515→    const f = poOptions.find((p) => p.id === id);
+  1516→    if (!f) return;
+  1517→    setItemName(f.itemName);
+  1518→    setOrderedQty(String(f.qty || ""));
+  1519→    setSupplier(f.supplier || "");
+  1520→  }
+  1521→
+  1522→  async function submit() {
+  1523→    if (!itemName.trim()) {
+  1524→      toast({ title: "Item name required", variant: "destructive" });
+  1525→      return;
+  1526→    }
+  1527→    if (!orderedQty || Number(orderedQty) <= 0) {
+  1528→      toast({ title: "Valid ordered qty required", variant: "destructive" });
+  1529→      return;
+  1530→    }
+  1531→    setSubmitting(true);
+  1532→    const res = await apiRequest("/api/collection/part-supply", "POST", {
+  1533→      itemName: itemName.trim(),
+  1534→      orderedQty: Number(orderedQty),
+  1535→      startDate: startDate || undefined,
+  1536→      expectedEndDate: expectedEndDate || undefined,
+  1537→      supplier: supplier.trim() || undefined,
+  1538→    });
+  1539→    setSubmitting(false);
+  1540→    if (!res.ok) {
+  1541→      toast({ title: res.error || "Failed", variant: "destructive" });
+  1542→      return;
+  1543→    }
+  1544→    setItemName("");
+  1545→    setOrderedQty("");
+  1546→    setExpectedEndDate("");
+  1547→    setSupplier("");
+  1548→    setSelectedPoId("");
+  1549→    onCreated();
+  1550→  }
+  1551→
+  1552→  return (
+  1553→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1554→      <DialogContent className="sm:max-w-md">
+  1555→        <DialogHeader>
+  1556→          <DialogTitle>Add Part Supply Order</DialogTitle>
+  1557→          <DialogDescription>
+  1558→            Create a new multi-day delivery order to track partial receipts.
+  1559→          </DialogDescription>
+  1560→        </DialogHeader>
+  1561→        <div className="space-y-3 py-1">
+  1562→          {/* Select PO Item — auto-fills item name, qty & supplier */}
+  1563→          <div className="space-y-1.5">
+  1564→            <Label className="flex items-center gap-1.5">
+  1565→              <ShoppingCart className="h-3.5 w-3.5 text-amber-400" />
+  1566→              Select PO Item
+  1567→            </Label>
+  1568→            <Select value={selectedPoId} onValueChange={handlePoSelect}>
+  1569→              <SelectTrigger className="w-full">
+  1570→                <SelectValue
+  1571→                  placeholder={
+  1572→                    poLoading
+  1573→                      ? "Loading PO files..."
+  1574→                      : "Pick a PO-processed item to auto-fill"
+  1575→                  }
+  1576→                />
+  1577→              </SelectTrigger>
+  1578→              <SelectContent>
+  1579→                {poOptions.length === 0 ? (
+  1580→                  <SelectItem value="__none" disabled>
+  1581→                    No PO-processed files
+  1582→                  </SelectItem>
+  1583→                ) : (
+  1584→                  poOptions.map((p) => (
+  1585→                    <SelectItem key={p.id} value={p.id}>
+  1586→                      {p.prNumber} · {p.itemName} ({formatNumber(p.qty)}{" "}
+  1587→                      {p.unit})
+  1588→                    </SelectItem>
+  1589→                  ))
+  1590→                )}
+  1591→              </SelectContent>
+  1592→            </Select>
+  1593→            <p className="text-[11px] text-muted-foreground">
+  1594→              Pick a procurement file with PO Placed/Dispatched/In Transit
+  1595→              status — its item, qty &amp; supplier will be auto-filled below.
+  1596→            </p>
+  1597→          </div>
+  1598→
+  1599→          <div className="space-y-1.5">
+  1600→            <Label>Item Name</Label>
+  1601→            <Input
+  1602→              value={itemName}
+  1603→              onChange={(e) => setItemName(e.target.value)}
+  1604→              placeholder="e.g. Ready-mix concrete M25"
+  1605→            />
+  1606→          </div>
+  1607→          <div className="grid grid-cols-2 gap-3">
+  1608→            <div className="space-y-1.5">
+  1609→              <Label>Ordered Qty</Label>
+  1610→              <Input
+  1611→                type="number"
+  1612→                value={orderedQty}
+  1613→                onChange={(e) => setOrderedQty(e.target.value)}
+  1614→                placeholder="0"
+  1615→              />
+  1616→            </div>
+  1617→            <div className="space-y-1.5">
+  1618→              <Label>Supplier</Label>
+  1619→              <Input
+  1620→                value={supplier}
+  1621→                onChange={(e) => setSupplier(e.target.value)}
+  1622→                placeholder="Supplier name"
+  1623→              />
+  1624→            </div>
+  1625→          </div>
+  1626→          <div className="grid grid-cols-2 gap-3">
+  1627→            <div className="space-y-1.5">
+  1628→              <Label>Start Date</Label>
+  1629→              <Input
+  1630→                type="date"
+  1631→                value={startDate}
+  1632→                onChange={(e) => setStartDate(e.target.value)}
+  1633→              />
+  1634→            </div>
+  1635→            <div className="space-y-1.5">
+  1636→              <Label>Expected End Date</Label>
+  1637→              <Input
+  1638→                type="date"
+  1639→                value={expectedEndDate}
+  1640→                onChange={(e) => setExpectedEndDate(e.target.value)}
+  1641→              />
+  1642→            </div>
+  1643→          </div>
+  1644→        </div>
+  1645→        <DialogFooter>
+  1646→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1647→            Cancel
+  1648→          </Button>
+  1649→          <Button onClick={submit} disabled={submitting}>
+  1650→            {submitting ? "Saving..." : "Create Order"}
+  1651→          </Button>
+  1652→        </DialogFooter>
+  1653→      </DialogContent>
+  1654→    </Dialog>
+  1655→  );
+  1656→}
+  1657→
+  1658→// ─────────────────────────────────────────────────────────
+  1659→// Add Entry Dialog
+  1660→// ─────────────────────────────────────────────────────────
+  1661→function AddEntryDialog({
+  1662→  order,
+  1663→  open,
+  1664→  onOpenChange,
+  1665→  onCreated,
+  1666→}: {
+  1667→  order: PartSupplyOrder;
+  1668→  open: boolean;
+  1669→  onOpenChange: (o: boolean) => void;
+  1670→  onCreated: () => void;
+  1671→}) {
+  1672→  const [date, setDate] = useState(todayISO());
+  1673→  const [vehicleNumber, setVehicleNumber] = useState("");
+  1674→  const [qty, setQty] = useState("");
+  1675→  // driverName repurposed to hold the "Provost Sailor Checked" name (saved
+  1676→  // into the PartSupplyEntry.driverName column on the server).
+  1677→  const [driverName, setDriverName] = useState("");
+  1678→  const [qcCheckedBy, setQcCheckedBy] = useState("");
+  1679→  // Dimension inputs — quantity is auto-calculated from H × W × D.
+  1680→  const [dimH, setDimH] = useState("");
+  1681→  const [dimW, setDimW] = useState("");
+  1682→  const [dimD, setDimD] = useState("");
+  1683→  const [dimUnit, setDimUnit] = useState<string>(DIMENSION_UNITS[0]);
+  1684→  const [submitting, setSubmitting] = useState(false);
+  1685→  const { toast } = useToast();
+  1686→
+  1687→  // Fetch stakeholders (only when dialog open) for the Provost Sailor and
+  1688→  // QC Checked-By dropdowns.
+  1689→  const { data: stakeholders } = useFetch<Stakeholder[]>(
+  1690→    open ? "/api/stakeholders" : null
+  1691→  );
+  1692→
+  1693→  // Provost Sailors — category contains "Sailor" OR department contains
+  1694→  // "Provost" (covers "CSLOG Sailor" and any future "Provost" dept).
+  1695→  const provostSailors = useMemo(() => {
+  1696→    return (stakeholders ?? []).filter((s) => {
+  1697→      const cat = (s.category || "").toLowerCase();
+  1698→      const dept = (s.department || "").toLowerCase();
+  1699→      return cat.includes("sailor") || dept.includes("provost");
+  1700→    });
+  1701→  }, [stakeholders]);
+  1702→
+  1703→  // CCED Sailors for QC — category === "CCED Sailor" (preferred) but fall
+  1704→  // back to anyone with category/appointment containing "CCED" so the
+  1705→  // dropdown isn't empty when the category hasn't been seeded yet.
+  1706→  const ccedSailors = useMemo(() => {
+  1707→    return (stakeholders ?? []).filter((s) => {
+  1708→      const cat = (s.category || "").toLowerCase();
+  1709→      const appt = (s.appointment || "").toLowerCase();
+  1710→      return (
+  1711→        cat === "cced sailor" ||
+  1712→        cat.includes("cced") ||
+  1713→        appt.includes("cced")
+  1714→      );
+  1715→    });
+  1716→  }, [stakeholders]);
+  1717→
+  1718→  // Auto-calculate Quantity from dimensions: H × W × D in the selected
+  1719→  // unit (cubic meters or cubic inches).
+  1720→  const computedQty = useMemo(() => {
+  1721→    const h = Number(dimH);
+  1722→    const w = Number(dimW);
+  1723→    const d = Number(dimD);
+  1724→    if (!isFinite(h) || !isFinite(w) || !isFinite(d)) return null;
+  1725→    if (h <= 0 || w <= 0 || d <= 0) return null;
+  1726→    const product = h * w * d;
+  1727→    // Round to 4 decimal places to keep storage clean.
+  1728→    return Math.round(product * 10000) / 10000;
+  1729→  }, [dimH, dimW, dimD]);
+  1730→
+  1731→  // Sync the computed quantity into the qty state whenever it changes.
+  1732→  // Using a useEffect here would be flagged by react-hooks rules; instead
+  1733→  // we derive the displayed qty directly from computedQty when dimensions
+  1734→  // are present, and fall back to the manual `qty` string otherwise.
+  1735→  const effectiveQty = computedQty != null ? String(computedQty) : qty;
+  1736→
+  1737→  async function submit() {
+  1738→    const q = Number(effectiveQty);
+  1739→    if (!q || q <= 0) {
+  1740→      toast({ title: "Valid qty required", variant: "destructive" });
+  1741→      return;
+  1742→    }
+  1743→    setSubmitting(true);
+  1744→    const res = await apiRequest(
+  1745→      `/api/collection/part-supply/${order.id}/entries`,
+  1746→      "POST",
+  1747→      {
+  1748→        date,
+  1749→        vehicleNumber: vehicleNumber.trim() || undefined,
+  1750→        qty: q,
+  1751→        // CCED Sailor name → stored in the dedicated qcCheckedBy column.
+  1752→        qcCheckedBy: qcCheckedBy.trim() || undefined,
+  1753→        // sailorCount field removed from the UI; preserve server contract
+  1754→        // by sending 0 (model default).
+  1755→        sailorCount: 0,
+  1756→        // Provost Sailor name → stored in driverName column (repurposed).
+  1757→        driverName: driverName.trim() || undefined,
+  1758→        // driverLicense / driverPhone no longer captured in the UI.
+  1759→        driverLicense: undefined,
+  1760→        driverPhone: undefined,
+  1761→      }
+  1762→    );
+  1763→    setSubmitting(false);
+  1764→    if (!res.ok) {
+  1765→      toast({ title: res.error || "Failed", variant: "destructive" });
+  1766→      return;
+  1767→    }
+  1768→    setVehicleNumber("");
+  1769→    setQty("");
+  1770→    setQcCheckedBy("");
+  1771→    setDriverName("");
+  1772→    setDimH("");
+  1773→    setDimW("");
+  1774→    setDimD("");
+  1775→    setDimUnit(DIMENSION_UNITS[0]);
+  1776→    onCreated();
+  1777→  }
+  1778→
+  1779→  return (
+  1780→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1781→      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto scrollbar-thin">
+  1782→        <DialogHeader>
+  1783→          <DialogTitle>Add Delivery Entry</DialogTitle>
+  1784→          <DialogDescription>
+  1785→            {order.itemName} · Ordered {formatNumber(order.orderedQty)} ·
+  1786→            Balance {formatNumber(order.balance)}
+  1787→          </DialogDescription>
+  1788→        </DialogHeader>
+  1789→        <div className="grid grid-cols-2 gap-3 py-1">
+  1790→          <div className="space-y-1.5">
+  1791→            <Label>Date</Label>
+  1792→            <Input
+  1793→              type="date"
+  1794→              value={date}
+  1795→              onChange={(e) => setDate(e.target.value)}
+  1796→            />
+  1797→          </div>
+  1798→          <div className="space-y-1.5">
+  1799→            <Label>Vehicle Number</Label>
+  1800→            <Input
+  1801→              value={vehicleNumber}
+  1802→              onChange={(e) => setVehicleNumber(e.target.value)}
+  1803→              placeholder="TN-01-AB-1234"
+  1804→            />
+  1805→          </div>
+  1806→
+  1807→          {/* Dimension fields — auto-fill Quantity */}
+  1808→          <div className="col-span-2 rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+  1809→            <div className="flex items-center justify-between">
+  1810→              <Label className="flex items-center gap-1.5 text-foreground">
+  1811→                <Ruler className="h-3.5 w-3.5 text-primary" />
+  1812→                Dimensions
+  1813→              </Label>
+  1814→              <CustomBadge className="bg-primary/10 text-primary border-primary/30">
+  1815→                <Calculator className="h-3 w-3 mr-1" />
+  1816→                Qty = H × W × D
+  1817→              </CustomBadge>
+  1818→            </div>
+  1819→            <div className="grid grid-cols-4 gap-2">
+  1820→              <div className="space-y-1">
+  1821→                <Label className="text-[11px] text-muted-foreground">
+  1822→                  Height
+  1823→                </Label>
+  1824→                <Input
+  1825→                  type="number"
+  1826→                  inputMode="decimal"
+  1827→                  value={dimH}
+  1828→                  onChange={(e) => setDimH(e.target.value)}
+  1829→                  placeholder="0"
+  1830→                  className="h-9"
+  1831→                />
+  1832→              </div>
+  1833→              <div className="space-y-1">
+  1834→                <Label className="text-[11px] text-muted-foreground">
+  1835→                  Width
+  1836→                </Label>
+  1837→                <Input
+  1838→                  type="number"
+  1839→                  inputMode="decimal"
+  1840→                  value={dimW}
+  1841→                  onChange={(e) => setDimW(e.target.value)}
+  1842→                  placeholder="0"
+  1843→                  className="h-9"
+  1844→                />
+  1845→              </div>
+  1846→              <div className="space-y-1">
+  1847→                <Label className="text-[11px] text-muted-foreground">
+  1848→                  Depth
+  1849→                </Label>
+  1850→                <Input
+  1851→                  type="number"
+  1852→                  inputMode="decimal"
+  1853→                  value={dimD}
+  1854→                  onChange={(e) => setDimD(e.target.value)}
+  1855→                  placeholder="0"
+  1856→                  className="h-9"
+  1857→                />
+  1858→              </div>
+  1859→              <div className="space-y-1">
+  1860→                <Label className="text-[11px] text-muted-foreground">
+  1861→                  Unit
+  1862→                </Label>
+  1863→                <Select value={dimUnit} onValueChange={setDimUnit}>
+  1864→                  <SelectTrigger className="h-9">
+  1865→                    <SelectValue />
+  1866→                  </SelectTrigger>
+  1867→                  <SelectContent>
+  1868→                    {DIMENSION_UNITS.map((u) => (
+  1869→                      <SelectItem key={u} value={u}>
+  1870→                        {u}
+  1871→                      </SelectItem>
+  1872→                    ))}
+  1873→                  </SelectContent>
+  1874→                </Select>
+  1875→              </div>
+  1876→            </div>
+  1877→            <p className="text-[11px] text-muted-foreground">
+  1878→              Quantity is auto-calculated as Height × Width × Depth in{" "}
+  1879→              {dimUnit === "meter" ? "cubic meters (m³)" : "cubic inches (in³)"}.
+  1880→              Leave dimensions blank to type the quantity manually.
+  1881→            </p>
+  1882→          </div>
+  1883→
+  1884→          <div className="space-y-1.5">
+  1885→            <Label className="flex items-center gap-1.5">
+  1886→              Quantity
+  1887→              {computedQty != null && (
+  1888→                <CustomBadge className="bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30">
+  1889→                  auto
+  1890→                </CustomBadge>
+  1891→              )}
+  1892→            </Label>
+  1893→            <Input
+  1894→              type="number"
+  1895→              value={effectiveQty}
+  1896→              onChange={(e) => setQty(e.target.value)}
+  1897→              placeholder="0"
+  1898→              readOnly={computedQty != null}
+  1899→              className={cn(
+  1900→                computedQty != null &&
+  1901→                  "bg-muted/50 text-muted-foreground cursor-not-allowed"
+  1902→              )}
+  1903→            />
+  1904→          </div>
+  1905→          <div className="space-y-1.5">
+  1906→            <Label className="flex items-center gap-1.5">
+  1907→              <Anchor className="h-3.5 w-3.5 text-blue-400" />
+  1908→              Provost Sailor Checked
+  1909→            </Label>
+  1910→            <Select value={driverName} onValueChange={setDriverName}>
+  1911→              <SelectTrigger className="w-full">
+  1912→                <SelectValue placeholder="Select provost sailor" />
+  1913→              </SelectTrigger>
+  1914→              <SelectContent>
+  1915→                {provostSailors.length === 0 ? (
+  1916→                  <SelectItem value="__none" disabled>
+  1917→                    No sailors in directory
+  1918→                  </SelectItem>
+  1919→                ) : (
+  1920→                  provostSailors.map((s) => (
+  1921→                    <SelectItem key={s.id} value={s.name}>
+  1922→                      {formatStakeholder(s)}
+  1923→                    </SelectItem>
+  1924→                  ))
+  1925→                )}
+  1926→              </SelectContent>
+  1927→            </Select>
+  1928→          </div>
+  1929→          <div className="col-span-2 space-y-1.5">
+  1930→            <Label className="flex items-center gap-1.5">
+  1931→              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+  1932→              QC Checked By
+  1933→            </Label>
+  1934→            <Select value={qcCheckedBy} onValueChange={setQcCheckedBy}>
+  1935→              <SelectTrigger className="w-full">
+  1936→                <SelectValue placeholder="Select CCED sailor" />
+  1937→              </SelectTrigger>
+  1938→              <SelectContent>
+  1939→                {ccedSailors.length === 0 ? (
+  1940→                  <SelectItem value="__none" disabled>
+  1941→                    No CCED sailors in directory
+  1942→                  </SelectItem>
+  1943→                ) : (
+  1944→                  ccedSailors.map((s) => (
+  1945→                    <SelectItem key={s.id} value={s.name}>
+  1946→                      {formatStakeholder(s)}
+  1947→                    </SelectItem>
+  1948→                  ))
+  1949→                )}
+  1950→              </SelectContent>
+  1951→            </Select>
+  1952→          </div>
+  1953→        </div>
+  1954→        <DialogFooter>
+  1955→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1956→            Cancel
+  1957→          </Button>
+  1958→          <Button onClick={submit} disabled={submitting}>
+  1959→            {submitting ? "Saving..." : "Add Entry"}
+  1960→          </Button>
+  1961→        </DialogFooter>
+  1962→      </DialogContent>
+  1963→    </Dialog>
+  1964→  );
+  1965→}
+  1966→
+  1967→// ─────────────────────────────────────────────────────────
+  1968→// Print Receipt Dialog
+  1969→// ─────────────────────────────────────────────────────────
+  1970→function PrintReceiptDialog({
+  1971→  order,
+  1972→  open,
+  1973→  onOpenChange,
+  1974→}: {
+  1975→  order: PartSupplyOrder;
+  1976→  open: boolean;
+  1977→  onOpenChange: (o: boolean) => void;
+  1978→}) {
+  1979→  const pct =
+  1980→    order.orderedQty > 0
+  1981→      ? Math.min((order.receivedQty / order.orderedQty) * 100, 100)
+  1982→      : 0;
+  1983→
+  1984→  return (
+  1985→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1986→      <DialogContent
+  1987→        showCloseButton={false}
+  1988→        className="sm:max-w-3xl print-receipt"
+  1989→      >
+  1990→        <style>{`
+  1991→          @media print {
+  1992→            body * { visibility: hidden !important; }
+  1993→            .print-receipt, .print-receipt * { visibility: visible !important; }
+  1994→            .print-receipt {
+  1995→              position: absolute !important;
+  1996→              left: 0 !important;
+  1997→              top: 0 !important;
+  1998→              width: 100% !important;
+  1999→              max-width: 100% !important;
+  2000→              margin: 0 !important;
+
+[showing lines 1-2000 of 4219; use offset=2001 with limit to continue reading]

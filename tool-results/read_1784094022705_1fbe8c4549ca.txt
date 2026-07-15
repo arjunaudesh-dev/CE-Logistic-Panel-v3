@@ -1,0 +1,1907 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useMemo, useRef, useState } from "react";
+     4→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     5→import { PageHeader } from "@/components/erp/page-header";
+     6→import { StatCard } from "@/components/erp/stat-card";
+     7→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     8→import { CategoryBadge, CustomBadge } from "@/components/erp/badges";
+     9→import { formatCurrency, RATE_CATEGORIES } from "@/lib/constants";
+    10→import { useToast } from "@/hooks/use-toast";
+    11→import { cn } from "@/lib/utils";
+    12→import { Button } from "@/components/ui/button";
+    13→import { Input } from "@/components/ui/input";
+    14→import { Label } from "@/components/ui/label";
+    15→import { Textarea } from "@/components/ui/textarea";
+    16→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    17→import {
+    18→  Dialog,
+    19→  DialogContent,
+    20→  DialogHeader,
+    21→  DialogTitle,
+    22→  DialogDescription,
+    23→  DialogFooter,
+    24→} from "@/components/ui/dialog";
+    25→import {
+    26→  Select,
+    27→  SelectContent,
+    28→  SelectItem,
+    29→  SelectTrigger,
+    30→  SelectValue,
+    31→} from "@/components/ui/select";
+    32→import {
+    33→  Table,
+    34→  TableHeader,
+    35→  TableBody,
+    36→  TableHead,
+    37→  TableRow,
+    38→  TableCell,
+    39→} from "@/components/ui/table";
+    40→import {
+    41→  BarChart,
+    42→  Bar,
+    43→  XAxis,
+    44→  YAxis,
+    45→  Tooltip,
+    46→  ResponsiveContainer,
+    47→  CartesianGrid,
+    48→} from "recharts";
+    49→import {
+    50→  Search,
+    51→  Upload,
+    52→  Plus,
+    53→  Trash2,
+    54→  Download,
+    55→  GitCompare,
+    56→  FileText,
+    57→  Ban,
+    58→  Loader2,
+    59→  X,
+    60→} from "lucide-react";
+    61→
+    62→// ─────────────────────────────── Types ───────────────────────────────
+    63→
+    64→interface RCItem {
+    65→  id: string;
+    66→  rateCode: string | null;
+    67→  itemCode: string;
+    68→  description: string;
+    69→  unit: string;
+    70→  rcPrice: number;
+    71→  vat: number;
+    72→  warranty: string | null;
+    73→  brand: string | null;
+    74→  makeModel: string | null;
+    75→  category: string;
+    76→  subCategory: string | null;
+    77→  supplier: string | null;
+    78→  rcYear: string;
+    79→  validFrom: string | null;
+    80→  validUntil: string | null;
+    81→}
+    82→
+    83→interface DiscontinuedItem {
+    84→  id: string;
+    85→  itemCode: string;
+    86→  description: string;
+    87→  unit: string;
+    88→  lastRCPrice: number;
+    89→  lastRCYear: string | null;
+    90→  discontinuedDate: string | null;
+    91→  reason: string | null;
+    92→  alternatives: string | null;
+    93→}
+    94→
+    95→// ───────────────────────────── Helpers ─────────────────────────────
+    96→
+    97→/** Minimal CSV parser that handles quoted fields (with "" escape) and CRLF. */
+    98→function parseCSV(text: string): string[][] {
+    99→  const rows: string[][] = [];
+   100→  let current: string[] = [];
+   101→  let field = "";
+   102→  let inQuotes = false;
+   103→
+   104→  for (let i = 0; i < text.length; i++) {
+   105→    const c = text[i];
+   106→    if (inQuotes) {
+   107→      if (c === '"') {
+   108→        if (text[i + 1] === '"') {
+   109→          field += '"';
+   110→          i++;
+   111→        } else {
+   112→          inQuotes = false;
+   113→        }
+   114→      } else {
+   115→        field += c;
+   116→      }
+   117→    } else {
+   118→      if (c === '"') {
+   119→        inQuotes = true;
+   120→      } else if (c === ",") {
+   121→        current.push(field);
+   122→        field = "";
+   123→      } else if (c === "\n") {
+   124→        current.push(field);
+   125→        rows.push(current);
+   126→        current = [];
+   127→        field = "";
+   128→      } else if (c === "\r") {
+   129→        // skip — handled with \n
+   130→      } else {
+   131→        field += c;
+   132→      }
+   133→    }
+   134→  }
+   135→  // flush trailing field/row
+   136→  if (field.length > 0 || current.length > 0) {
+   137→    current.push(field);
+   138→    rows.push(current);
+   139→  }
+   140→  // drop fully empty rows
+   141→  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+   142→}
+   143→
+   144→/** Defensive date formatter — accepts ISO strings, date-only strings, or arbitrary strings. */
+   145→function formatDate(s: string | null | undefined): string {
+   146→  if (!s) return "—";
+   147→  const trimmed = s.trim();
+   148→  if (!trimmed) return "—";
+   149→  const d = new Date(trimmed);
+   150→  if (isNaN(d.getTime())) return trimmed;
+   151→  return d.toLocaleDateString("en-GB", {
+   152→    day: "2-digit",
+   153→    month: "short",
+   154→    year: "numeric",
+   155→  });
+   156→}
+   157→
+   158→/** Trigger a browser download for a CSV string. */
+   159→function downloadCSV(filename: string, content: string) {
+   160→  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+   161→  const url = URL.createObjectURL(blob);
+   162→  const a = document.createElement("a");
+   163→  a.href = url;
+   164→  a.download = filename;
+   165→  document.body.appendChild(a);
+   166→  a.click();
+   167→  document.body.removeChild(a);
+   168→  URL.revokeObjectURL(url);
+   169→}
+   170→
+   171→/** Split an alternatives string into individual items (comma or semicolon separated). */
+   172→function splitAlternatives(s: string | null): string[] {
+   173→  if (!s) return [];
+   174→  return s
+   175→    .split(/[,;]/)
+   176→    .map((x) => x.trim())
+   177→    .filter(Boolean);
+   178→}
+   179→
+   180→// New CSV format — exact column headers expected by the importer & API.
+   181→// Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand, make model, Category, sub category, RC supplier
+   182→const RC_TEMPLATE =
+   183→  "Rate code,item,rate(Rs),VAT,warranty,validity up to,Brand,make model,Category,sub category,RC supplier\n" +
+   184→  "RC-2025-001,Brass Valve 50mm,1500,15,12 months,2025-12-31,ABC Brands,Model BV-50,Plumbing,Valves,ABC Suppliers\n" +
+   185→  "RC-2025-002,Copper Pipe 1m,3200,15,24 months,2026-03-31,XYZ Metals,CP-1000,Electrical,Cables,XYZ Traders\n";
+   186→
+   187→const DISCONTINUED_TEMPLATE =
+   188→  "ItemCode,Description,Unit,LastRCPrice,LastRCYear,DiscontinuedDate,Reason,Alternatives\n" +
+   189→  "RC-2020-045,Old Brass Valve,NOS,800,2020,2024-03-15,Obsolete,RC-2025-012;RC-2025-015\n" +
+   190→  "RC-2019-012,Legacy Pipe Fitting,NOS,450,2019,2024-01-10,Supplier Discontinued,RC-2025-022\n";
+   191→
+   192→// ───────────────────────────── Main Module ─────────────────────────────
+   193→
+   194→export function RateFinderModule() {
+   195→  const {
+   196→    data: rcItems,
+   197→    loading: rcLoading,
+   198→    error: rcError,
+   199→    refresh: rcRefresh,
+   200→  } = useFetch<RCItem[]>("/api/rate-finder/rc");
+   201→  const {
+   202→    data: discontinued,
+   203→    loading: dLoading,
+   204→    error: dError,
+   205→    refresh: dRefresh,
+   206→  } = useFetch<DiscontinuedItem[]>("/api/rate-finder/discontinued");
+   207→  const [tab, setTab] = useState<string>("rc");
+   208→
+   209→  const totalRC = rcItems?.length ?? 0;
+   210→  const totalDiscontinued = discontinued?.length ?? 0;
+   211→
+   212→  return (
+   213→    <div>
+   214→      <PageHeader
+   215→        title="Rate Finder"
+   216→        description="Rate contracts across years & discontinued item registry"
+   217→        icon={Search}
+   218→      />
+   219→
+   220→      {/* Summary stat cards */}
+   221→      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+   222→        <StatCard
+   223→          label="Total RC Items"
+   224→          value={totalRC}
+   225→          icon={FileText}
+   226→          accent="blue"
+   227→          sub="Across all years & categories"
+   228→        />
+   229→        <StatCard
+   230→          label="Total Discontinued"
+   231→          value={totalDiscontinued}
+   232→          icon={Ban}
+   233→          accent="red"
+   234→          sub="Items no longer in supply"
+   235→        />
+   236→      </div>
+   237→
+   238→      <Tabs value={tab} onValueChange={setTab}>
+   239→        <TabsList>
+   240→          <TabsTrigger value="rc">RC</TabsTrigger>
+   241→          <TabsTrigger value="discontinued">Discontinued</TabsTrigger>
+   242→        </TabsList>
+   243→
+   244→        <TabsContent value="rc">
+   245→          <RCTab
+   246→            items={rcItems ?? null}
+   247→            loading={rcLoading}
+   248→            error={rcError}
+   249→            refresh={rcRefresh}
+   250→          />
+   251→        </TabsContent>
+   252→
+   253→        <TabsContent value="discontinued">
+   254→          <DiscontinuedTab
+   255→            items={discontinued ?? null}
+   256→            loading={dLoading}
+   257→            error={dError}
+   258→            refresh={dRefresh}
+   259→          />
+   260→        </TabsContent>
+   261→      </Tabs>
+   262→    </div>
+   263→  );
+   264→}
+   265→
+   266→// ───────────────────────────── RC Tab ─────────────────────────────
+   267→
+   268→interface RCTabProps {
+   269→  items: RCItem[] | null;
+   270→  loading: boolean;
+   271→  error: string | null;
+   272→  refresh: () => void;
+   273→}
+   274→
+   275→function RCTab({ items, loading, error, refresh }: RCTabProps) {
+   276→  const { toast } = useToast();
+   277→  const [search, setSearch] = useState("");
+   278→  const [debouncedSearch, setDebouncedSearch] = useState("");
+   279→  const [category, setCategory] = useState<string>("All");
+   280→  const [year, setYear] = useState<string>("All");
+   281→  const [supplier, setSupplier] = useState<string>("All");
+   282→  const [addOpen, setAddOpen] = useState(false);
+   283→  const [uploadOpen, setUploadOpen] = useState(false);
+   284→  const [compareItem, setCompareItem] = useState<RCItem[] | null>(null);
+   285→  const [deletingId, setDeletingId] = useState<string | null>(null);
+   286→
+   287→  // Debounced search input
+   288→  useEffect(() => {
+   289→    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+   290→    return () => clearTimeout(t);
+   291→  }, [search]);
+   292→
+   293→  // Derived filter option lists
+   294→  const years = useMemo(() => {
+   295→    const s = new Set<string>();
+   296→    items?.forEach((i) => i.rcYear && s.add(i.rcYear));
+   297→    return Array.from(s).sort((a, b) => b.localeCompare(a));
+   298→  }, [items]);
+   299→
+   300→  const suppliers = useMemo(() => {
+   301→    const s = new Set<string>();
+   302→    items?.forEach((i) => i.supplier && s.add(i.supplier));
+   303→    return Array.from(s).sort();
+   304→  }, [items]);
+   305→
+   306→  // Filtered rows
+   307→  const filtered = useMemo(() => {
+   308→    if (!items) return [];
+   309→    return items.filter((i) => {
+   310→      if (category !== "All" && i.category !== category) return false;
+   311→      if (year !== "All" && i.rcYear !== year) return false;
+   312→      if (supplier !== "All" && i.supplier !== supplier) return false;
+   313→      if (debouncedSearch) {
+   314→        const q = debouncedSearch.toLowerCase();
+   315→        if (
+   316→          !(i.rateCode ?? "").toLowerCase().includes(q) &&
+   317→          !i.itemCode.toLowerCase().includes(q) &&
+   318→          !i.description.toLowerCase().includes(q) &&
+   319→          !(i.brand ?? "").toLowerCase().includes(q) &&
+   320→          !(i.makeModel ?? "").toLowerCase().includes(q) &&
+   321→          !(i.supplier ?? "").toLowerCase().includes(q)
+   322→        )
+   323→          return false;
+   324→      }
+   325→      return true;
+   326→    });
+   327→  }, [items, category, year, supplier, debouncedSearch]);
+   328→
+   329→  // Group by rateCode (preferred) or itemCode for compare feature
+   330→  const groupedByCode = useMemo(() => {
+   331→    const m = new Map<string, RCItem[]>();
+   332→    items?.forEach((i) => {
+   333→      const key = i.rateCode || i.itemCode;
+   334→      const arr = m.get(key) ?? [];
+   335→      arr.push(i);
+   336→      m.set(key, arr);
+   337→    });
+   338→    return m;
+   339→  }, [items]);
+   340→
+   341→  const filtersActive =
+   342→    category !== "All" || year !== "All" || supplier !== "All" || debouncedSearch !== "";
+   343→
+   344→  const clearFilters = () => {
+   345→    setCategory("All");
+   346→    setYear("All");
+   347→    setSupplier("All");
+   348→    setSearch("");
+   349→  };
+   350→
+   351→  const handleDelete = async (id: string) => {
+   352→    setDeletingId(id);
+   353→    const res = await apiRequest(`/api/rate-finder/rc/${id}`, "DELETE");
+   354→    setDeletingId(null);
+   355→    if (res.ok) {
+   356→      toast({ title: "RC item deleted" });
+   357→      refresh();
+   358→    } else {
+   359→      toast({
+   360→        title: "Failed to delete RC item",
+   361→        description: res.error,
+   362→        variant: "destructive",
+   363→      });
+   364→    }
+   365→  };
+   366→
+   367→  if (loading) return <LoadingState label="Loading rate contracts..." />;
+   368→  if (error) return <ErrorState message={error} />;
+   369→
+   370→  return (
+   371→    <div className="space-y-4">
+   372→      {/* Toolbar */}
+   373→      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+   374→        <div className="flex flex-1 flex-wrap items-center gap-2">
+   375→          <div className="relative flex-1 min-w-[200px] max-w-sm">
+   376→            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   377→            <Input
+   378→              value={search}
+   379→              onChange={(e) => setSearch(e.target.value)}
+   380→              placeholder="Search item name or code..."
+   381→              className="pl-9 bg-card border-border"
+   382→            />
+   383→          </div>
+   384→          <Select value={category} onValueChange={setCategory}>
+   385→            <SelectTrigger className="w-[150px] bg-card border-border">
+   386→              <SelectValue placeholder="Category" />
+   387→            </SelectTrigger>
+   388→            <SelectContent>
+   389→              {RATE_CATEGORIES.map((c) => (
+   390→                <SelectItem key={c} value={c}>
+   391→                  {c === "All" ? "All Categories" : c}
+   392→                </SelectItem>
+   393→              ))}
+   394→            </SelectContent>
+   395→          </Select>
+   396→          <Select value={year} onValueChange={setYear}>
+   397→            <SelectTrigger className="w-[130px] bg-card border-border">
+   398→              <SelectValue placeholder="Year" />
+   399→            </SelectTrigger>
+   400→            <SelectContent>
+   401→              <SelectItem value="All">All Years</SelectItem>
+   402→              {years.map((y) => (
+   403→                <SelectItem key={y} value={y}>
+   404→                  {y}
+   405→                </SelectItem>
+   406→              ))}
+   407→            </SelectContent>
+   408→          </Select>
+   409→          <Select value={supplier} onValueChange={setSupplier}>
+   410→            <SelectTrigger className="w-[170px] bg-card border-border">
+   411→              <SelectValue placeholder="Supplier" />
+   412→            </SelectTrigger>
+   413→            <SelectContent>
+   414→              <SelectItem value="All">All Suppliers</SelectItem>
+   415→              {suppliers.map((s) => (
+   416→                <SelectItem key={s} value={s}>
+   417→                  {s}
+   418→                </SelectItem>
+   419→              ))}
+   420→            </SelectContent>
+   421→          </Select>
+   422→          {filtersActive && (
+   423→            <Button
+   424→              variant="ghost"
+   425→              size="sm"
+   426→              onClick={clearFilters}
+   427→              className="gap-1.5 text-muted-foreground"
+   428→            >
+   429→              <X className="h-4 w-4" /> Clear
+   430→            </Button>
+   431→          )}
+   432→        </div>
+   433→        <div className="flex items-center gap-2">
+   434→          <Button
+   435→            variant="outline"
+   436→            size="sm"
+   437→            className="gap-1.5"
+   438→            onClick={() => setUploadOpen(true)}
+   439→          >
+   440→            <Upload className="h-4 w-4" /> Upload RC List
+   441→          </Button>
+   442→          <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+   443→            <Plus className="h-4 w-4" /> Add RC
+   444→          </Button>
+   445→        </div>
+   446→      </div>
+   447→
+   448→      {/* Result count */}
+   449→      <div className="flex items-center justify-between text-xs text-muted-foreground">
+   450→        <span>
+   451→          Showing <span className="text-foreground font-medium">{filtered.length}</span> of{" "}
+   452→          <span className="text-foreground font-medium">{items?.length ?? 0}</span> rate contracts
+   453→        </span>
+   454→      </div>
+   455→
+   456→      {/* Table */}
+   457→      {!filtered || filtered.length === 0 ? (
+   458→        <EmptyState
+   459→          icon={FileText}
+   460→          title={items && items.length > 0 ? "No matching rate contracts" : "No rate contracts yet"}
+   461→          description={
+   462→            items && items.length > 0
+   463→              ? "Try adjusting your search or filter criteria."
+   464→              : "Add a single RC entry or upload a CSV list to get started."
+   465→          }
+   466→          action={
+   467→            <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+   468→              <Plus className="h-4 w-4" /> Add RC
+   469→            </Button>
+   470→          }
+   471→        />
+   472→      ) : (
+   473→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+   474→          <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin">
+   475→            <Table>
+   476→              <TableHeader className="sticky top-0 z-10 bg-card">
+   477→                <TableRow className="border-border hover:bg-transparent">
+   478→                  <TableHead className="text-muted-foreground">Rate Code</TableHead>
+   479→                  <TableHead className="text-muted-foreground">Item</TableHead>
+   480→                  <TableHead className="text-muted-foreground text-right">Rate (Rs)</TableHead>
+   481→                  <TableHead className="text-muted-foreground">VAT</TableHead>
+   482→                  <TableHead className="text-muted-foreground">Warranty</TableHead>
+   483→                  <TableHead className="text-muted-foreground">Valid Until</TableHead>
+   484→                  <TableHead className="text-muted-foreground">Brand</TableHead>
+   485→                  <TableHead className="text-muted-foreground">Make/Model</TableHead>
+   486→                  <TableHead className="text-muted-foreground">Category</TableHead>
+   487→                  <TableHead className="text-muted-foreground">Sub Category</TableHead>
+   488→                  <TableHead className="text-muted-foreground">RC Supplier</TableHead>
+   489→                  <TableHead className="text-muted-foreground">RC Year</TableHead>
+   490→                  <TableHead className="text-muted-foreground text-right">Actions</TableHead>
+   491→                </TableRow>
+   492→              </TableHeader>
+   493→              <TableBody>
+   494→                {filtered.map((item) => {
+   495→                  const group = groupedByCode.get(item.itemCode) ?? [item];
+   496→                  const multiYear = group.length > 1;
+   497→                  return (
+   498→                    <TableRow key={item.id} className="border-border">
+   499→                      <TableCell className="font-mono text-foreground whitespace-nowrap">
+   500→                        {item.rateCode || item.itemCode || "—"}
+   501→                      </TableCell>
+   502→                      <TableCell
+   503→                        className="max-w-[280px] truncate text-foreground"
+   504→                        title={item.description}
+   505→                      >
+   506→                        <div className="flex flex-col">
+   507→                          <span className="font-medium">{item.description}</span>
+   508→                          <span className="text-[10px] text-muted-foreground">
+   509→                            {item.unit}
+   510→                          </span>
+   511→                        </div>
+   512→                      </TableCell>
+   513→                      <TableCell className="font-semibold text-foreground text-right whitespace-nowrap">
+   514→                        {formatCurrency(item.rcPrice)}
+   515→                      </TableCell>
+   516→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   517→                        {item.vat ? `${item.vat}%` : "—"}
+   518→                      </TableCell>
+   519→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   520→                        {item.warranty || "—"}
+   521→                      </TableCell>
+   522→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   523→                        {formatDate(item.validUntil)}
+   524→                      </TableCell>
+   525→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   526→                        {item.brand || "—"}
+   527→                      </TableCell>
+   528→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   529→                        {item.makeModel || "—"}
+   530→                      </TableCell>
+   531→                      <TableCell>
+   532→                        <CategoryBadge category={item.category} />
+   533→                      </TableCell>
+   534→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   535→                        {item.subCategory || "—"}
+   536→                      </TableCell>
+   537→                      <TableCell className="text-muted-foreground whitespace-nowrap">
+   538→                        {item.supplier || "—"}
+   539→                      </TableCell>
+   540→                      <TableCell>
+   541→                        <div className="flex items-center gap-1.5">
+   542→                          <span className="text-foreground font-medium">{item.rcYear}</span>
+   543→                          {multiYear && (
+   544→                            <Button
+   545→                              size="sm"
+   546→                              variant="ghost"
+   547→                              className="h-6 px-1.5 gap-1 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+   548→                              onClick={() => setCompareItem(group)}
+   549→                              title={`Compare ${group.length} years`}
+   550→                            >
+   551→                              <GitCompare className="h-3 w-3" /> Compare
+   552→                            </Button>
+   553→                          )}
+   554→                        </div>
+   555→                      </TableCell>
+   556→                      <TableCell className="text-right">
+   557→                        <Button
+   558→                          size="icon"
+   559→                          variant="ghost"
+   560→                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+   561→                          onClick={() => handleDelete(item.id)}
+   562→                          disabled={deletingId === item.id}
+   563→                          title="Delete RC item"
+   564→                        >
+   565→                          {deletingId === item.id ? (
+   566→                            <Loader2 className="h-4 w-4 animate-spin" />
+   567→                          ) : (
+   568→                            <Trash2 className="h-4 w-4" />
+   569→                          )}
+   570→                        </Button>
+   571→                      </TableCell>
+   572→                    </TableRow>
+   573→                  );
+   574→                })}
+   575→              </TableBody>
+   576→            </Table>
+   577→          </div>
+   578→        </div>
+   579→      )}
+   580→
+   581→      {/* Add RC dialog */}
+   582→      <AddRCDialog
+   583→        open={addOpen}
+   584→        onOpenChange={setAddOpen}
+   585→        onDone={() => {
+   586→          setAddOpen(false);
+   587→          refresh();
+   588→        }}
+   589→      />
+   590→
+   591→      {/* Upload RC dialog */}
+   592→      <UploadRCDialog
+   593→        open={uploadOpen}
+   594→        onOpenChange={setUploadOpen}
+   595→        onDone={() => {
+   596→          setUploadOpen(false);
+   597→          refresh();
+   598→        }}
+   599→      />
+   600→
+   601→      {/* Compare dialog */}
+   602→      <CompareDialog items={compareItem} onClose={() => setCompareItem(null)} />
+   603→    </div>
+   604→  );
+   605→}
+   606→
+   607→// ───────────────────────────── Add RC Dialog ─────────────────────────────
+   608→
+   609→interface AddRCDialogProps {
+   610→  open: boolean;
+   611→  onOpenChange: (o: boolean) => void;
+   612→  onDone: () => void;
+   613→}
+   614→
+   615→function AddRCDialog({ open, onOpenChange, onDone }: AddRCDialogProps) {
+   616→  const { toast } = useToast();
+   617→  const [saving, setSaving] = useState(false);
+   618→  const blankForm = {
+   619→    rateCode: "",
+   620→    itemCode: "",
+   621→    description: "",
+   622→    unit: "NOS",
+   623→    rcPrice: "",
+   624→    vat: "",
+   625→    warranty: "",
+   626→    validFrom: "",
+   627→    validUntil: "",
+   628→    brand: "",
+   629→    makeModel: "",
+   630→    category: "General",
+   631→    subCategory: "",
+   632→    supplier: "",
+   633→    rcYear: String(new Date().getFullYear()),
+   634→  };
+   635→  const [form, setForm] = useState(blankForm);
+   636→
+   637→  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+   638→
+   639→  const submit = async () => {
+   640→    if (!form.description) {
+   641→      toast({
+   642→        title: "Item description is required",
+   643→        variant: "destructive",
+   644→      });
+   645→      return;
+   646→    }
+   647→    setSaving(true);
+   648→    const res = await apiRequest("/api/rate-finder/rc", "POST", {
+   649→      rateCode: form.rateCode || null,
+   650→      itemCode: form.itemCode || form.rateCode || "",
+   651→      description: form.description,
+   652→      unit: form.unit || "NOS",
+   653→      rcPrice: Number(form.rcPrice) || 0,
+   654→      vat: Number(form.vat) || 0,
+   655→      warranty: form.warranty || null,
+   656→      brand: form.brand || null,
+   657→      makeModel: form.makeModel || null,
+   658→      category: form.category || "General",
+   659→      subCategory: form.subCategory || null,
+   660→      supplier: form.supplier || null,
+   661→      rcYear: form.rcYear || String(new Date().getFullYear()),
+   662→      validFrom: form.validFrom || null,
+   663→      validUntil: form.validUntil || null,
+   664→    });
+   665→    setSaving(false);
+   666→    if (res.ok) {
+   667→      toast({ title: "RC item added successfully" });
+   668→      setForm(blankForm);
+   669→      onDone();
+   670→    } else {
+   671→      toast({
+   672→        title: "Failed to add RC item",
+   673→        description: res.error,
+   674→        variant: "destructive",
+   675→      });
+   676→    }
+   677→  };
+   678→
+   679→  return (
+   680→    <Dialog open={open} onOpenChange={onOpenChange}>
+   681→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   682→        <DialogHeader>
+   683→          <DialogTitle className="text-foreground">Add Rate Contract</DialogTitle>
+   684→          <DialogDescription>
+   685→            Add a new rate contract entry to the registry.
+   686→          </DialogDescription>
+   687→        </DialogHeader>
+   688→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+   689→          <div className="space-y-1.5">
+   690→            <Label>Rate Code *</Label>
+   691→            <Input
+   692→              value={form.rateCode}
+   693→              onChange={(e) => set("rateCode", e.target.value)}
+   694→              placeholder="e.g. RC-2025-001"
+   695→              className="bg-background border-border font-mono"
+   696→            />
+   697→          </div>
+   698→          <div className="space-y-1.5">
+   699→            <Label>Item Code</Label>
+   700→            <Input
+   701→              value={form.itemCode}
+   702→              onChange={(e) => set("itemCode", e.target.value)}
+   703→              placeholder="Defaults to Rate Code"
+   704→              className="bg-background border-border font-mono"
+   705→            />
+   706→          </div>
+   707→          <div className="sm:col-span-2 space-y-1.5">
+   708→            <Label>Item (Description) *</Label>
+   709→            <Input
+   710→              value={form.description}
+   711→              onChange={(e) => set("description", e.target.value)}
+   712→              placeholder="Item description"
+   713→              className="bg-background border-border"
+   714→            />
+   715→          </div>
+   716→          <div className="space-y-1.5">
+   717→            <Label>Rate (Rs.)</Label>
+   718→            <Input
+   719→              type="number"
+   720→              value={form.rcPrice}
+   721→              onChange={(e) => set("rcPrice", e.target.value)}
+   722→              placeholder="0"
+   723→              className="bg-background border-border"
+   724→            />
+   725→          </div>
+   726→          <div className="space-y-1.5">
+   727→            <Label>VAT (%)</Label>
+   728→            <Input
+   729→              type="number"
+   730→              value={form.vat}
+   731→              onChange={(e) => set("vat", e.target.value)}
+   732→              placeholder="0"
+   733→              className="bg-background border-border"
+   734→            />
+   735→          </div>
+   736→          <div className="space-y-1.5">
+   737→            <Label>Warranty</Label>
+   738→            <Input
+   739→              value={form.warranty}
+   740→              onChange={(e) => set("warranty", e.target.value)}
+   741→              placeholder="e.g. 12 months"
+   742→              className="bg-background border-border"
+   743→            />
+   744→          </div>
+   745→          <div className="space-y-1.5">
+   746→            <Label>Unit</Label>
+   747→            <Input
+   748→              value={form.unit}
+   749→              onChange={(e) => set("unit", e.target.value)}
+   750→              placeholder="NOS"
+   751→              className="bg-background border-border"
+   752→            />
+   753→          </div>
+   754→          <div className="space-y-1.5">
+   755→            <Label>Brand</Label>
+   756→            <Input
+   757→              value={form.brand}
+   758→              onChange={(e) => set("brand", e.target.value)}
+   759→              placeholder="Brand name"
+   760→              className="bg-background border-border"
+   761→            />
+   762→          </div>
+   763→          <div className="space-y-1.5">
+   764→            <Label>Make / Model</Label>
+   765→            <Input
+   766→              value={form.makeModel}
+   767→              onChange={(e) => set("makeModel", e.target.value)}
+   768→              placeholder="Make and model"
+   769→              className="bg-background border-border"
+   770→            />
+   771→          </div>
+   772→          <div className="space-y-1.5">
+   773→            <Label>Category</Label>
+   774→            <Select value={form.category} onValueChange={(v) => set("category", v)}>
+   775→              <SelectTrigger className="bg-background border-border">
+   776→                <SelectValue />
+   777→              </SelectTrigger>
+   778→              <SelectContent>
+   779→                {RATE_CATEGORIES.filter((c) => c !== "All").map((c) => (
+   780→                  <SelectItem key={c} value={c}>
+   781→                    {c}
+   782→                  </SelectItem>
+   783→                ))}
+   784→              </SelectContent>
+   785→            </Select>
+   786→          </div>
+   787→          <div className="space-y-1.5">
+   788→            <Label>Sub Category</Label>
+   789→            <Input
+   790→              value={form.subCategory}
+   791→              onChange={(e) => set("subCategory", e.target.value)}
+   792→              placeholder="e.g. Valves"
+   793→              className="bg-background border-border"
+   794→            />
+   795→          </div>
+   796→          <div className="space-y-1.5">
+   797→            <Label>RC Supplier</Label>
+   798→            <Input
+   799→              value={form.supplier}
+   800→              onChange={(e) => set("supplier", e.target.value)}
+   801→              placeholder="RC supplier name"
+   802→              className="bg-background border-border"
+   803→            />
+   804→          </div>
+   805→          <div className="space-y-1.5">
+   806→            <Label>RC Year</Label>
+   807→            <Input
+   808→              value={form.rcYear}
+   809→              onChange={(e) => set("rcYear", e.target.value)}
+   810→              placeholder="2025"
+   811→              className="bg-background border-border"
+   812→            />
+   813→          </div>
+   814→          <div className="space-y-1.5">
+   815→            <Label>Valid From</Label>
+   816→            <Input
+   817→              type="date"
+   818→              value={form.validFrom}
+   819→              onChange={(e) => set("validFrom", e.target.value)}
+   820→              className="bg-background border-border"
+   821→            />
+   822→          </div>
+   823→          <div className="space-y-1.5">
+   824→            <Label>Valid Until</Label>
+   825→            <Input
+   826→              type="date"
+   827→              value={form.validUntil}
+   828→              onChange={(e) => set("validUntil", e.target.value)}
+   829→              className="bg-background border-border"
+   830→            />
+   831→          </div>
+   832→        </div>
+   833→        <DialogFooter>
+   834→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   835→            Cancel
+   836→          </Button>
+   837→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+   838→            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Add RC
+   839→          </Button>
+   840→        </DialogFooter>
+   841→      </DialogContent>
+   842→    </Dialog>
+   843→  );
+   844→}
+   845→
+   846→// ───────────────────────────── Upload RC Dialog ─────────────────────────────
+   847→
+   848→interface UploadRCDialogProps {
+   849→  open: boolean;
+   850→  onOpenChange: (o: boolean) => void;
+   851→  onDone: () => void;
+   852→}
+   853→
+   854→function UploadRCDialog({ open, onOpenChange, onDone }: UploadRCDialogProps) {
+   855→  const { toast } = useToast();
+   856→  const [parsed, setParsed] = useState<Omit<RCItem, "id">[] | null>(null);
+   857→  const [fileName, setFileName] = useState<string>("");
+   858→  const [uploading, setUploading] = useState(false);
+   859→  const inputRef = useRef<HTMLInputElement>(null);
+   860→
+   861→  const reset = () => {
+   862→    setParsed(null);
+   863→    setFileName("");
+   864→    if (inputRef.current) inputRef.current.value = "";
+   865→  };
+   866→
+   867→  const handleFile = async (file: File) => {
+   868→    setFileName(file.name);
+   869→    let text: string;
+   870→    try {
+   871→      text = await file.text();
+   872→    } catch {
+   873→      toast({ title: "Failed to read file", variant: "destructive" });
+   874→      return;
+   875→    }
+   876→    const rows = parseCSV(text);
+   877→    if (rows.length === 0) {
+   878→      toast({ title: "CSV file is empty", variant: "destructive" });
+   879→      setParsed(null);
+   880→      return;
+   881→    }
+   882→    const headers = rows[0].map((h) => h.trim().toLowerCase());
+   883→    // New CSV format headers (lowercased). The API also accepts these aliases
+   884→    // directly (e.g. "rate(Rs)" → rcPrice, "validity up to" → validUntil).
+   885→    const columnAliases: Record<string, string[]> = {
+   886→      rateCode: ["rate code", "ratecode"],
+   887→      description: ["item", "description"],
+   888→      rcPrice: ["rate(rs)", "rate", "rcprice"],
+   889→      vat: ["vat"],
+   890→      warranty: ["warranty"],
+   891→      validUntil: ["validity up to", "validuntil"],
+   892→      brand: ["brand"],
+   893→      makeModel: ["make model", "makemodel"],
+   894→      category: ["category"],
+   895→      subCategory: ["sub category", "subcategory"],
+   896→      supplier: ["rc supplier", "supplier"],
+   897→      itemCode: ["itemcode", "item code"],
+   898→      rcYear: ["rcyear", "rc year"],
+   899→      validFrom: ["validfrom", "valid from"],
+   900→      unit: ["unit"],
+   901→    };
+   902→    const idx: Record<string, number> = {};
+   903→    Object.entries(columnAliases).forEach(([field, aliases]) => {
+   904→      for (const a of aliases) {
+   905→        const i = headers.indexOf(a);
+   906→        if (i >= 0) {
+   907→          idx[field] = i;
+   908→          break;
+   909→        }
+   910→      }
+   911→    });
+   912→    if (!("description" in idx)) {
+   913→      toast({
+   914→        title: "Missing required column",
+   915→        description:
+   916→          'CSV must include an "item" (or "description") column. Use the template button to get the correct format.',
+   917→        variant: "destructive",
+   918→      });
+   919→      setParsed(null);
+   920→      return;
+   921→    }
+   922→    const dataRows = rows.slice(1);
+   923→    const items: Omit<RCItem, "id">[] = dataRows
+   924→      .map((r) => {
+   925→        const rateCode = (r[idx["rateCode"]] ?? "").trim();
+   926→        const itemCode = (r[idx["itemCode"]] ?? "").trim();
+   927→        const description = (r[idx["description"]] ?? "").trim();
+   928→        const rcYearRaw = (r[idx["rcYear"]] ?? "").trim();
+   929→        return {
+   930→          rateCode: rateCode || null,
+   931→          itemCode: itemCode || rateCode || "",
+   932→          description,
+   933→          unit: (r[idx["unit"]] ?? "NOS").trim() || "NOS",
+   934→          rcPrice: Number((r[idx["rcPrice"]] ?? "0").trim()) || 0,
+   935→          vat: Number((r[idx["vat"]] ?? "0").trim()) || 0,
+   936→          warranty: (r[idx["warranty"]] ?? "").trim() || null,
+   937→          brand: (r[idx["brand"]] ?? "").trim() || null,
+   938→          makeModel: (r[idx["makeModel"]] ?? "").trim() || null,
+   939→          category: (r[idx["category"]] ?? "General").trim() || "General",
+   940→          subCategory: (r[idx["subCategory"]] ?? "").trim() || null,
+   941→          supplier: (r[idx["supplier"]] ?? "").trim() || null,
+   942→          rcYear: rcYearRaw || String(new Date().getFullYear()),
+   943→          validFrom: (r[idx["validFrom"]] ?? "").trim() || null,
+   944→          validUntil: (r[idx["validUntil"]] ?? "").trim() || null,
+   945→        };
+   946→      })
+   947→      .filter((i) => i.itemCode || i.description);
+   948→
+   949→    if (items.length === 0) {
+   950→      toast({ title: "No data rows found in CSV", variant: "destructive" });
+   951→      setParsed(null);
+   952→      return;
+   953→    }
+   954→    setParsed(items);
+   955→  };
+   956→
+   957→  const submit = async () => {
+   958→    if (!parsed || parsed.length === 0) {
+   959→      toast({ title: "No data to upload", variant: "destructive" });
+   960→      return;
+   961→    }
+   962→    setUploading(true);
+   963→    const res = await apiRequest("/api/rate-finder/rc", "POST", parsed);
+   964→    setUploading(false);
+   965→    if (res.ok) {
+   966→      toast({ title: `Uploaded ${parsed.length} RC items` });
+   967→      reset();
+   968→      onDone();
+   969→    } else {
+   970→      toast({
+   971→        title: "Upload failed",
+   972→        description: res.error,
+   973→        variant: "destructive",
+   974→      });
+   975→    }
+   976→  };
+   977→
+   978→  return (
+   979→    <Dialog
+   980→      open={open}
+   981→      onOpenChange={(o) => {
+   982→        if (!o) reset();
+   983→        onOpenChange(o);
+   984→      }}
+   985→    >
+   986→      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   987→        <DialogHeader>
+   988→          <DialogTitle className="text-foreground">Upload RC List (CSV)</DialogTitle>
+   989→          <DialogDescription>
+   990→            Columns: Rate code, item, rate(Rs), VAT, warranty, validity up to, Brand,
+   991→            make model, Category, sub category, RC supplier
+   992→          </DialogDescription>
+   993→        </DialogHeader>
+   994→        <div className="space-y-3 py-2">
+   995→          <div className="flex items-center justify-between gap-2 flex-wrap">
+   996→            <input
+   997→              ref={inputRef}
+   998→              type="file"
+   999→              accept=".csv,text/csv"
+  1000→              className="hidden"
+  1001→              onChange={(e) => {
+  1002→                const f = e.target.files?.[0];
+  1003→                if (f) handleFile(f);
+  1004→              }}
+  1005→            />
+  1006→            <Button
+  1007→              variant="outline"
+  1008→              size="sm"
+  1009→              className="gap-1.5"
+  1010→              onClick={() => inputRef.current?.click()}
+  1011→            >
+  1012→              <Upload className="h-4 w-4" /> Choose CSV File
+  1013→            </Button>
+  1014→            <Button
+  1015→              variant="ghost"
+  1016→              size="sm"
+  1017→              className="gap-1.5"
+  1018→              onClick={() => downloadCSV("rc-list-template.csv", RC_TEMPLATE)}
+  1019→            >
+  1020→              <Download className="h-4 w-4" /> Download Template
+  1021→            </Button>
+  1022→          </div>
+  1023→          {fileName && (
+  1024→            <p className="text-sm text-muted-foreground">
+  1025→              Selected: <span className="text-foreground font-medium">{fileName}</span>
+  1026→            </p>
+  1027→          )}
+  1028→          {parsed && (
+  1029→            <div className="rounded-lg border border-border bg-background overflow-hidden">
+  1030→              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+  1031→                <span className="text-sm font-medium text-foreground">
+  1032→                  Preview ({parsed.length} rows)
+  1033→                </span>
+  1034→                <Button
+  1035→                  variant="ghost"
+  1036→                  size="sm"
+  1037→                  className="h-7 px-2 text-xs text-muted-foreground"
+  1038→                  onClick={reset}
+  1039→                >
+  1040→                  Reset
+  1041→                </Button>
+  1042→              </div>
+  1043→              <div className="max-h-72 overflow-y-auto scrollbar-thin">
+  1044→                <Table>
+  1045→                  <TableHeader>
+  1046→                    <TableRow className="border-border hover:bg-transparent">
+  1047→                      <TableHead className="text-muted-foreground">Rate Code</TableHead>
+  1048→                      <TableHead className="text-muted-foreground">Item</TableHead>
+  1049→                      <TableHead className="text-muted-foreground text-right">Rate (Rs)</TableHead>
+  1050→                      <TableHead className="text-muted-foreground">VAT</TableHead>
+  1051→                      <TableHead className="text-muted-foreground">Warranty</TableHead>
+  1052→                      <TableHead className="text-muted-foreground">Valid Until</TableHead>
+  1053→                      <TableHead className="text-muted-foreground">Brand</TableHead>
+  1054→                      <TableHead className="text-muted-foreground">Make/Model</TableHead>
+  1055→                      <TableHead className="text-muted-foreground">Category</TableHead>
+  1056→                      <TableHead className="text-muted-foreground">Sub Cat</TableHead>
+  1057→                      <TableHead className="text-muted-foreground">Supplier</TableHead>
+  1058→                    </TableRow>
+  1059→                  </TableHeader>
+  1060→                  <TableBody>
+  1061→                    {parsed.slice(0, 50).map((p, i) => (
+  1062→                      <TableRow key={i} className="border-border">
+  1063→                        <TableCell className="font-mono text-foreground whitespace-nowrap">
+  1064→                          {p.rateCode || "—"}
+  1065→                        </TableCell>
+  1066→                        <TableCell
+  1067→                          className="text-muted-foreground truncate max-w-[200px]"
+  1068→                          title={p.description}
+  1069→                        >
+  1070→                          {p.description}
+  1071→                        </TableCell>
+  1072→                        <TableCell className="text-foreground text-right whitespace-nowrap">
+  1073→                          {formatCurrency(p.rcPrice)}
+  1074→                        </TableCell>
+  1075→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1076→                          {p.vat ? `${p.vat}%` : "—"}
+  1077→                        </TableCell>
+  1078→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1079→                          {p.warranty || "—"}
+  1080→                        </TableCell>
+  1081→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1082→                          {formatDate(p.validUntil)}
+  1083→                        </TableCell>
+  1084→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1085→                          {p.brand || "—"}
+  1086→                        </TableCell>
+  1087→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1088→                          {p.makeModel || "—"}
+  1089→                        </TableCell>
+  1090→                        <TableCell>
+  1091→                          <CategoryBadge category={p.category} />
+  1092→                        </TableCell>
+  1093→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1094→                          {p.subCategory || "—"}
+  1095→                        </TableCell>
+  1096→                        <TableCell className="text-muted-foreground whitespace-nowrap">
+  1097→                          {p.supplier || "—"}
+  1098→                        </TableCell>
+  1099→                      </TableRow>
+  1100→                    ))}
+  1101→                  </TableBody>
+  1102→                </Table>
+  1103→                {parsed.length > 50 && (
+  1104→                  <p className="text-xs text-muted-foreground p-2 text-center">
+  1105→                    ... and {parsed.length - 50} more rows
+  1106→                  </p>
+  1107→                )}
+  1108→              </div>
+  1109→            </div>
+  1110→          )}
+  1111→        </div>
+  1112→        <DialogFooter>
+  1113→          <Button
+  1114→            variant="outline"
+  1115→            onClick={() => {
+  1116→              reset();
+  1117→              onOpenChange(false);
+  1118→            }}
+  1119→          >
+  1120→            Cancel
+  1121→          </Button>
+  1122→          <Button onClick={submit} disabled={!parsed || uploading} className="gap-1.5">
+  1123→            {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+  1124→            Upload {parsed ? `${parsed.length} ` : ""}Items
+  1125→          </Button>
+  1126→        </DialogFooter>
+  1127→      </DialogContent>
+  1128→    </Dialog>
+  1129→  );
+  1130→}
+  1131→
+  1132→// ───────────────────────────── Compare Dialog ─────────────────────────────
+  1133→
+  1134→interface CompareDialogProps {
+  1135→  items: RCItem[] | null;
+  1136→  onClose: () => void;
+  1137→}
+  1138→
+  1139→function CompareDialog({ items, onClose }: CompareDialogProps) {
+  1140→  if (!items || items.length === 0) return null;
+  1141→
+  1142→  const sorted = [...items].sort((a, b) => a.rcYear.localeCompare(b.rcYear));
+  1143→  const data = sorted.map((i) => ({
+  1144→    year: i.rcYear,
+  1145→    price: i.rcPrice,
+  1146→    supplier: i.supplier || "—",
+  1147→    validUntil: i.validUntil,
+  1148→  }));
+  1149→
+  1150→  const prices = data.map((d) => d.price);
+  1151→  const min = Math.min(...prices);
+  1152→  const max = Math.max(...prices);
+  1153→  const diff = max - min;
+  1154→  const pct = min > 0 ? ((max - min) / min) * 100 : 0;
+  1155→  const first = data[0]?.price ?? 0;
+  1156→  const last = data[data.length - 1]?.price ?? 0;
+  1157→  const trend =
+  1158→    last > first ? "increased" : last < first ? "decreased" : "stable";
+  1159→
+  1160→  return (
+  1161→    <Dialog open onOpenChange={(o) => !o && onClose()}>
+  1162→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1163→        <DialogHeader>
+  1164→          <DialogTitle className="text-foreground flex items-center gap-2">
+  1165→            <GitCompare className="h-4 w-4 text-primary" />
+  1166→            Price Comparison — {sorted[0].itemCode}
+  1167→          </DialogTitle>
+  1168→          <DialogDescription>{sorted[0].description}</DialogDescription>
+  1169→        </DialogHeader>
+  1170→
+  1171→        <div className="space-y-3">
+  1172→          {/* Summary tiles */}
+  1173→          <div className="grid grid-cols-3 gap-3">
+  1174→            <div className="bg-secondary/40 rounded-lg p-3">
+  1175→              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Years</p>
+  1176→              <p className="text-sm font-semibold text-foreground mt-0.5">{data.length}</p>
+  1177→            </div>
+  1178→            <div className="bg-secondary/40 rounded-lg p-3">
+  1179→              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+  1180→                Price Range
+  1181→              </p>
+  1182→              <p className="text-sm font-semibold text-foreground mt-0.5">
+  1183→                {formatCurrency(min)} – {formatCurrency(max)}
+  1184→              </p>
+  1185→            </div>
+  1186→            <div className="bg-secondary/40 rounded-lg p-3">
+  1187→              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Change</p>
+  1188→              <p
+  1189→                className={cn(
+  1190→                  "text-sm font-semibold mt-0.5",
+  1191→                  trend === "increased"
+  1192→                    ? "text-red-400"
+  1193→                    : trend === "decreased"
+  1194→                      ? "text-emerald-400"
+  1195→                      : "text-muted-foreground"
+  1196→                )}
+  1197→              >
+  1198→                {diff > 0 ? `${formatCurrency(diff)} (${pct.toFixed(1)}%)` : "—"}
+  1199→              </p>
+  1200→            </div>
+  1201→          </div>
+  1202→
+  1203→          {/* Bar chart */}
+  1204→          <div className="bg-background border border-border rounded-lg p-4">
+  1205→            <h4 className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
+  1206→              Price by Year
+  1207→            </h4>
+  1208→            <ResponsiveContainer width="100%" height={260}>
+  1209→              <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+  1210→                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" vertical={false} />
+  1211→                <XAxis
+  1212→                  dataKey="year"
+  1213→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1214→                  axisLine={{ stroke: "#2d3548" }}
+  1215→                  tickLine={{ stroke: "#2d3548" }}
+  1216→                />
+  1217→                <YAxis
+  1218→                  tick={{ fill: "#94a3b8", fontSize: 11 }}
+  1219→                  axisLine={{ stroke: "#2d3548" }}
+  1220→                  tickLine={{ stroke: "#2d3548" }}
+  1221→                  tickFormatter={(v: number) => "Rs. " + v.toLocaleString("en-IN")}
+  1222→                  width={95}
+  1223→                />
+  1224→                <Tooltip
+  1225→                  cursor={{ fill: "#2d354840" }}
+  1226→                  contentStyle={{
+  1227→                    background: "#1a1f2e",
+  1228→                    border: "1px solid #2d3548",
+  1229→                    borderRadius: 8,
+  1230→                    fontSize: 12,
+  1231→                  }}
+  1232→                  formatter={(v: number) => [formatCurrency(v), "Price"]}
+  1233→                  labelFormatter={(l) => `Year ${l}`}
+  1234→                />
+  1235→                <Bar dataKey="price" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={64} />
+  1236→              </BarChart>
+  1237→            </ResponsiveContainer>
+  1238→          </div>
+  1239→
+  1240→          {/* Detail table */}
+  1241→          <div className="rounded-lg border border-border overflow-hidden">
+  1242→            <Table>
+  1243→              <TableHeader>
+  1244→                <TableRow className="border-border hover:bg-transparent">
+  1245→                  <TableHead className="text-muted-foreground">Year</TableHead>
+  1246→                  <TableHead className="text-muted-foreground">Price</TableHead>
+  1247→                  <TableHead className="text-muted-foreground">Supplier</TableHead>
+  1248→                  <TableHead className="text-muted-foreground">Valid Until</TableHead>
+  1249→                </TableRow>
+  1250→              </TableHeader>
+  1251→              <TableBody>
+  1252→                {sorted.map((i) => (
+  1253→                  <TableRow key={i.id} className="border-border">
+  1254→                    <TableCell className="font-medium text-foreground">{i.rcYear}</TableCell>
+  1255→                    <TableCell className="text-foreground font-medium">
+  1256→                      {formatCurrency(i.rcPrice)}
+  1257→                    </TableCell>
+  1258→                    <TableCell className="text-muted-foreground">
+  1259→                      {i.supplier || "—"}
+  1260→                    </TableCell>
+  1261→                    <TableCell className="text-muted-foreground">
+  1262→                      {formatDate(i.validUntil)}
+  1263→                    </TableCell>
+  1264→                  </TableRow>
+  1265→                ))}
+  1266→              </TableBody>
+  1267→            </Table>
+  1268→          </div>
+  1269→        </div>
+  1270→
+  1271→        <DialogFooter>
+  1272→          <Button variant="outline" onClick={onClose}>
+  1273→            Close
+  1274→          </Button>
+  1275→        </DialogFooter>
+  1276→      </DialogContent>
+  1277→    </Dialog>
+  1278→  );
+  1279→}
+  1280→
+  1281→// ───────────────────────────── Discontinued Tab ─────────────────────────────
+  1282→
+  1283→interface DiscontinuedTabProps {
+  1284→  items: DiscontinuedItem[] | null;
+  1285→  loading: boolean;
+  1286→  error: string | null;
+  1287→  refresh: () => void;
+  1288→}
+  1289→
+  1290→function DiscontinuedTab({ items, loading, error, refresh }: DiscontinuedTabProps) {
+  1291→  const { toast } = useToast();
+  1292→  const [year, setYear] = useState<string>("All");
+  1293→  const [addOpen, setAddOpen] = useState(false);
+  1294→  const [uploadOpen, setUploadOpen] = useState(false);
+  1295→  const [deletingId, setDeletingId] = useState<string | null>(null);
+  1296→
+  1297→  const years = useMemo(() => {
+  1298→    const s = new Set<string>();
+  1299→    items?.forEach((i) => i.lastRCYear && s.add(i.lastRCYear));
+  1300→    return Array.from(s).sort((a, b) => b.localeCompare(a));
+  1301→  }, [items]);
+  1302→
+  1303→  const filtered = useMemo(() => {
+  1304→    if (!items) return [];
+  1305→    if (year === "All") return items;
+  1306→    return items.filter((i) => i.lastRCYear === year);
+  1307→  }, [items, year]);
+  1308→
+  1309→  const handleDelete = async (id: string) => {
+  1310→    setDeletingId(id);
+  1311→    const res = await apiRequest(`/api/rate-finder/discontinued/${id}`, "DELETE");
+  1312→    setDeletingId(null);
+  1313→    if (res.ok) {
+  1314→      toast({ title: "Discontinued item deleted" });
+  1315→      refresh();
+  1316→    } else {
+  1317→      toast({
+  1318→        title: "Failed to delete item",
+  1319→        description: res.error,
+  1320→        variant: "destructive",
+  1321→      });
+  1322→    }
+  1323→  };
+  1324→
+  1325→  if (loading) return <LoadingState label="Loading discontinued items..." />;
+  1326→  if (error) return <ErrorState message={error} />;
+  1327→
+  1328→  return (
+  1329→    <div className="space-y-4">
+  1330→      {/* Toolbar */}
+  1331→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1332→        <div className="flex items-center gap-2">
+  1333→          <Select value={year} onValueChange={setYear}>
+  1334→            <SelectTrigger className="w-[180px] bg-card border-border">
+  1335→              <SelectValue placeholder="Year" />
+  1336→            </SelectTrigger>
+  1337→            <SelectContent>
+  1338→              <SelectItem value="All">All Years</SelectItem>
+  1339→              {years.map((y) => (
+  1340→                <SelectItem key={y} value={y}>
+  1341→                  {y}
+  1342→                </SelectItem>
+  1343→              ))}
+  1344→            </SelectContent>
+  1345→          </Select>
+  1346→          {year !== "All" && (
+  1347→            <Button
+  1348→              size="sm"
+  1349→              variant="ghost"
+  1350→              onClick={() => setYear("All")}
+  1351→              className="gap-1.5 text-muted-foreground"
+  1352→            >
+  1353→              <X className="h-4 w-4" /> Clear
+  1354→            </Button>
+  1355→          )}
+  1356→        </div>
+  1357→        <div className="flex items-center gap-2">
+  1358→          <Button
+  1359→            variant="outline"
+  1360→            size="sm"
+  1361→            className="gap-1.5"
+  1362→            onClick={() => setUploadOpen(true)}
+  1363→          >
+  1364→            <Upload className="h-4 w-4" /> Upload Discontinued List
+  1365→          </Button>
+  1366→          <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+  1367→            <Plus className="h-4 w-4" /> Add Discontinued
+  1368→          </Button>
+  1369→        </div>
+  1370→      </div>
+  1371→
+  1372→      {/* Result count */}
+  1373→      <div className="flex items-center justify-between text-xs text-muted-foreground">
+  1374→        <span>
+  1375→          Showing <span className="text-foreground font-medium">{filtered.length}</span> of{" "}
+  1376→          <span className="text-foreground font-medium">{items?.length ?? 0}</span> discontinued
+  1377→          items
+  1378→        </span>
+  1379→      </div>
+  1380→
+  1381→      {/* Table */}
+  1382→      {!filtered || filtered.length === 0 ? (
+  1383→        <EmptyState
+  1384→          icon={Ban}
+  1385→          title={
+  1386→            items && items.length > 0
+  1387→              ? "No discontinued items for this year"
+  1388→              : "No discontinued items yet"
+  1389→          }
+  1390→          description={
+  1391→            items && items.length > 0
+  1392→              ? "Try selecting a different year or All Years."
+  1393→              : "Add a discontinued item or upload a CSV list to get started."
+  1394→          }
+  1395→          action={
+  1396→            <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+  1397→              <Plus className="h-4 w-4" /> Add Discontinued
+  1398→            </Button>
+  1399→          }
+  1400→        />
+  1401→      ) : (
+  1402→        <div className="bg-card border border-border rounded-xl overflow-hidden">
+  1403→          <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin">
+  1404→            <Table>
+  1405→              <TableHeader className="sticky top-0 z-10 bg-card">
+  1406→                <TableRow className="border-border hover:bg-transparent">
+  1407→                  <TableHead className="text-muted-foreground">Item Code</TableHead>
+  1408→                  <TableHead className="text-muted-foreground">Description</TableHead>
+  1409→                  <TableHead className="text-muted-foreground">Unit</TableHead>
+  1410→                  <TableHead className="text-muted-foreground">Last RC Price</TableHead>
+  1411→                  <TableHead className="text-muted-foreground">Last RC Year</TableHead>
+  1412→                  <TableHead className="text-muted-foreground">Discontinued Date</TableHead>
+  1413→                  <TableHead className="text-muted-foreground">Reason</TableHead>
+  1414→                  <TableHead className="text-muted-foreground">Alternatives</TableHead>
+  1415→                  <TableHead className="text-muted-foreground text-right">Actions</TableHead>
+  1416→                </TableRow>
+  1417→              </TableHeader>
+  1418→              <TableBody>
+  1419→                {filtered.map((item) => {
+  1420→                  const alts = splitAlternatives(item.alternatives);
+  1421→                  return (
+  1422→                    <TableRow key={item.id} className="border-border">
+  1423→                      <TableCell className="font-medium text-foreground">
+  1424→                        {item.itemCode}
+  1425→                      </TableCell>
+  1426→                      <TableCell
+  1427→                        className="max-w-[260px] truncate text-muted-foreground"
+  1428→                        title={item.description}
+  1429→                      >
+  1430→                        {item.description}
+  1431→                      </TableCell>
+  1432→                      <TableCell className="text-muted-foreground">{item.unit}</TableCell>
+  1433→                      <TableCell className="font-semibold text-foreground">
+  1434→                        {formatCurrency(item.lastRCPrice)}
+  1435→                      </TableCell>
+  1436→                      <TableCell className="text-foreground font-medium">
+  1437→                        {item.lastRCYear || "—"}
+  1438→                      </TableCell>
+  1439→                      <TableCell className="text-muted-foreground">
+  1440→                        {formatDate(item.discontinuedDate)}
+  1441→                      </TableCell>
+  1442→                      <TableCell
+  1443→                        className="max-w-[200px] truncate text-muted-foreground"
+  1444→                        title={item.reason || ""}
+  1445→                      >
+  1446→                        {item.reason || "—"}
+  1447→                      </TableCell>
+  1448→                      <TableCell>
+  1449→                        {alts.length > 0 ? (
+  1450→                          <div className="flex flex-wrap gap-1 max-w-[260px]">
+  1451→                            {alts.map((a, i) => (
+  1452→                              <CustomBadge
+  1453→                                key={i}
+  1454→                                className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 cursor-default hover:bg-emerald-500/20 transition-colors"
+  1455→                              >
+  1456→                                {a}
+  1457→                              </CustomBadge>
+  1458→                            ))}
+  1459→                          </div>
+  1460→                        ) : (
+  1461→                          <span className="text-muted-foreground">—</span>
+  1462→                        )}
+  1463→                      </TableCell>
+  1464→                      <TableCell className="text-right">
+  1465→                        <Button
+  1466→                          size="icon"
+  1467→                          variant="ghost"
+  1468→                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+  1469→                          onClick={() => handleDelete(item.id)}
+  1470→                          disabled={deletingId === item.id}
+  1471→                          title="Delete discontinued item"
+  1472→                        >
+  1473→                          {deletingId === item.id ? (
+  1474→                            <Loader2 className="h-4 w-4 animate-spin" />
+  1475→                          ) : (
+  1476→                            <Trash2 className="h-4 w-4" />
+  1477→                          )}
+  1478→                        </Button>
+  1479→                      </TableCell>
+  1480→                    </TableRow>
+  1481→                  );
+  1482→                })}
+  1483→              </TableBody>
+  1484→            </Table>
+  1485→          </div>
+  1486→        </div>
+  1487→      )}
+  1488→
+  1489→      {/* Add Discontinued dialog */}
+  1490→      <AddDiscontinuedDialog
+  1491→        open={addOpen}
+  1492→        onOpenChange={setAddOpen}
+  1493→        onDone={() => {
+  1494→          setAddOpen(false);
+  1495→          refresh();
+  1496→        }}
+  1497→      />
+  1498→
+  1499→      {/* Upload Discontinued dialog */}
+  1500→      <UploadDiscontinuedDialog
+  1501→        open={uploadOpen}
+  1502→        onOpenChange={setUploadOpen}
+  1503→        onDone={() => {
+  1504→          setUploadOpen(false);
+  1505→          refresh();
+  1506→        }}
+  1507→      />
+  1508→    </div>
+  1509→  );
+  1510→}
+  1511→
+  1512→// ───────────────────────────── Add Discontinued Dialog ─────────────────────────────
+  1513→
+  1514→interface AddDiscontinuedDialogProps {
+  1515→  open: boolean;
+  1516→  onOpenChange: (o: boolean) => void;
+  1517→  onDone: () => void;
+  1518→}
+  1519→
+  1520→function AddDiscontinuedDialog({ open, onOpenChange, onDone }: AddDiscontinuedDialogProps) {
+  1521→  const { toast } = useToast();
+  1522→  const [saving, setSaving] = useState(false);
+  1523→  const blankForm = {
+  1524→    itemCode: "",
+  1525→    description: "",
+  1526→    unit: "NOS",
+  1527→    lastRCPrice: "",
+  1528→    lastRCYear: String(new Date().getFullYear()),
+  1529→    discontinuedDate: "",
+  1530→    reason: "",
+  1531→    alternatives: "",
+  1532→  };
+  1533→  const [form, setForm] = useState(blankForm);
+  1534→
+  1535→  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  1536→
+  1537→  const submit = async () => {
+  1538→    if (!form.itemCode || !form.description) {
+  1539→      toast({
+  1540→        title: "Item Code and Description are required",
+  1541→        variant: "destructive",
+  1542→      });
+  1543→      return;
+  1544→    }
+  1545→    setSaving(true);
+  1546→    const res = await apiRequest("/api/rate-finder/discontinued", "POST", {
+  1547→      itemCode: form.itemCode,
+  1548→      description: form.description,
+  1549→      unit: form.unit || "NOS",
+  1550→      lastRCPrice: Number(form.lastRCPrice) || 0,
+  1551→      lastRCYear: form.lastRCYear || null,
+  1552→      discontinuedDate: form.discontinuedDate || null,
+  1553→      reason: form.reason || null,
+  1554→      alternatives: form.alternatives || null,
+  1555→    });
+  1556→    setSaving(false);
+  1557→    if (res.ok) {
+  1558→      toast({ title: "Discontinued item added" });
+  1559→      setForm(blankForm);
+  1560→      onDone();
+  1561→    } else {
+  1562→      toast({
+  1563→        title: "Failed to add discontinued item",
+  1564→        description: res.error,
+  1565→        variant: "destructive",
+  1566→      });
+  1567→    }
+  1568→  };
+  1569→
+  1570→  return (
+  1571→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1572→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1573→        <DialogHeader>
+  1574→          <DialogTitle className="text-foreground">Add Discontinued Item</DialogTitle>
+  1575→          <DialogDescription>
+  1576→            Record an item that has been discontinued, along with any alternative items.
+  1577→          </DialogDescription>
+  1578→        </DialogHeader>
+  1579→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+  1580→          <div className="space-y-1.5">
+  1581→            <Label>Item Code *</Label>
+  1582→            <Input
+  1583→              value={form.itemCode}
+  1584→              onChange={(e) => set("itemCode", e.target.value)}
+  1585→              placeholder="e.g. RC-2020-045"
+  1586→              className="bg-background border-border"
+  1587→            />
+  1588→          </div>
+  1589→          <div className="space-y-1.5">
+  1590→            <Label>Unit</Label>
+  1591→            <Input
+  1592→              value={form.unit}
+  1593→              onChange={(e) => set("unit", e.target.value)}
+  1594→              placeholder="NOS"
+  1595→              className="bg-background border-border"
+  1596→            />
+  1597→          </div>
+  1598→          <div className="sm:col-span-2 space-y-1.5">
+  1599→            <Label>Description *</Label>
+  1600→            <Input
+  1601→              value={form.description}
+  1602→              onChange={(e) => set("description", e.target.value)}
+  1603→              placeholder="Item description"
+  1604→              className="bg-background border-border"
+  1605→            />
+  1606→          </div>
+  1607→          <div className="space-y-1.5">
+  1608→            <Label>Last RC Price (Rs.)</Label>
+  1609→            <Input
+  1610→              type="number"
+  1611→              value={form.lastRCPrice}
+  1612→              onChange={(e) => set("lastRCPrice", e.target.value)}
+  1613→              placeholder="0"
+  1614→              className="bg-background border-border"
+  1615→            />
+  1616→          </div>
+  1617→          <div className="space-y-1.5">
+  1618→            <Label>Last RC Year</Label>
+  1619→            <Input
+  1620→              value={form.lastRCYear}
+  1621→              onChange={(e) => set("lastRCYear", e.target.value)}
+  1622→              placeholder="2024"
+  1623→              className="bg-background border-border"
+  1624→            />
+  1625→          </div>
+  1626→          <div className="space-y-1.5">
+  1627→            <Label>Discontinued Date</Label>
+  1628→            <Input
+  1629→              type="date"
+  1630→              value={form.discontinuedDate}
+  1631→              onChange={(e) => set("discontinuedDate", e.target.value)}
+  1632→              className="bg-background border-border"
+  1633→            />
+  1634→          </div>
+  1635→          <div className="space-y-1.5">
+  1636→            <Label>Reason</Label>
+  1637→            <Input
+  1638→              value={form.reason}
+  1639→              onChange={(e) => set("reason", e.target.value)}
+  1640→              placeholder="e.g. Obsolete / Supplier discontinued"
+  1641→              className="bg-background border-border"
+  1642→            />
+  1643→          </div>
+  1644→          <div className="sm:col-span-2 space-y-1.5">
+  1645→            <Label>Alternatives (comma-separated)</Label>
+  1646→            <Textarea
+  1647→              value={form.alternatives}
+  1648→              onChange={(e) => set("alternatives", e.target.value)}
+  1649→              placeholder="e.g. RC-2025-012, RC-2025-015"
+  1650→              rows={2}
+  1651→              className="bg-background border-border"
+  1652→            />
+  1653→          </div>
+  1654→        </div>
+  1655→        <DialogFooter>
+  1656→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1657→            Cancel
+  1658→          </Button>
+  1659→          <Button onClick={submit} disabled={saving} className="gap-1.5">
+  1660→            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Add Item
+  1661→          </Button>
+  1662→        </DialogFooter>
+  1663→      </DialogContent>
+  1664→    </Dialog>
+  1665→  );
+  1666→}
+  1667→
+  1668→// ───────────────────────────── Upload Discontinued Dialog ─────────────────────────────
+  1669→
+  1670→interface UploadDiscontinuedDialogProps {
+  1671→  open: boolean;
+  1672→  onOpenChange: (o: boolean) => void;
+  1673→  onDone: () => void;
+  1674→}
+  1675→
+  1676→function UploadDiscontinuedDialog({
+  1677→  open,
+  1678→  onOpenChange,
+  1679→  onDone,
+  1680→}: UploadDiscontinuedDialogProps) {
+  1681→  const { toast } = useToast();
+  1682→  const [parsed, setParsed] = useState<Omit<DiscontinuedItem, "id">[] | null>(null);
+  1683→  const [fileName, setFileName] = useState<string>("");
+  1684→  const [uploading, setUploading] = useState(false);
+  1685→  const inputRef = useRef<HTMLInputElement>(null);
+  1686→
+  1687→  const reset = () => {
+  1688→    setParsed(null);
+  1689→    setFileName("");
+  1690→    if (inputRef.current) inputRef.current.value = "";
+  1691→  };
+  1692→
+  1693→  const handleFile = async (file: File) => {
+  1694→    setFileName(file.name);
+  1695→    let text: string;
+  1696→    try {
+  1697→      text = await file.text();
+  1698→    } catch {
+  1699→      toast({ title: "Failed to read file", variant: "destructive" });
+  1700→      return;
+  1701→    }
+  1702→    const rows = parseCSV(text);
+  1703→    if (rows.length === 0) {
+  1704→      toast({ title: "CSV file is empty", variant: "destructive" });
+  1705→      setParsed(null);
+  1706→      return;
+  1707→    }
+  1708→    const headers = rows[0].map((h) => h.trim().toLowerCase());
+  1709→    const expected = [
+  1710→      "itemcode",
+  1711→      "description",
+  1712→      "unit",
+  1713→      "lastrcprice",
+  1714→      "lastrcyear",
+  1715→      "discontinueddate",
+  1716→      "reason",
+  1717→      "alternatives",
+  1718→    ];
+  1719→    const idx: Record<string, number> = {};
+  1720→    expected.forEach((h) => {
+  1721→      const i = headers.indexOf(h);
+  1722→      if (i >= 0) idx[h] = i;
+  1723→    });
+  1724→    if (!("itemcode" in idx) || !("description" in idx)) {
+  1725→      toast({
+  1726→        title: "Missing required columns",
+  1727→        description: "ItemCode and Description columns are required.",
+  1728→        variant: "destructive",
+  1729→      });
+  1730→      setParsed(null);
+  1731→      return;
+  1732→    }
+  1733→    const dataRows = rows.slice(1);
+  1734→    const items: Omit<DiscontinuedItem, "id">[] = dataRows
+  1735→      .map((r) => ({
+  1736→        itemCode: (r[idx["itemcode"]] ?? "").trim(),
+  1737→        description: (r[idx["description"]] ?? "").trim(),
+  1738→        unit: (r[idx["unit"]] ?? "NOS").trim() || "NOS",
+  1739→        lastRCPrice: Number((r[idx["lastrcprice"]] ?? "0").trim()) || 0,
+  1740→        lastRCYear: (r[idx["lastrcyear"]] ?? "").trim(),
+  1741→        discontinuedDate: (r[idx["discontinueddate"]] ?? "").trim(),
+  1742→        reason: (r[idx["reason"]] ?? "").trim(),
+  1743→        alternatives: (r[idx["alternatives"]] ?? "").trim(),
+  1744→      }))
+  1745→      .filter((i) => i.itemCode || i.description);
+  1746→
+  1747→    if (items.length === 0) {
+  1748→      toast({ title: "No data rows found in CSV", variant: "destructive" });
+  1749→      setParsed(null);
+  1750→      return;
+  1751→    }
+  1752→    setParsed(items);
+  1753→  };
+  1754→
+  1755→  const submit = async () => {
+  1756→    if (!parsed || parsed.length === 0) {
+  1757→      toast({ title: "No data to upload", variant: "destructive" });
+  1758→      return;
+  1759→    }
+  1760→    setUploading(true);
+  1761→    const res = await apiRequest("/api/rate-finder/discontinued", "POST", parsed);
+  1762→    setUploading(false);
+  1763→    if (res.ok) {
+  1764→      toast({ title: `Uploaded ${parsed.length} discontinued items` });
+  1765→      reset();
+  1766→      onDone();
+  1767→    } else {
+  1768→      toast({
+  1769→        title: "Upload failed",
+  1770→        description: res.error,
+  1771→        variant: "destructive",
+  1772→      });
+  1773→    }
+  1774→  };
+  1775→
+  1776→  return (
+  1777→    <Dialog
+  1778→      open={open}
+  1779→      onOpenChange={(o) => {
+  1780→        if (!o) reset();
+  1781→        onOpenChange(o);
+  1782→      }}
+  1783→    >
+  1784→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+  1785→        <DialogHeader>
+  1786→          <DialogTitle className="text-foreground">Upload Discontinued List (CSV)</DialogTitle>
+  1787→          <DialogDescription>
+  1788→            Columns: ItemCode, Description, Unit, LastRCPrice, LastRCYear, DiscontinuedDate, Reason,
+  1789→            Alternatives
+  1790→          </DialogDescription>
+  1791→        </DialogHeader>
+  1792→        <div className="space-y-3 py-2">
+  1793→          <div className="flex items-center justify-between gap-2 flex-wrap">
+  1794→            <input
+  1795→              ref={inputRef}
+  1796→              type="file"
+  1797→              accept=".csv,text/csv"
+  1798→              className="hidden"
+  1799→              onChange={(e) => {
+  1800→                const f = e.target.files?.[0];
+  1801→                if (f) handleFile(f);
+  1802→              }}
+  1803→            />
+  1804→            <Button
+  1805→              variant="outline"
+  1806→              size="sm"
+  1807→              className="gap-1.5"
+  1808→              onClick={() => inputRef.current?.click()}
+  1809→            >
+  1810→              <Upload className="h-4 w-4" /> Choose CSV File
+  1811→            </Button>
+  1812→            <Button
+  1813→              variant="ghost"
+  1814→              size="sm"
+  1815→              className="gap-1.5"
+  1816→              onClick={() =>
+  1817→                downloadCSV("discontinued-template.csv", DISCONTINUED_TEMPLATE)
+  1818→              }
+  1819→            >
+  1820→              <Download className="h-4 w-4" /> Download Template
+  1821→            </Button>
+  1822→          </div>
+  1823→          {fileName && (
+  1824→            <p className="text-sm text-muted-foreground">
+  1825→              Selected: <span className="text-foreground font-medium">{fileName}</span>
+  1826→            </p>
+  1827→          )}
+  1828→          {parsed && (
+  1829→            <div className="rounded-lg border border-border bg-background overflow-hidden">
+  1830→              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+  1831→                <span className="text-sm font-medium text-foreground">
+  1832→                  Preview ({parsed.length} rows)
+  1833→                </span>
+  1834→                <Button
+  1835→                  variant="ghost"
+  1836→                  size="sm"
+  1837→                  className="h-7 px-2 text-xs text-muted-foreground"
+  1838→                  onClick={reset}
+  1839→                >
+  1840→                  Reset
+  1841→                </Button>
+  1842→              </div>
+  1843→              <div className="max-h-72 overflow-y-auto scrollbar-thin">
+  1844→                <Table>
+  1845→                  <TableHeader>
+  1846→                    <TableRow className="border-border hover:bg-transparent">
+  1847→                      <TableHead className="text-muted-foreground">Item Code</TableHead>
+  1848→                      <TableHead className="text-muted-foreground">Description</TableHead>
+  1849→                      <TableHead className="text-muted-foreground">Last Price</TableHead>
+  1850→                      <TableHead className="text-muted-foreground">Year</TableHead>
+  1851→                      <TableHead className="text-muted-foreground">Date</TableHead>
+  1852→                    </TableRow>
+  1853→                  </TableHeader>
+  1854→                  <TableBody>
+  1855→                    {parsed.slice(0, 50).map((p, i) => (
+  1856→                      <TableRow key={i} className="border-border">
+  1857→                        <TableCell className="font-medium text-foreground">
+  1858→                          {p.itemCode}
+  1859→                        </TableCell>
+  1860→                        <TableCell
+  1861→                          className="text-muted-foreground truncate max-w-[200px]"
+  1862→                          title={p.description}
+  1863→                        >
+  1864→                          {p.description}
+  1865→                        </TableCell>
+  1866→                        <TableCell className="text-foreground">
+  1867→                          {formatCurrency(p.lastRCPrice)}
+  1868→                        </TableCell>
+  1869→                        <TableCell className="text-muted-foreground">
+  1870→                          {p.lastRCYear || "—"}
+  1871→                        </TableCell>
+  1872→                        <TableCell className="text-muted-foreground">
+  1873→                          {p.discontinuedDate || "—"}
+  1874→                        </TableCell>
+  1875→                      </TableRow>
+  1876→                    ))}
+  1877→                  </TableBody>
+  1878→                </Table>
+  1879→                {parsed.length > 50 && (
+  1880→                  <p className="text-xs text-muted-foreground p-2 text-center">
+  1881→                    ... and {parsed.length - 50} more rows
+  1882→                  </p>
+  1883→                )}
+  1884→              </div>
+  1885→            </div>
+  1886→          )}
+  1887→        </div>
+  1888→        <DialogFooter>
+  1889→          <Button
+  1890→            variant="outline"
+  1891→            onClick={() => {
+  1892→              reset();
+  1893→              onOpenChange(false);
+  1894→            }}
+  1895→          >
+  1896→            Cancel
+  1897→          </Button>
+  1898→          <Button onClick={submit} disabled={!parsed || uploading} className="gap-1.5">
+  1899→            {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+  1900→            Upload {parsed ? `${parsed.length} ` : ""}Items
+  1901→          </Button>
+  1902→        </DialogFooter>
+  1903→      </DialogContent>
+  1904→    </Dialog>
+  1905→  );
+  1906→}
+  1907→
