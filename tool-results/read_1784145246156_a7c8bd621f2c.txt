@@ -1,0 +1,302 @@
+   200→- Feature B "Item Code Finder (AI)" delivered: toolbar button + dialog with editable candidate table, "Load from current store items" + "Add Row", "Run AI Matching" → POST /api/stores/find-code, results table with suggested code, duplicate flag (red left border + badge), duplicateOf, existingCodes, confidence badge (confidenceColor), recommendation, and per-row Apply (PUT /api/stores/[id]) with manual-entry tooltip disable.
+   201→- All existing functionality (Zones tab, Stores tab with filters/sort/pagination, Add/Edit/Bulk Upload/View) preserved untouched.
+   202→- Lint-clean for stores.tsx; responsive (mobile-first, flex-wrap toolbar, max-h scroll containers with scrollbar-thin); dark theme tokens honored; uses only shared ERP components + shadcn/ui primitives + lucide-react icons.
+   203→
+   204→---
+   205→Task ID: 5
+   206→Agent: Collection Enhancement
+   207→Task: Add filters + QC Inspection section to Collection module
+   208→
+   209→Work Log:
+   210→- Read worklog.md (foundation Task 1-enhance context), the existing collection.tsx (~2k lines, 3 tabs: Dashboard / Part Supply / Daily Collection), constants.ts (QC_LEVELS, qcLevelColor, FILE_CATEGORIES, formatCurrency), use-fetch.ts, QC API routes (/api/qc GET/POST, /api/qc/[id] PUT/DELETE), QCInspection prisma schema, and confirmed shapes of /api/projects, /api/stores, /api/collection/* via curl.
+   211→- Enhancement A — Dashboard filter bar + view toggle:
+   212→  * Added 4-column filter bar at the top of DashboardTab: By Project (Select from /api/projects), By Vote (Select from unique voteNumbers), By Type (Select from FILE_CATEGORIES minus GEN), and a By Numbers / By Value toggle.
+   213→  * Added module-level pure helpers (so the React Compiler preserves manual memoization): `looselyMatches`, `applyProjVoteFilter`, `applyTypeFilter`, `unitCostFor`, `valueFor`. Each takes the needed lookup Maps as explicit parameters.
+   214→  * Built `storeByName` map (description → StoreItem), `projectById`, `projectByVote`, and `votes` lookups via useFetch + useMemo.
+   215→  * Project/vote filter: loosely matches the row's supplier/receivedFrom against the selected project name; falls back to showing all if no rows match (per spec).
+   216→  * Type filter: looks up item name in stores; only includes rows whose store category matches the selected type (excludes items not in stores when a type is set).
+   217→  * View toggle: By Numbers shows counts via formatNumber; By Value computes value = qty × unitCost (unitCost looked up from stores by item name; 0 if not found) and displays via formatCurrency.
+   218→  * Filters apply to: 3 stat cards (counts ↔ values), trend line chart (qty ↔ value with formatted YAxis + Tooltip), status pie chart (count ↔ value), and the recent activity feed.
+   219→  * Added "Clear" button when any filter is active; EmptyState copy adapts to whether filters are active.
+   220→- Enhancement B — QC Inspection tab (NEW):
+   221→  * Added a 4th tab "QC Inspection" to the CollectionModule Tabs (grid-cols-4, max-w-2xl) with ShieldCheck icon.
+   222→  * QCInspectionTab: 4 top stat cards (Total Inspections, Passed = Satisfactory+Good+Excellent, Failed, Pass Rate %).
+   223→  * "New QC Inspection" button opens QCInspectionDialog (keyed by editing id or "new" so form state resets cleanly on open).
+   224→  * QCInspectionDialog (Create + Edit):
+   225→    - Reference Type Select (Daily Collection / Part Supply Entry / Collection Item) from QC_REF_TYPES; disabled in edit mode.
+   226→    - Reference Select fetches the appropriate endpoint (/api/collection/daily, /api/collection/part-supply, /api/collection/items) based on refType (only in create mode via conditional useFetch URL). Options are flattened/labelled per spec (e.g. `${itemName} — ${qty} ${date} (${receivedFrom})`).
+   227→    - Selecting a reference auto-fills itemName, supplier, qty (all still editable in create mode; read-only in edit mode since PUT only updates qcLevel/officer/remarks).
+   228→    - When refType changes (create mode), the dependent fields are reset in the onValueChange handler (NOT in a useEffect) to satisfy the react-hooks/set-state-in-effect rule.
+   229→    - QC Level Select from QC_LEVELS constant.
+   230→    - QCI Officer Name (required) + QCI Officer Details (optional, e.g. "QC Bay 2").
+   231→    - Remarks Textarea — mandatory when QC Level is "Fail"; shows a red "Remarks required when Fail" hint, red asterisk, and red border when Fail + empty. Submit is blocked client-side with a destructive toast if Fail + empty remarks (also enforced server-side as a 400).
+   232→    - Submit: POST /api/qc (create) or PUT /api/qc/[id] (edit, only sends qcLevel/qcOfficer/qcOfficerDetails/remarks).
+   233→  * Inspections table: Inspected At (formatted date), Item (with refType caption), Supplier, Qty, QC Level badge (uses qcLevelColor from constants), QCI Officer (with details sub-line), Remarks (line-clamp-2), Actions (Edit pencil, Delete trash).
+   234→  * Delete uses an AlertDialog confirmation (red destructive action button) with Loader2 spinner while deleting.
+   235→  * Supplier Rating Summary card: aggregates inspections by supplier, maps levels to numeric (Fail=1, Below Average=2, Satisfactory=3, Good=4, Excellent=5), shows each supplier's average score (e.g. 4.20 / 5.00), count of inspections, color-coded rating badge (supplierRatingColor) + label (supplierRatingLabel), and a Progress bar. Sorted by avg descending.
+   236→- Preserved all existing functionality (Part Supply tab, Daily Collection tab, all dialogs) unchanged.
+   237→- Imports expanded: added Select/SelectContent/SelectItem/SelectTrigger/SelectValue, Textarea, Progress, AlertDialog family, formatCurrency, FILE_CATEGORIES, QC_LEVELS, qcLevelColor, and icons (ShieldCheck, ClipboardCheck, Pencil, Trash2, Loader2, Filter, AlertCircle, Star, X).
+   238→- Ran `bun run lint` — 0 errors, 0 warnings in collection.tsx (and the wider project). Verified /api/qc POST 201 + 400 validation + DELETE 200 via curl. Dev log shows clean compiles with no runtime errors.
+   239→
+   240→Stage Summary:
+   241→- Collection module enhanced in place at /home/z/my-project/src/components/erp/modules/collection.tsx (~3.3k lines).
+   242→- Two new capabilities shipped: (A) Dashboard filter bar with 3 Selects + By Numbers/By Value toggle that re-derives stat cards, trend chart, pie chart, and recent feed; (B) QC Inspection tab with full CRUD (create/edit dialog, delete confirm), 4 stat cards, color-coded QC level badges, and a supplier rating summary that evaluates suppliers on a 1–5 scale.
+   243→- All shared helpers, shadcn primitives, recharts, and the dark theme are reused; no new files created; no new dependencies.
+   244→- Lint-clean and runtime-clean.
+   245→
+   246→---
+   247→Task ID: 1-stakeholders
+   248→Agent: Main (Stakeholders + Item Master foundation)
+   249→Task: Schema/API/AI for Stakeholders, Suppliers, Item Master
+   250→
+   251→Work Log:
+   252→- Added Prisma models: Stakeholder, Supplier, SupplierContact, SupplierNomination, SupplierRating, ItemMaster
+   253→- Created API routes: /api/stakeholders (GET,POST) + [id] (PUT,DELETE); /api/suppliers (GET,POST) + [id] (GET,PUT,DELETE) + nested contacts/nominations/ratings; /api/item-master (GET,POST bulk) + [id] (PUT,DELETE) + [id]/merge (POST consolidate) + /analyze (POST AI dedup)
+   254→- Item Master analyze endpoint uses z-ai-web-dev-sdk for near-duplicate clustering with deterministic fallback (same-name-diff-code, same-code-diff-name)
+   255→- Merge endpoint consolidates duplicates into one canonical code, marks merged records, repoints StoreItems
+   256→- Added constants: CSLOG_APPOINTMENTS, CE_APPOINTMENTS, STAKEHOLDER_DEPARTMENTS/ROLES, AVAILABILITY_STATUSES, availabilityColor, departmentColor, ratingColor, ratingLabel, itemMasterStatusColor, duplicateTypeColor
+   257→- Seeded 9 stakeholders (5 CSLOG, 4 CE), 4 suppliers with contacts/nominations/ratings, 15 item-master entries (with deliberate duplicates: BMS-220/BMS-220A, MT-045/MT-045-PL, PL-118/PL-118-A)
+   258→- Added "Stakeholders" to sidebar nav (Users icon)
+   259→- Database re-seeded successfully
+   260→
+   261→Stage Summary:
+   262→- All backend ready. Frontend needed: Item Code Finder full window (Stores), Stakeholders module (Officers/Sailors + Suppliers dashboard with pop-up)
+   263→- Shared helpers: useFetch, apiRequest, StatCard, badges, PageHeader, states, all new constants
+   264→
+   265→---
+   266→Task ID: 3
+   267→Agent: Stakeholders Module Builder
+   268→Task: Build Stakeholders module (Officers/Sailors + Suppliers dashboard with pop-up)
+   269→
+   270→Work Log:
+   271→- Read worklog.md to absorb project context, shared helpers (StatCard, PageHeader, LoadingState/ErrorState/EmptyState, CustomBadge, useFetch, apiRequest, useToast) and constants (CSLOG_APPOINTMENTS, CE_APPOINTMENTS, STAKEHOLDER_DEPARTMENTS, STAKEHOLDER_ROLES, AVAILABILITY_STATUSES, availabilityColor, departmentColor, ratingColor, ratingLabel).
+   272→- Inspected all relevant API route.ts files for /api/stakeholders (GET/POST/PUT/DELETE), /api/suppliers (GET/POST/GET-by-id/PUT/DELETE), nested /contacts, /nominations, /ratings endpoints to confirm exact request/response shapes.
+   273→- Verified via curl that GET /api/stakeholders returns 9 records (5 CSLOG, 4 CE) and GET /api/suppliers returns 4 suppliers with nested contacts[], nominations[], ratings[] (and computed avgRating/ratingCount).
+   274→- Inspected shadcn primitives (dialog, tabs, select, table, slider, progress, scroll-area, alert-dialog, button) for prop conventions; recharts usage in dashboard.tsx as reference.
+   275→- Created /home/z/my-project/src/components/erp/modules/stakeholders.tsx — named export `StakeholdersModule` with `"use client"` directive.
+   276→- Helpers: digits(), telLink(), waMeLink() (LK-aware: leading-0 numbers → +94), ratingBarColor() (for chart cells), ratingProgressClass() (for breakdown bars), formatDate().
+   277→- Main module: PageHeader + shadcn Tabs ("Officers & Sailors" | "Suppliers").
+   278→- Tab 1 (OfficersSailorsTab):
+   279→  * 4 StatCards (Total Personnel, CSLOG Dept, CE Dept, Available Now) using Users/Anchor/Wrench/ShieldCheck icons.
+   280→  * Filters bar: Search (name/SVC/appointment), Department dropdown, Appointment dropdown (combined CSLOG_APPOINTMENTS + CE_APPOINTMENTS with group separators), Role dropdown, Availability dropdown, Clear button, Add Person button.
+   281→  * Directory table with 10 columns: Name+role, Rank/Rate, Appointment badge (departmentColor), Department badge, SVC Number, Office Number, Telephone (clickable tel:), WhatsApp (clickable wa.me), Availability badge (availabilityColor), Actions (View/Edit/Delete). Row click → View dialog.
+   282→  * StakeholderFormDialog (Add/Edit): 12 fields including name/rankOrRate/svcNumber/appointment/department/officeNumber/telephone/whatsapp/email/availability/role. Department change resets appointment to avoid mismatches. POST/PUT wired.
+   283→  * StakeholderViewDialog: contact card pop-up with avatar, dept/role/availability chips, and a divided contact-rows panel (SVC, Office, Telephone → tel: link, WhatsApp → wa.me link, Email → mailto:). Edit shortcut.
+   284→  * Delete via AlertDialog confirmation → DELETE /api/stakeholders/[id].
+   285→- Tab 2 (SuppliersTab):
+   286→  * 4 StatCards (Total Suppliers, Avg Rating, Top Rated, Under Review <2.5).
+   287→  * Ratings overview BarChart (recharts) with CartesianGrid, sorted desc, each bar colored via Cell + ratingBarColor (emerald/blue/amber/red by score band), X-axis angled -15°, Y-axis 0-5 with 5 ticks.
+   288→  * Filters: search + min-rating Select (0/4.5/3.5/2.5/1.5), Clear button, Add Supplier button.
+   289→  * Suppliers table: Supplier (name + contract details sub-line), Contact Person, Telephone (tel:), WhatsApp (wa.me), Nominated Items count, Avg Rating badge (ratingColor + Star + ratingLabel), Rating Count, Actions.
+   290→  * SupplierFormDialog (Add/Edit): 10 fields including name/contactPerson/telephone/whatsapp/email/address/contractDetails/registrationNo/vatNo/bankDetails.
+   291→  * Delete supplier via AlertDialog → DELETE /api/suppliers/[id].
+   292→- SupplierDetailsDialog (centerpiece, max-w-4xl): fetches /api/suppliers/[id] live (refreshable from inside). Layout:
+   293→  * Header: avatar, supplier name, contact person, overall rating badge.
+   294→  * Section: Contract Details (DetailItem grid for contractDetails, registrationNo, vatNo, bankDetails, address, telephone (tel:), whatsapp (wa.me), email (mailto:)).
+   295→  * Section: Contact Persons — table (Name, Designation, Telephone clickable, WhatsApp clickable, Email mailto:, Primary badge, Delete button). AddContactDialog form (name/designation/telephone/whatsapp/email/isPrimary checkbox) → POST /api/suppliers/[id]/contacts. Delete → DELETE /api/suppliers/[id]/contacts/[cid] with Loader2 spinner.
+   296→  * Section: Nominated Items — responsive grid of cards (item name, code, category badge, hover-reveal delete). AddNominationDialog (itemName*/itemCode/category) → POST /api/suppliers/[id]/nominations. Delete → DELETE /api/suppliers/[id]/nominations/[nid].
+   297→  * Section: Ratings & Evaluation — big overall score tile (ratingColor border), label, count; latest breakdown (5 RatingBar progress bars for QCI/Loyalty/Professionalism/Active Engagement/Values with color-coded fills); history table (Rated At, Rated By, 5 breakdown scores, Overall badge, Remarks line-clamped, Delete); AddRatingDialog with 5 Sliders (min=1 max=5 step=0.1, numeric value shown next to each label, color-coded), live preview of computed overall + ratingLabel, ratedBy + remarks → POST /api/suppliers/[id]/ratings.
+   298→- Reusable Section wrapper (icon + colored tile + title), DetailItem (label/value + optional link), ContactRow (icon + label/value + action link), RatingBar (label + numeric value + colored progress bar), RatingSlider (Slider + numeric value), Field (label + required asterisk) helpers.
+   299→- Wired StakeholdersModule into src/app/page.tsx (`active === "stakeholders" && <StakeholdersModule />`) — nav.ts already had the "stakeholders" ModuleId with Users icon.
+   300→- All mutations call refresh() and surface success/error toasts via useToast.
+   301→- Ran `bun run lint` — 0 errors across the project (including stakeholders.tsx). Verified dev.log shows clean compiles; GET /api/stakeholders and GET /api/suppliers respond 200; POST /api/suppliers/[id]/ratings correctly computes overallScore server-side (verified with test payload then cleaned up).
+   302→- Dark theme tokens (#0f1420 / #1a1f2e / #2d3548 / #3b82f6) honored throughout via bg-card/border-border/text-foreground.
+   303→
+   304→Stage Summary:
+   305→- File created: /home/z/my-project/src/components/erp/modules/stakeholders.tsx (~1.6k lines, single named export `StakeholdersModule`, `"use client"` directive).
+   306→- Two shadcn Tabs: Officers & Sailors directory (stats + filters + clickable table + contact card pop-up + Add/Edit/Delete CRUD); Suppliers directory & ratings dashboard (stats + recharts bar chart + filters + table + Add/Edit/Delete CRUD + comprehensive details pop-up).
+   307→- Centerpiece supplier details pop-up (max-w-4xl) implements a full dashboard layout: contract details, contact persons (CRUD), nominated items (CRUD), ratings & evaluation (big overall score, breakdown bars, history table, Add Rating form with 5 sliders + live preview).
+   308→- All phone numbers wired as clickable `tel:` links; WhatsApp numbers wired as `https://wa.me/<digits>` (LK-aware: leading-0 → +94).
+   309→- Reuses all shared ERP components (StatCard, PageHeader, states, CustomBadge) + constants (departmentColor, availabilityColor, ratingColor, ratingLabel, CSLOG_APPOINTMENTS, CE_APPOINTMENTS, STAKEHOLDER_DEPARTMENTS, STAKEHOLDER_ROLES, AVAILABILITY_STATUSES) + shadcn primitives + recharts (BarChart with per-bar Cell coloring) + lucide-react icons.
+   310→- Lint-clean; runtime-clean; integrates cleanly with AppShell via src/app/page.tsx.
+   311→
+   312→---
+   313→Task ID: 2
+   314→Agent: Item Code Finder Full Window
+   315→Task: Build dedicated full-window Item Code Finder with deduplication + bulk upload
+   316→
+   317→Work Log:
+   318→- Read worklog.md (esp. Task 1-stakeholders) for the new Item Master API routes + constants (itemMasterStatusColor, duplicateTypeColor, STORE_CATEGORIES) and shared ERP components/hook conventions.
+   319→- Read existing /home/z/my-project/src/components/erp/modules/stores.tsx (~2.8k lines) in full to map every existing piece (StoresModule, ZonesTab, StoresTab, ItemFormDialog, BulkUploadDialog, ViewItemDialog, EarmarkItemDialog, EarmarkedItemsDialog, FindItemCodeDialog) — to preserve all functionality and only swap the small FindItemCodeDialog for a full-window.
+   320→- Read /api/item-master (GET/POST bulk), /api/item-master/[id] (PUT/DELETE), /api/item-master/[id]/merge (POST), /api/item-master/analyze (POST) route.ts files to confirm request/response shapes (DuplicateGroup with source: "item-master"|"store-item", zoneName, storeItemId; MergeResponse returns mergedCount + canonicalCode; analyze uses z-ai-web-dev-sdk with deterministic + AI clustering).
+   321→- Read projects/present-position.tsx for the established full-window overlay pattern (fixed inset-0 z-50 bg-background flex flex-col + sticky header with X close + custom tab buttons + scrollable body).
+   322→- Updated imports: added lucide icons Database, GitMerge, Sparkles, Copy; added itemMasterStatusColor + duplicateTypeColor to constants import; added `import { Checkbox } from "@/components/ui/checkbox"`.
+   323→- Added new types after existing types: ItemMasterRecord, DuplicateGroupItem, DuplicateGroup, AnalyzeResponse, MergeResponse (kept old FindCodeCandidate/FindCodeResult types for safety — they are no longer referenced; no-unused-vars is off).
+   324→- Replaced the `<FindItemCodeDialog ... />` JSX block in StoresModule with `<ItemCodeMasterWindow open={findCodeOpen} onOpenChange={setFindCodeOpen} />` — the existing toolbar button "Find Item Codes (AI)" now opens the full window.
+   325→- Removed the entire old FindItemCodeDialog component + EMPTY_CANDIDATE constant + FindItemCodeDialogProps interface via `sed -i '2379,2861d'` (verified clean boundary with EarmarkedItemsDialog above and new content below).
+   326→- Appended new code (~1500 lines) implementing:
+   327→  * ItemCodeMasterWindow — fixed inset-0 overlay with header (title, subtitle, X close) + custom WindowTabButton bar (3 tabs) + scrollable body.
+   328→  * WindowTabButton — tab pill component matching present-position.tsx pattern.
+   329→  * MiniStat — small stat tile reused in all 3 sections.
+   330→  * Section A — ItemMasterDatabaseSection: fetches GET /api/item-master with live query params (search/category/status), 4 stat tiles (Total/Active/Merged/Discontinued), toolbar (search input, category Select from STORE_CATEGORIES minus "All", status Select, Add Item button), table with canonical code (mono highlighted badge), description (with "→ merged into X" sub-line), CategoryBadge, unit, alternate codes/names (muted, truncated), status badge using itemMasterStatusColor, Edit/Delete actions; ItemMasterFormDialog for add/edit (POST /api/item-master or PUT /api/item-master/[id]) with canonicalCode/description/category/unit/alternateCodes/alternateNames/status fields; DELETE with confirm + Loader2 spinner.
+   331→  * Section B — DuplicateAnalysisSection: "Run Duplicate Analysis (AI)" button → POST /api/item-master/analyze with Loader2 spinner + "10-25 seconds" hint; summary tiles (Entries Scanned, Duplicate Groups, Multi-Code/One Item, Same-Code/Near-Dup); groups rendered as cards with type badge using duplicateTypeColor, description, recommendation, items table per group (radio for canonical — disabled for store-item rows with title tooltip; Checkbox for merge — disabled for canonical & store-items; source badge Master/Store; zone column); Merge Selected button → POST /api/item-master/[canonicalId]/merge with {canonicalId, mergeIds} — on success removes the group from the list, shows toast "Merged X items into CODE", refreshes. Auto-initialises selections: first item-master item as canonical, remaining item-master items as merge candidates. Re-run Analysis button. groupKey() helper builds stable key from sorted source-id pairs so selections survive group removal.
+   332→  * Section C — BulkUploadItemMasterSection: intro card with CSV format chips (ItemCode, Description, Category, Unit) + Download CSV Template button (downloadItemMasterTemplate — Blob with 2 sample rows) + file input + Add Manual Row button; preview/edit table (row#, ItemCode, Description, Category Select from FILE_CATEGORIES, Unit, delete) — invalid rows highlighted red; Import button → POST /api/item-master with array (bulk createMany with skipDuplicates); Progress bar + success/skipped counts + error list; Clear button resets rows.
+   333→- Verified lint clean: `bun run lint` → 0 errors. Dev server log shows multiple `✓ Compiled` entries with no errors after edits.
+   334→- Verified API contracts via curl: GET /api/item-master returns the 15 seeded records with expected fields; GET /api/item-master?search=BMS returns 4 matches (BMS-220, BMS-220-SK, BMS-220A, BMS-6204); POST /api/item-master/analyze returns {totalScanned: 32, duplicatesFound: 4, groups: [multi_code_one_item ×2, same_code_diff_name ×1, near_duplicate ×1]} — the seeded BMS-220/BMS-220A duplicate is correctly detected.
+   335→
+   336→Stage Summary:
+   337→- StoresModule enhanced in place at /home/z/my-project/src/components/erp/modules/stores.tsx (~3.9k lines). Component still named `StoresModule` with `"use client"` directive. Only ONE file edited (no new files created).
+   338→- The small FindItemCodeDialog is GONE; the existing "Find Item Codes (AI)" toolbar button now opens a fixed inset-0 full-window overlay titled "Item Code Master & Deduplication" with 3 tabs.
+   339→- Section A (Item Master Database): searchable/filterable table of canonical item records with full CRUD (Add/Edit/Delete) + status badges + alternate codes/names display.
+   340→- Section B (Duplicate Analysis AI): one-click AI scan detects 3 duplicate types (multi-code/one-item, same-code/different-items, AI near-duplicates); per-group consolidation with radio (canonical) + checkboxes (merge targets) → backend merge marks records as Merged + repoints StoreItems.
+   341→- Section C (Bulk Upload): CSV template download + file parse + editable preview + manual row entry + bulk POST with skipDuplicates + progress/error reporting.
+   342→- All existing Stores functionality preserved untouched: Zones tab, Stores tab (filters/sort/pagination), Add/Edit/Bulk Upload store items, View Item, Earmark Item, View Earmarked.
+   343→- Lint-clean, runtime-clean, dev server compiles successfully. Uses only shared ERP components (StatCard, badges, PageHeader, states, useFetch/apiRequest, useToast) + shadcn/ui primitives + lucide-react icons. Dark theme tokens honored throughout. Responsive (mobile-first, flex-wrap toolbars, max-h scroll containers with scrollbar-thin).
+   344→
+   345→---
+   346→Task ID: 1-vote-settings
+   347→Agent: Main (Vote data + Settings + Area Stores foundation)
+   348→Task: Real vote data, project types, area stores, process flows, settings
+   349→
+   350→Work Log:
+   351→- Updated Project model: added projectType (New Construction/Continue/Renovation/Maintenance/General Requirement/Contractual Job), financialMean (Vote/Malima Fund/Non-Public Fund/Contractual)
+   352→- Updated ProjectFile model: added fileNumber, responsiblePerson
+   353→- Updated Stakeholder model: added category (CCED Officer/CCED Sailor/CSLOG Officer/CSLOG Sailor/Officer-in-Area), seniority, areaStoreLocation, subjectClerk, ilmsCced
+   354→- New models: AreaStoreRecord (oncharge NAV 251 / off-charge NAV 255), ProcessFlow, ProcessStep (with financialDelegationLevel, isTenderStage, isEvaluationStage), UserProfile, StoreSetting
+   355→- New API routes: /api/area-stores, /api/process-flows (+steps), /api/settings/users, /api/settings/stores-config
+   356→- Updated /api/projects and /api/projects/[id]/files to handle new fields
+   357→- Seeded 12 real projects from provided vote data (VOTE 223-1-01-2104, 2001, 2506, 1303, 2103, NON-NAVAL with Malima Fund, CONTRACTUAL JOB ENA)
+   358→- Seeded 3 process flows (RC 7 steps, Non-Rate 10 steps with tender+evaluation, ARO Contractual 11 steps with tender opening+negotiation+financial delegation)
+   359→- Seeded area store records (NAV 251 oncharge + NAV 255 off-charge), user profiles, store settings
+   360→- Added constants: PROJECT_TYPES, FINANCIAL_MEANS, AREA_STORES, NAV_REFERENCES, STAKEHOLDER_CATEGORIES, PROCESS_FLOW_TYPES, USER_ROLES + color helpers
+   361→- Added "Settings" to sidebar nav
+   362→
+   363→Stage Summary:
+   364→- All backend ready. Frontend needed: Projects wizard update (Type/financialMean/estimate), Present Position next-position popup with responsible person + file number separation, Stores Area Stores section, Stakeholders categorization, Settings module, Rate Finder non-rate cost finding
+   365→
+   366→---
+   367→Task ID: 5
+   368→Agent: Settings Module Builder
+   369→Task: Build Settings module (User Profiles, Store Config, Process Flows with Financial Delegation)
+   370→
+   371→Work Log:
+   372→- Read worklog.md (esp. Task 1-vote-settings) for context: Prisma models (UserProfile, StoreSetting, ProcessFlow, ProcessStep), API routes (/api/settings/users, /api/settings/stores-config, /api/process-flows + nested steps), constants (USER_ROLES, userRoleColor, PROCESS_FLOW_TYPES, processFlowColor).
+   373→- Inspected shared ERP components (StatCard, PageHeader, LoadingState/ErrorState/EmptyState, CustomBadge), useFetch/apiRequest, useToast, shadcn primitives (Tabs, Dialog, AlertDialog, Select, Table, Checkbox, ScrollArea), and the existing FileLogDialog timeline pattern (file-log.tsx) for the vertical timeline visual reference.
+   374→- Verified API shapes via curl: GET /api/settings/users returns 4 user profiles; GET /api/settings/stores-config returns 7 store configs; GET /api/process-flows returns 3 flows (RC=7 steps, Non-Rate=10 steps, ARO=11 steps) with steps[].{id,flowId,stepOrder,positionName,description,defaultResponsiblePerson,financialDelegationLevel,isTenderStage,isEvaluationStage}.
+   375→- Created /home/z/my-project/src/components/erp/modules/settings.tsx — single named export `SettingsModule` with `"use client"` directive.
+   376→- Main module: PageHeader (Settings icon) + shadcn Tabs ("User Profiles" | "Store Management" | "Process"). Default tab = "process" (the centerpiece).
+   377→- Tab 1 — UserProfilesTab:
+   378→  * 4 StatCards (Total Users, Active, Administrators, Distinct Departments).
+   379→  * Toolbar: search input (username/name/email), Role/Department/Status filters (Select), Clear button, Add User button.
+   380→  * Table (Sr, Username with avatar, Display Name, Email mailto link, Role badge using userRoleColor, Department, Active/Inactive badge, Created date, Edit/Delete actions) wrapped in sticky-header ScrollArea (max-h-60vh).
+   381→  * UserFormDialog (Add/Edit) — keyed remount via `key` prop so form state resets cleanly when editing a different user. Fields: username*, displayName*, email, role (Select from USER_ROLES), department (Select from local DEPARTMENTS constant), active checkbox with live preview badge. POST /api/settings/users, PUT /api/settings/users/[id].
+   382→  * AlertDialog delete confirmation with Loader2 spinner → DELETE /api/settings/users/[id].
+   383→- Tab 2 — StoreManagementTab:
+   384→  * 4 StatCards (Total Stores, Active, Zones count, Area Stores count).
+   385→  * Toolbar: search (name/person/location), Type filter (Zone/AreaStore/Ready-Use/Balance/Project), Status filter, Clear + Add Store.
+   386→  * Table (Sr, Store Name with Warehouse icon, Type badge using local storeTypeColor helper, Responsible Person, Location, Active/Inactive badge, Edit/Delete actions) in sticky-header ScrollArea.
+   387→  * StoreFormDialog (Add/Edit) — storeName*, storeType Select (STORE_TYPES constant with proper labels), responsiblePerson, location, active checkbox. POST /api/settings/stores-config, PUT /api/settings/stores-config/[id].
+   388→  * AlertDialog delete confirm → DELETE /api/settings/stores-config/[id].
+   389→- Tab 3 — ProcessFlowsTab (CENTERPIECE):
+   390→  * Summary banner at top: gradient card with ListTree icon, total flows count + total steps, and inline per-flow breakdown (e.g. "RC (7 steps) · Non-Rate (10 steps) · ARO (Contractual) (11 steps)").
+   391→  * Add Flow button → FlowFormDialog (name Select from PROCESS_FLOW_TYPES with colored dot preview, description Textarea, inline Flow Type Guide card explaining RC/Non-Rate/ARO semantics). POST /api/process-flows, PUT /api/process-flows/[id].
+   392→  * Each flow rendered as a separate card with colored header (processFlowColor via flowAccent helper which returns badge/dot/ring/headerBg/border/text/stepDot classes — RC=emerald, Non-Rate=amber, ARO=violet). Header shows flow name + type badge + step count + Tender/Evaluation/Delegation quick-count badges. Edit Flow / Delete Flow / Add Step buttons.
+   393→  * Body of each flow = vertical timeline (relative pl-10 container with colored vertical line) listing steps sorted by stepOrder.
+   394→  * StepTimelineItem (per-step) renders:
+   395→    - Colored dot on the timeline line (amber if tender, violet if evaluation, flow accent color otherwise).
+   396→    - Card with left border colored by branch type (amber for tender, violet for evaluation).
+   397→    - Step order number badge (flow accent color), position name badge (flow accent color), TENDER (amber) / EVALUATION (violet) tags when flagged, Edit/Delete action buttons.
+   398→    - Description text.
+   399→    - Two-column grid: Default Responsible Person box (neutral) + Financial Delegation Level box (highlighted blue when value is non-trivial — bordered blue-500/40, bg blue-500/5, blue-400 label icon, blue-300 value text).
+   400→    - Branch helper caption ("Tender branch — quotation/tender is called, received and opened at this stage." etc.) for tender/evaluation steps.
+   401→  * StepFormDialog (Add/Edit) — stepOrder (number, defaults to next available), positionName*, description Textarea, defaultResponsiblePerson, financialDelegationLevel, isTenderStage checkbox (amber-styled label card), isEvaluationStage checkbox (violet-styled label card). Live Preview block at bottom showing the badge combinations as they'll appear in the timeline. POST /api/process-flows/[id]/steps, PUT /api/process-flows/[id]/steps/[sid].
+   402→  * AlertDialog delete confirm for both flows and steps (DELETE endpoints).
+   403→- Reusable helpers: Field (label + required asterisk), flowAccent (returns color set for a flow name), storeTypeColor/storeTypeLabel, activeBadgeClass, formatDate.
+   404→- All mutations call refresh() and surface success/destructive toasts via useToast.
+   405→- Dark theme tokens (bg-card / border-border / text-foreground / bg-secondary) honored throughout; responsive (mobile-first, 2→4 col stat grids, 1→2 col form grids, flex-wrap toolbars, sticky-header scroll containers with native ScrollArea).
+   406→- Wired SettingsModule into src/app/page.tsx (import + `{active === "settings" && <SettingsModule />}`).
+   407→- Ran `bun run lint` — 0 errors in settings.tsx or page.tsx (npx eslint on both files returns exit 0). The single remaining lint error is pre-existing in stores.tsx (`AreaStoresTab` is not defined) — unrelated to this task; left untouched per scope.
+   408→- Verified dev.log: all three settings endpoints respond 200 OK; root page `/` compiles and renders (200) with the new module wired in.
+   409→
+   410→Stage Summary:
+   411→- File created: /home/z/my-project/src/components/erp/modules/settings.tsx (~1.4k lines, single named export `SettingsModule`, `"use client"` directive). Wired into src/app/page.tsx.
+   412→- Three shadcn Tabs implemented end-to-end:
+   413→  1) User Profiles — searchable/filterable table + Add/Edit dialog (keyed remount) + AlertDialog delete confirm; full CRUD on /api/settings/users.
+   414→  2) Store Management — searchable/filterable table + Add/Edit dialog + AlertDialog delete confirm; full CRUD on /api/settings/stores-config.
+   415→  3) Process (centerpiece) — summary banner with per-flow breakdown + per-flow colored cards (RC emerald / Non-Rate amber / ARO violet) each containing a vertical timeline of steps with tender (amber) / evaluation (violet) branch flags and prominently highlighted Financial Delegation Level boxes; full CRUD on /api/process-flows + nested /steps endpoints.
+   416→- Process timeline visually distinguishes tender/evaluation branches via colored left-border, colored timeline dot, and inline branch tag captions. Financial delegation levels render in a blue-bordered highlighted box per the spec ("Up to Rs. 2,000,000 — Capt").
+   417→- Reuses all shared ERP components (StatCard, PageHeader, LoadingState/ErrorState/EmptyState, CustomBadge, useFetch, apiRequest, useToast) + constants (USER_ROLES, userRoleColor, PROCESS_FLOW_TYPES, processFlowColor) + shadcn/ui primitives (Tabs, Dialog, AlertDialog, Button, Input, Label, Textarea, Checkbox, Select, Table, ScrollArea) + lucide-react icons.
+   418→- Lint-clean for the new file; runtime-clean; all 3 endpoints verified 200 OK via curl.
+   419→
+   420→---
+   421→Task ID: 2
+   422→Agent: Projects Wizard + Present Position Update
+   423→Task: Add project types, financial means, estimate template, next-position popup with responsible person
+   424→
+   425→Work Log:
+   426→- Read worklog.md (esp. Task 1-vote-settings) for the new Project/ProjectFile fields (projectType, financialMean, fileNumber, responsiblePerson), the ProcessFlow/ProcessStep schema with defaultResponsiblePerson + financialDelegationLevel, and the constants PROJECT_TYPES / FINANCIAL_MEANS / projectTypeColor / financialMeanColor.
+   427→- Read in full: add-project-wizard.tsx, present-position.tsx (~676 lines), initiate-file.tsx, file-log.tsx, projects.tsx, plus the route files for /api/projects (GET/POST), /api/projects/[id]/files (GET/POST), /api/projects/[id]/files/[fileId] (PUT/DELETE), /api/process-flows (GET), /api/stakeholders (GET), /api/estimates/[id]/items/[itemId] (POST initiate). Confirmed backend already persists projectType/financialMean on Project, and fileNumber/authorizedBy/responsiblePerson on ProjectFile (PUT preserves via ?? existing). The initiate-file route was hard-coding authorizedBy: null — fixed.
+   428→- Verified via curl: GET /api/process-flows returns 3 flows with steps[].positionName + defaultResponsiblePerson + financialDelegationLevel; GET /api/stakeholders returns 9 records with category field (some "Officer", some "Sailor"); GET /api/projects returns 12 projects with projectType + financialMean fields; POST /api/projects accepts the new fields (created a test "Maintenance / Malima Fund" project then deleted it).
+   429→- PART A — add-project-wizard.tsx (rewritten):
+   430→  * Form state adds `projectType` (default "New Construction") and `financialMean` (default "Vote"); reset on Go-to-Project also resets these.
+   431→  * Reference field changed from a Select to a manual text Input (label "Reference (how vote allocated)") with placeholder "e.g. Vote 2104 - Allocation 2025".
+   432→  * Added "Project Type" Select (PROJECT_TYPES) with a live CustomBadge using projectTypeColor.
+   433→  * Added "Financial Mean" Select (FINANCIAL_MEANS) with a live CustomBadge using financialMeanColor. When non-Vote selected, the Vote Number field placeholder changes to "NON-NAVAL or CONTRACTUAL" and an amber Info hint appears: "Non-Vote funding — Vote Number can be 'NON-NAVAL' or 'CONTRACTUAL'".
+   434→  * Material Estimate section relabeled "Material Estimate · Mandatory — required to create project material list".
+   435→  * Added "Download Template" button (CSV with header `ItemName,Qty,Unit,EstimateCost` + 1 sample row).
+   436→  * Added "Upload Estimate" button (hidden file input accept=".csv"); robust CSV parser handles quoted fields/commas/newlines; opens a preview Dialog listing parsed rows; "Confirm Import (N rows)" replaces the current estimate rows; toast on import.
+   437→  * "Export Estimate & Process (Step 2)" button is disabled when no valid rows exist (valid = itemName + qty or estimateCost); inline hint "Add estimate items to continue" + tooltip.
+   438→  * onCreated callback typed to include projectType + financialMean; POST body sends the whole form so the backend persists both.
+   439→  * Step 2 (EstimateItemsTable with AI process) and Go-to-Project-Window preserved.
+   440→- PART B — present-position.tsx (full rewrite, ~870 lines):
+   441→  * Imported ProcessFlow/ProcessStep types; added `useFetch<ProcessFlow[]>("/api/process-flows")` and built `positionToResponsible: Map<string, string>` via useMemo (first non-empty defaultResponsiblePerson across all flows).
+   442→  * Added `fileNumberFilter: "all" | "with" | "without"` state; computed fileNumberCounts (all / with / without) and rendered a 3-pill toggle (FilterPill component) next to the position Select. Search now also matches fileNumber.
+   443→  * Added a new "File Number" column to the file register table: green Hash-prefixed mono value when set; amber "Assign File No" inline button when missing (opens the Update Position dialog directly).
+   444→  * Added `updateFile` state + new dedicated **UpdatePositionDialog** component (replaces the simple edit FileFormDialog for edit mode). It shows: a Position Transition panel (current colored box + default-officer hint → arrow → next position Select + default-officer hint), a Responsible Person Input that auto-fills from the process-flow default for the picked next position via `handleNextPositionChange` (no useEffect-setState, lint-clean), File Number Input, Supplier Input, Changed By (required when position changes) + Comment Input. Submit does PUT `/api/projects/[id]/files/[fileId]` with presentPosition/responsiblePerson/fileNumber/supplier/changedBy/comment.
+   445→  * FileFormDialog kept for Add mode (with the optional File Number field added).
+   446→  * Position column now also renders a small responsible-person subtitle (User icon) under the PositionBadge when set.
+   447→  * PR Raised summary, position summary, sort/search/export, delete-confirm, AllocationHistoryDialog, PR-from-Estimate tab all preserved.
+   448→- PART B.3 — initiate-file.tsx (rewritten):
+   449→  * Added `useFetch<Stakeholder[]>("/api/stakeholders")` + useMemo that splits into `officers` (category includes "officer", sorted by seniority then name) and `sailors` (category includes "sailor", sorted by name).
+   450→  * Added "Authorized By (Officer) *" Select (UserCheck icon) — options show `name — rankOrRate (appointment)`; below the Select a confirmation line shows the selected officer's name + appointment + department.
+   451→  * Added "Created By (Sailor) *" Select (User icon) — same pattern.
+   452→  * Both fields required; on submit, sends `createdBy`, `authorizedBy`, and `responsiblePerson` (formatted as "Name (Appointment)") to POST `/api/estimates/[id]/items/[itemId]`.
+   453→- Backend route `/api/estimates/[id]/items/[itemId]` updated: now accepts `authorizedBy` and `responsiblePerson` from body (was hard-coded to null). Both ProjectFile.create and ProcurementFile.create receive them; the FileLog comment appends " · Authorized by X" when set.
+   454→- file-log.tsx ProjectFile interface extended with `fileNumber?: string | null` and `responsiblePerson?: string | null`; FileLogDialog Details grid now shows File Number (placed after File Cost) and Responsible Person (after Authorized By).
+   455→- PART C — projects.tsx:
+   456→  * Project interface extended with `projectType?: string | null` and `financialMean?: string | null`.
+   457→  * Card header right side now stacks up to 3 CustomBadges (flex-wrap, justify-end): Financial Mean (only when !== "Vote" — to highlight Malima/Non-Public/Contractual) using financialMeanColor; Project Type using projectTypeColor; Status (existing projectStatusColor).
+   458→  * Subtitle line updated to: `voteNumber · benefactor · reference · projectType`.
+   459→  * Existing financial breakdown, utilization bar, and footer (files count + EDC) preserved untouched.
+   460→- Ran `bun run lint` — initially 1 warning (unused eslint-disable directive), then 1 error (react-hooks/set-state-in-effect on the useEffect that auto-filled responsible person). Refactored: removed useEffect, moved the auto-fill logic into a `handleNextPositionChange(v)` callback invoked from the Select's onValueChange — this also reads cleaner. Final lint: 0 errors, 0 warnings across the project.
+   461→- Verified dev.log: file compiles cleanly (multiple "✓ Compiled" + 200 responses after edits; no errors). Verified via curl that POST /api/projects persists projectType + financialMean; PUT /api/projects/[id]/files/[fileId] already handles fileNumber + responsiblePerson + authorizedBy per the existing backend.
+   462→
+   463→Stage Summary:
+   464→- 5 frontend files + 1 backend route touched. All components retain their named exports and `"use client"` directive. No new files outside the 3 listed (file-log.tsx + initiate-file.tsx + the backend route were necessary sibling edits to wire up the new fields end-to-end).
+   465→- Projects wizard Step 1 now captures projectType, financialMean, and a manual reference; estimate is mandatory with CSV template download + CSV upload with preview-before-confirm; Step 2 button is disabled until at least one valid estimate row exists.
+   466→- Present Position window has a dedicated "Update Position" popup that shows current → next position side-by-side, auto-fills the responsible person from the Process Flow defaults (with manual override), and lets the user set/update the file number. The file register table separates files with/without a File Number via a 3-pill filter toggle and a dedicated File Number column with an inline "Assign File No" action for pending rows.
+   467→- Initiate File dialog (raised from estimate items) now requires Authorized By (Officer) and Created By (Sailor) — both Selects populated from /api/stakeholders with name + appointment in parentheses. The backend initiate route now persists authorizedBy + responsiblePerson on both ProjectFile and ProcurementFile mirror records.
+   468→- Project cards show projectType + financialMean badges next to the status badge; subtitle includes projectType.
+   469→- Lint-clean; runtime-clean; dev server compiles successfully. Dark theme tokens honored throughout. Uses only shared ERP components + shadcn/ui primitives + lucide-react icons.
+   470→
+   471→---
+   472→Task ID: 3-4
+   473→Agent: Stores Area Stores + Stakeholders Categorization
+   474→Task: Add AREA STORES section to Stores; categorize stakeholders CCED/CSLOG officers & sailors
+   475→
+   476→Work Log:
+   477→- Read worklog.md (esp. Task 1-vote-settings foundation: AreaStoreRecord model + /api/area-stores routes + STAKEHOLDER_CATEGORIES/AREA_STORES/NAV_REFERENCES constants + stakeholderCategoryColor/navRefColor helpers) and constants.ts to confirm available helpers.
+   478→- Read existing stores.tsx (~3.9k lines: StoresModule, ZonesTab, StoresTab, ItemFormDialog, BulkUploadDialog, ViewItemDialog, EarmarkItemDialog, EarmarkedItemsDialog, ItemCodeMasterWindow with 3 internal sections) in full to map every existing piece and preserve it.
+   479→- Read existing stakeholders.tsx (~2.8k lines: StakeholdersModule, OfficersSailorsTab with single directory table, StakeholderFormDialog, StakeholderViewDialog, SuppliersTab with full supplier details pop-up) to plan categorisation without losing Suppliers functionality.
+   480→- Read /api/area-stores (GET with storeName/recordType/navReference/search filters, POST single/array, DELETE) and /api/stakeholders (GET/POST/PUT/DELETE) route.ts files. Found that stakeholders POST/PUT did NOT yet persist the new fields (category, seniority, areaStoreLocation, subjectClerk, ilmsCced) even though the schema had them.
+   481→
+   482→Backend updates (so the frontend has working data):
+   483→- /api/stakeholders/route.ts POST: now persists category, seniority (numeric, null when empty), areaStoreLocation, subjectClerk, ilmsCced. GET now also accepts a `category` query param.
+   484→- /api/stakeholders/[id]/route.ts PUT: same new fields persisted.
+   485→- /api/seed/route.ts: relocated the stakeholder `updateMany` block (category/seniority/areaStoreLocation/subjectClerk/ilmsCced) to run AFTER the `createMany` (it had been running BEFORE — a bug introduced by Task 1-vote-settings that meant the updates hit zero rows). Added 3 extra sailors (LS Perera→Metal, AB Fernando→Paint) and 1 Officer-in-Area (Lt. S. Wijesinghe / AOE → BMS) to make every category demonstrable. Re-seeded → 4 CCED Officers (seniority 1,3,5,6), 3 CSLOG Sailors (area=BMS/General/Metal/Paint), 4 CSLOG Officers (seniority 2,4,7), 1 Officer-in-Area (BMS).
+   486→
+   487→PART A — Stores Area Stores tab (stores.tsx, ~850 new lines):
+   488→- Imports: added Store, ArrowDownToLine, ArrowUpFromLine, FileText icons; added AlertDialog family; added AREA_STORES, AREA_STORE_CATEGORIES, NAV_REFERENCES, navRefColor from constants.
+   489→- Types: added AreaStoreRecord interface + AreaRecordTypeFilter union.
+   490→- StoresModule: tab state extended to "zones" | "stores" | "area"; added third TabsTrigger (Store icon, "Area Stores") and a TabsContent that renders <AreaStoresTab />. ALL existing Zones/Stores functionality (filters/sort/pagination/dialogs/ItemCodeMasterWindow) preserved untouched.
+   491→- AreaStoresTab component:
+   492→  * State: storeFilter, recordTypeFilter, search, addOpen, deleteTarget, deleting.
+   493→  * URL builder (useMemo) — composes /api/area-stores?storeName=…&recordType=…&search=… so the server filters; refetches automatically on every filter change.
+   494→  * Second useFetch of /api/area-stores (unfiltered) to compute always-on per-store summary tiles (Oncharge value, Off-charge value, item count) for ALL 6 area stores — independent of the current filter.
+   495→  * Header strip explaining the NAV 251 (Oncharge via QCI) / NAV 255 (Off-charge to Stores) model.
+   496→  * 6 clickable summary tiles (BMS / Metal / General / Paint / Oil & Lubricant / Stationary) — clicking toggles the store filter; active tile gets primary ring.
+   497→  * 4 aggregate StatCards for current filter: Oncharge Value (green), Off-charge Value (blue), Net Stock Value (amber), Records count (purple).
+   498→  * Filter toolbar: search input, Record Type Select (All / Oncharge (NAV 251) / Off-charge (NAV 255)), Area Store Select (All / 6 stores), Clear button, Export CSV button, Add Record button.
+   499→  * Records table (sticky header, max-h-[60vh] scroll, scrollbar-thin): Item (name + mono code), Category badge, Unit, Qty, Unit Cost, Total Cost, Record Type badge (Oncharge=emerald / Off-charge=blue via recordTypeColor helper), NAV Reference badge (navRefColor), File Number (mono), Location (MapPin badge), Date, Remarks (line-clamp-2), Actions (Delete trash).
+
+[showing lines 200-499 of 1658; use offset=500 with limit to continue reading]

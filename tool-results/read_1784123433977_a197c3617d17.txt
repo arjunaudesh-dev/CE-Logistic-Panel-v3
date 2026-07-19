@@ -1,0 +1,978 @@
+     1→"use client";
+     2→import { useState, useRef } from "react";
+     3→import { useFetch, apiRequest } from "@/lib/use-fetch";
+     4→import { PageHeader } from "@/components/erp/page-header";
+     5→import { StatCard } from "@/components/erp/stat-card";
+     6→import { LoadingState, ErrorState, EmptyState } from "@/components/erp/states";
+     7→import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
+     8→import { PresentPositionDialog } from "./projects/present-position";
+     9→import { AddProjectWizard } from "./projects/add-project-wizard";
+    10→import {
+    11→  FolderKanban,
+    12→  Wallet,
+    13→  TrendingDown,
+    14→  TrendingUp,
+    15→  Plus,
+    16→  FileText,
+    17→  Layers,
+    18→  Sparkles,
+    19→  PieChart as PieChartIcon,
+    20→  Activity,
+    21→  Upload,
+    22→  Download,
+    23→  FileSpreadsheet,
+    24→  Loader2,
+    25→  Check,
+    26→} from "lucide-react";
+    27→import {
+    28→  PieChart,
+    29→  Pie,
+    30→  Cell,
+    31→  Tooltip,
+    32→  ResponsiveContainer,
+    33→  Legend,
+    34→} from "recharts";
+    35→import { Button } from "@/components/ui/button";
+    36→import { Progress } from "@/components/ui/progress";
+    37→import {
+    38→  Dialog,
+    39→  DialogContent,
+    40→  DialogHeader,
+    41→  DialogTitle,
+    42→  DialogFooter,
+    43→  DialogDescription,
+    44→} from "@/components/ui/dialog";
+    45→import {
+    46→  Table,
+    47→  TableBody,
+    48→  TableCell,
+    49→  TableHead,
+    50→  TableHeader,
+    51→  TableRow,
+    52→} from "@/components/ui/table";
+    53→import { ModuleId } from "../nav";
+    54→import {
+    55→  formatCurrency,
+    56→  PROJECT_TYPES,
+    57→  PROJECT_STATUSES,
+    58→  FINANCIAL_MEANS,
+    59→  projectStatusColor,
+    60→  utilizationColor,
+    61→  projectTypeColor,
+    62→  financialMeanColor,
+    63→} from "@/lib/constants";
+    64→import { useToast } from "@/hooks/use-toast";
+    65→import { cn } from "@/lib/utils";
+    66→
+    67→// Donut palette — distinct, accessible in both light & dark themes.
+    68→const DONUT_COLORS = [
+    69→  "#3b82f6", // blue
+    70→  "#f59e0b", // amber
+    71→  "#8b5cf6", // violet
+    72→  "#64748b", // slate
+    73→  "#22c55e", // emerald
+    74→  "#ec4899", // pink
+    75→  "#06b6d4", // cyan
+    76→  "#ef4444", // red
+    77→];
+    78→
+    79→// Buckets for the by-type donut — uses the standard PROJECT_TYPES ordering.
+    80→const TYPE_BUCKET_DEFS: { name: string; color: string }[] = [
+    81→  { name: "New Construction", color: "#3b82f6" },
+    82→  { name: "Renovation", color: "#f59e0b" },
+    83→  { name: "Maintenance", color: "#8b5cf6" },
+    84→  { name: "General Requirement", color: "#64748b" },
+    85→  { name: "Contractual Job", color: "#22c55e" },
+    86→  { name: "Continue", color: "#06b6d4" },
+    87→];
+    88→
+    89→const STATUS_BUCKET_DEFS: { name: string; color: string }[] = [
+    90→  { name: "Active", color: "#22c55e" },
+    91→  { name: "On Hold", color: "#f59e0b" },
+    92→  { name: "Completed", color: "#3b82f6" },
+    93→  { name: "Cancelled", color: "#ef4444" },
+    94→];
+    95→
+    96→interface ProjectFile {
+    97→  id: string;
+    98→  prNumber: string;
+    99→  itemCode: string;
+   100→  itemName: string;
+   101→  unit: string;
+   102→  qty: number;
+   103→  unitPrice: number;
+   104→  fileCost: number;
+   105→  supplier: string | null;
+   106→  presentPosition: string;
+   107→  fileCategory: string;
+   108→  createdBy: string | null;
+   109→  authorizedBy: string | null;
+   110→  createdAt: string;
+   111→  logs?: FileLog[];
+   112→}
+   113→
+   114→interface FileLog {
+   115→  id: string;
+   116→  oldPosition: string | null;
+   117→  newPosition: string;
+   118→  changedBy: string | null;
+   119→  comment: string | null;
+   120→  changedAt: string;
+   121→}
+   122→
+   123→interface Allocation {
+   124→  id: string;
+   125→  date: string;
+   126→  description: string;
+   127→  amount: number;
+   128→  type: string;
+   129→  authorizedBy: string | null;
+   130→}
+   131→
+   132→interface Project {
+   133→  id: string;
+   134→  name: string;
+   135→  nameAbbreviation?: string | null;
+   136→  voteNumber: string;
+   137→  voteAllocation: number;
+   138→  committed: number;
+   139→  actualSpent: number;
+   140→  startDate: string | null;
+   141→  endDate: string | null;
+   142→  department: string | null;
+   143→  benefactor: string | null;
+   144→  reference: string | null;
+   145→  projectType?: string | null;
+   146→  financialMean?: string | null;
+   147→  projectOfficer: string | null;
+   148→  status: string;
+   149→  description: string | null;
+   150→  fileCount?: number;
+   151→  committedFiles?: number;
+   152→  balance?: number;
+   153→  utilization?: number;
+   154→}
+   155→
+   156→// ─── Bulk Upload CSV row schema ───
+   157→// The columns below match the pp.csv template header exactly. Optional columns
+   158→// are coerced / defaulted during import.
+   159→interface BulkProjectRow {
+   160→  ProjectName: string;
+   161→  NameAbbreviation: string;
+   162→  VoteNumber: string;
+   163→  ProjectType: string;
+   164→  FinancialMean: string;
+   165→  VoteAllocation: string;
+   166→  Benefactor: string;
+   167→  ProjectOfficer: string;
+   168→  StartDate: string;
+   169→  EndDate: string;
+   170→  Status: string;
+   171→  Description: string;
+   172→}
+   173→
+   174→const BULK_CSV_COLUMNS: (keyof BulkProjectRow)[] = [
+   175→  "ProjectName",
+   176→  "NameAbbreviation",
+   177→  "VoteNumber",
+   178→  "ProjectType",
+   179→  "FinancialMean",
+   180→  "VoteAllocation",
+   181→  "Benefactor",
+   182→  "ProjectOfficer",
+   183→  "StartDate",
+   184→  "EndDate",
+   185→  "Status",
+   186→  "Description",
+   187→];
+   188→
+   189→export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => void }) {
+   190→  const { data: projects, loading, error, refresh } = useFetch<Project[]>("/api/projects");
+   191→  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+   192→  const [addOpen, setAddOpen] = useState(false);
+   193→  const [bulkOpen, setBulkOpen] = useState(false);
+   194→  const { toast } = useToast();
+   195→
+   196→  if (loading) return <LoadingState label="Loading projects..." />;
+   197→  if (error) return <ErrorState message={error} />;
+   198→
+   199→  const totalVote = projects?.reduce((s, p) => s + p.voteAllocation, 0) ?? 0;
+   200→  const totalCommitted = projects?.reduce((s, p) => s + p.committed, 0) ?? 0;
+   201→  const totalSpent = projects?.reduce((s, p) => s + p.actualSpent, 0) ?? 0;
+   202→  const activeCount = projects?.filter((p) => p.status === "Active").length ?? 0;
+   203→  const totalFiles = projects?.reduce((s, p) => s + (p.fileCount || 0), 0) ?? 0;
+   204→
+   205→  // ── Donut 1: Projects by Type ──
+   206→  // Each defined bucket gets a slice (count of projects of that type).
+   207→  const typeData = TYPE_BUCKET_DEFS.map((b) => ({
+   208→    name: b.name,
+   209→    value: (projects ?? []).filter((p) => p.projectType === b.name).length,
+   210→    color: b.color,
+   211→  })).filter((d) => d.value > 0);
+   212→  const totalTyped = typeData.reduce((s, d) => s + d.value, 0);
+   213→
+   214→  // ── Donut 2: Projects by Status ──
+   215→  const statusData = STATUS_BUCKET_DEFS.map((b) => ({
+   216→    name: b.name,
+   217→    value: (projects ?? []).filter((p) => p.status === b.name).length,
+   218→    color: b.color,
+   219→  })).filter((d) => d.value > 0);
+   220→  const totalStatused = statusData.reduce((s, d) => s + d.value, 0);
+   221→
+   222→  return (
+   223→    <div>
+   224→      <PageHeader
+   225→        title="Projects"
+   226→        description="Vote allocations, file registers & present position tracking"
+   227→        icon={FolderKanban}
+   228→        actions={
+   229→          <div className="flex flex-wrap items-center gap-2">
+   230→            <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5">
+   231→              <Upload className="h-4 w-4" /> Upload Bulk
+   232→            </Button>
+   233→            <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
+   234→              <Sparkles className="h-4 w-4" /> Add Project (Estimate)
+   235→            </Button>
+   236→          </div>
+   237→        }
+   238→      />
+   239→
+   240→      {/* Summary cards */}
+   241→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+   242→        <StatCard label="Total Vote Allocation" value={formatCurrency(totalVote)} icon={Wallet} accent="blue" />
+   243→        <StatCard label="Total Committed" value={formatCurrency(totalCommitted)} icon={TrendingUp} accent="amber" />
+   244→        <StatCard label="Total Actual Spent" value={formatCurrency(totalSpent)} icon={TrendingDown} accent="red" />
+   245→        <StatCard label="Active Projects" value={activeCount} icon={FolderKanban} accent="green" sub={`${totalFiles} files`} />
+   246→      </div>
+   247→
+   248→      {/* Donut charts: Projects by Type + Projects by Status */}
+   249→      {projects && projects.length > 0 && (
+   250→        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+   251→          {/* Donut — Projects by Type */}
+   252→          <div className="bg-card border border-border rounded-xl p-5">
+   253→            <div className="flex items-center gap-2 mb-1">
+   254→              <PieChartIcon className="h-4 w-4 text-primary" />
+   255→              <h3 className="text-sm font-semibold text-foreground">
+   256→                Projects by Type
+   257→              </h3>
+   258→            </div>
+   259→            <p className="text-xs text-muted-foreground mb-3">
+   260→              Distribution of projects across the project-type categories
+   261→            </p>
+   262→            {totalTyped > 0 ? (
+   263→              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-center gap-4">
+   264→                <div className="relative">
+   265→                  <ResponsiveContainer width="100%" height={260}>
+   266→                    <PieChart>
+   267→                      <Pie
+   268→                        data={typeData}
+   269→                        dataKey="value"
+   270→                        nameKey="name"
+   271→                        cx="50%"
+   272→                        cy="50%"
+   273→                        innerRadius={55}
+   274→                        outerRadius={90}
+   275→                        paddingAngle={3}
+   276→                        label={({ value }: { value?: number }) =>
+   277→                          value != null ? `${value}` : ""
+   278→                        }
+   279→                        labelLine={false}
+   280→                      >
+   281→                        {typeData.map((entry, i) => (
+   282→                          <Cell
+   283→                            key={`type-${i}`}
+   284→                            fill={entry.color}
+   285→                            stroke="var(--background, #0f1420)"
+   286→                            strokeWidth={2}
+   287→                          />
+   288→                        ))}
+   289→                      </Pie>
+   290→                      <Tooltip
+   291→                        contentStyle={{
+   292→                          background: "var(--card, #1a1f2e)",
+   293→                          border: "1px solid var(--border, #2d3548)",
+   294→                          borderRadius: 8,
+   295→                          fontSize: 12,
+   296→                        }}
+   297→                        formatter={(value: number, name: string) => {
+   298→                          const pct = totalTyped > 0 ? ((value / totalTyped) * 100).toFixed(1) : "0.0";
+   299→                          return [`${value} project${value === 1 ? "" : "s"} · ${pct}%`, name];
+   300→                        }}
+   301→                      />
+   302→                    </PieChart>
+   303→                  </ResponsiveContainer>
+   304→                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+   305→                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   306→                      Total
+   307→                    </span>
+   308→                    <span className="text-2xl font-bold text-foreground leading-tight">
+   309→                      {totalTyped}
+   310→                    </span>
+   311→                    <span className="text-[10px] text-muted-foreground mt-0.5">
+   312→                      {typeData.length} type{typeData.length === 1 ? "" : "s"}
+   313→                    </span>
+   314→                  </div>
+   315→                </div>
+   316→                {/* Legend with values + percentages */}
+   317→                <ul className="space-y-1.5 min-w-[180px]">
+   318→                  {typeData.map((d) => {
+   319→                    const pct = totalTyped > 0 ? ((d.value / totalTyped) * 100).toFixed(1) : "0.0";
+   320→                    return (
+   321→                      <li key={d.name} className="flex items-center gap-2 text-xs">
+   322→                        <span
+   323→                          className="h-2.5 w-2.5 rounded-full shrink-0"
+   324→                          style={{ background: d.color }}
+   325→                        />
+   326→                        <span className="text-foreground flex-1 truncate">{d.name}</span>
+   327→                        <span className="font-semibold text-foreground tabular-nums">{d.value}</span>
+   328→                        <span className="text-muted-foreground tabular-nums w-12 text-right">{pct}%</span>
+   329→                      </li>
+   330→                    );
+   331→                  })}
+   332→                </ul>
+   333→              </div>
+   334→            ) : (
+   335→              <p className="text-sm text-muted-foreground py-10 text-center">
+   336→                No typed projects yet
+   337→              </p>
+   338→            )}
+   339→          </div>
+   340→
+   341→          {/* Donut — Projects by Status */}
+   342→          <div className="bg-card border border-border rounded-xl p-5">
+   343→            <div className="flex items-center gap-2 mb-1">
+   344→              <Activity className="h-4 w-4 text-primary" />
+   345→              <h3 className="text-sm font-semibold text-foreground">
+   346→                Projects by Status
+   347→              </h3>
+   348→            </div>
+   349→            <p className="text-xs text-muted-foreground mb-3">
+   350→              Active / On Hold / Completed / Cancelled distribution
+   351→            </p>
+   352→            {totalStatused > 0 ? (
+   353→              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-center gap-4">
+   354→                <div className="relative">
+   355→                  <ResponsiveContainer width="100%" height={260}>
+   356→                    <PieChart>
+   357→                      <Pie
+   358→                        data={statusData}
+   359→                        dataKey="value"
+   360→                        nameKey="name"
+   361→                        cx="50%"
+   362→                        cy="50%"
+   363→                        innerRadius={55}
+   364→                        outerRadius={90}
+   365→                        paddingAngle={3}
+   366→                        label={({ value }: { value?: number }) =>
+   367→                          value != null ? `${value}` : ""
+   368→                        }
+   369→                        labelLine={false}
+   370→                      >
+   371→                        {statusData.map((entry, i) => (
+   372→                          <Cell
+   373→                            key={`status-${i}`}
+   374→                            fill={entry.color}
+   375→                            stroke="var(--background, #0f1420)"
+   376→                            strokeWidth={2}
+   377→                          />
+   378→                        ))}
+   379→                      </Pie>
+   380→                      <Tooltip
+   381→                        contentStyle={{
+   382→                          background: "var(--card, #1a1f2e)",
+   383→                          border: "1px solid var(--border, #2d3548)",
+   384→                          borderRadius: 8,
+   385→                          fontSize: 12,
+   386→                        }}
+   387→                        formatter={(value: number, name: string) => {
+   388→                          const pct = totalStatused > 0 ? ((value / totalStatused) * 100).toFixed(1) : "0.0";
+   389→                          return [`${value} project${value === 1 ? "" : "s"} · ${pct}%`, name];
+   390→                        }}
+   391→                      />
+   392→                    </PieChart>
+   393→                  </ResponsiveContainer>
+   394→                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+   395→                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   396→                      Total
+   397→                    </span>
+   398→                    <span className="text-2xl font-bold text-foreground leading-tight">
+   399→                      {totalStatused}
+   400→                    </span>
+   401→                    <span className="text-[10px] text-muted-foreground mt-0.5">
+   402→                      {statusData.length} status{statusData.length === 1 ? "" : "es"}
+   403→                    </span>
+   404→                  </div>
+   405→                </div>
+   406→                <ul className="space-y-1.5 min-w-[180px]">
+   407→                  {statusData.map((d) => {
+   408→                    const pct = totalStatused > 0 ? ((d.value / totalStatused) * 100).toFixed(1) : "0.0";
+   409→                    return (
+   410→                      <li key={d.name} className="flex items-center gap-2 text-xs">
+   411→                        <span
+   412→                          className="h-2.5 w-2.5 rounded-full shrink-0"
+   413→                          style={{ background: d.color }}
+   414→                        />
+   415→                        <span className="text-foreground flex-1 truncate">{d.name}</span>
+   416→                        <span className="font-semibold text-foreground tabular-nums">{d.value}</span>
+   417→                        <span className="text-muted-foreground tabular-nums w-12 text-right">{pct}%</span>
+   418→                      </li>
+   419→                    );
+   420→                  })}
+   421→                </ul>
+   422→              </div>
+   423→            ) : (
+   424→              <p className="text-sm text-muted-foreground py-10 text-center">
+   425→                No statused projects yet
+   426→              </p>
+   427→            )}
+   428→          </div>
+   429→        </div>
+   430→      )}
+   431→
+   432→      {/* Project cards */}
+   433→      {!projects || projects.length === 0 ? (
+   434→        <EmptyState
+   435→          icon={FolderKanban}
+   436→          title="No projects yet"
+   437→          description="Create your first project to start managing vote allocations and procurement files."
+   438→          action={
+   439→            <div className="flex flex-wrap items-center gap-2 justify-center">
+   440→              <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5">
+   441→                <Upload className="h-4 w-4" /> Upload Bulk
+   442→              </Button>
+   443→              <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
+   444→                <Sparkles className="h-4 w-4" /> Add Project (Estimate)
+   445→              </Button>
+   446→            </div>
+   447→          }
+   448→        />
+   449→      ) : (
+   450→        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   451→          {projects.map((p) => {
+   452→            const util = p.utilization ?? 0;
+   453→            return (
+   454→              <div
+   455→                key={p.id}
+   456→                onClick={() => setSelectedProject(p)}
+   457→                className="bg-card border border-border rounded-xl p-5 cursor-pointer hover:border-primary/50 transition-all group"
+   458→              >
+   459→                <div className="flex items-start justify-between gap-2 mb-3">
+   460→                  <div className="min-w-0">
+   461→                    <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate flex items-center gap-2">
+   462→                      {p.name}
+   463→                      {p.nameAbbreviation && (
+   464→                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+   465→                          {p.nameAbbreviation}
+   466→                        </span>
+   467→                      )}
+   468→                    </h3>
+   469→                    <p className="text-xs text-muted-foreground mt-0.5">
+   470→                      {p.voteNumber}
+   471→                      {p.benefactor ? ` · ${p.benefactor}` : p.department ? ` · ${p.department}` : ""}
+   472→                      {p.reference ? ` · ${p.reference}` : ""}
+   473→                      {p.projectType ? ` · ${p.projectType}` : ""}
+   474→                    </p>
+   475→                  </div>
+   476→                  <div className="flex flex-wrap items-center gap-1 justify-end shrink-0">
+   477→                    {p.financialMean && p.financialMean !== "Vote" && (
+   478→                      <CustomBadge className={cn("border", financialMeanColor(p.financialMean))}>
+   479→                        {p.financialMean}
+   480→                      </CustomBadge>
+   481→                    )}
+   482→                    {p.projectType && (
+   483→                      <CustomBadge className={cn("border", projectTypeColor(p.projectType))}>
+   484→                        {p.projectType}
+   485→                      </CustomBadge>
+   486→                    )}
+   487→                    <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
+   488→                      {p.status}
+   489→                    </CustomBadge>
+   490→                  </div>
+   491→                </div>
+   492→
+   493→                {/* Financial breakdown */}
+   494→                <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+   495→                  <div className="bg-secondary/50 rounded-lg py-2">
+   496→                    <p className="text-[10px] text-muted-foreground uppercase">Budget</p>
+   497→                    <p className="text-sm font-semibold text-foreground">
+   498→                      {formatCurrency(p.voteAllocation)}
+   499→                    </p>
+   500→                  </div>
+   501→                  <div className="bg-secondary/50 rounded-lg py-2">
+   502→                    <p className="text-[10px] text-muted-foreground uppercase">Committed</p>
+   503→                    <p className="text-sm font-semibold text-amber-400">
+   504→                      {formatCurrency(p.committed)}
+   505→                    </p>
+   506→                  </div>
+   507→                  <div className="bg-secondary/50 rounded-lg py-2">
+   508→                    <p className="text-[10px] text-muted-foreground uppercase">Balance</p>
+   509→                    <p className="text-sm font-semibold text-emerald-400">
+   510→                      {formatCurrency(p.balance ?? p.voteAllocation - p.actualSpent)}
+   511→                    </p>
+   512→                  </div>
+   513→                </div>
+   514→
+   515→                {/* Utilization */}
+   516→                <div className="mb-3">
+   517→                  <div className="flex items-center justify-between mb-1">
+   518→                    <span className="text-xs text-muted-foreground">Utilization</span>
+   519→                    <span className="text-xs font-medium text-foreground">{util.toFixed(0)}%</span>
+   520→                  </div>
+   521→                  <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+   522→                    <div
+   523→                      className={cn("h-full rounded-full transition-all", utilizationColor(util))}
+   524→                      style={{ width: `${Math.min(util, 100)}%` }}
+   525→                    />
+   526→                  </div>
+   527→                </div>
+   528→
+   529→                {/* Footer */}
+   530→                <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
+   531→                  <span className="flex items-center gap-1">
+   532→                    <FileText className="h-3.5 w-3.5" />
+   533→                    {p.fileCount || 0} files
+   534→                  </span>
+   535→                  <span className="flex items-center gap-1">
+   536→                    <Layers className="h-3.5 w-3.5" />
+   537→                    EDC: {p.endDate ? new Date(p.endDate).toLocaleDateString("en-GB") : "—"}
+   538→                  </span>
+   539→                </div>
+   540→              </div>
+   541→            );
+   542→          })}
+   543→        </div>
+   544→      )}
+   545→
+   546→      {/* Present Position Dialog */}
+   547→      {selectedProject && (
+   548→        <PresentPositionDialog
+   549→          project={selectedProject}
+   550→          open={!!selectedProject}
+   551→          onOpenChange={(o) => !o && setSelectedProject(null)}
+   552→          onChanged={refresh}
+   553→        />
+   554→      )}
+   555→
+   556→      {/* Add Project Wizard (Step 1 + Step 2) */}
+   557→      <AddProjectWizard
+   558→        open={addOpen}
+   559→        onClose={() => setAddOpen(false)}
+   560→        onCreated={(project) => {
+   561→          setAddOpen(false);
+   562→          toast({ title: "Project created & estimate processed" });
+   563→          refresh();
+   564→          // open the present position window for the new project
+   565→          setSelectedProject(project as Project);
+   566→        }}
+   567→      />
+   568→
+   569→      {/* Bulk Upload Dialog (pp.csv template) */}
+   570→      <BulkUploadDialog
+   571→        open={bulkOpen}
+   572→        onOpenChange={setBulkOpen}
+   573→        onImported={() => {
+   574→          setBulkOpen(false);
+   575→          refresh();
+   576→        }}
+   577→      />
+   578→    </div>
+   579→  );
+   580→}
+   581→
+   582→// ─── Bulk Upload Dialog — pp.csv template ───
+   583→// Provides a downloadable CSV template, parses the uploaded CSV, previews rows,
+   584→// then POSTs each row to /api/projects sequentially with live progress + counts.
+   585→function BulkUploadDialog({
+   586→  open,
+   587→  onOpenChange,
+   588→  onImported,
+   589→}: {
+   590→  open: boolean;
+   591→  onOpenChange: (o: boolean) => void;
+   592→  onImported: () => void;
+   593→}) {
+   594→  const fileInputRef = useRef<HTMLInputElement>(null);
+   595→  const [rows, setRows] = useState<BulkProjectRow[] | null>(null);
+   596→  const [importing, setImporting] = useState(false);
+   597→  const [progress, setProgress] = useState(0);
+   598→  const [successCount, setSuccessCount] = useState(0);
+   599→  const [errorCount, setErrorCount] = useState(0);
+   600→  const [errors, setErrors] = useState<string[]>([]);
+   601→  const { toast } = useToast();
+   602→
+   603→  const downloadTemplate = () => {
+   604→    // Sample row demonstrates the format — Type/Status must match the
+   605→    // controlled-vocabulary constants used by the wizard.
+   606→    const header = BULK_CSV_COLUMNS.join(",");
+   607→    const sample = [
+   608→      "No.03 Slipway Hangar",
+   609→      "NSH",
+   610→      "223-1-01-2104",
+   611→      "New Construction",
+   612→      "Vote/Funds",
+   613→      "50000000",
+   614→      "Engineering Dept",
+   615→      "Cdr. R. Perera",
+   616→      "2025-01-15",
+   617→      "2026-12-31",
+   618→      "Active",
+   619→      "Construction of a new slipway hangar for naval dockyard",
+   620→    ].map(csvEscape).join(",");
+   621→    const sample2 = [
+   622→      "Engine Fire Suppression",
+   623→      "EFS",
+   624→      "NON-NAVAL",
+   625→      "Maintenance",
+   626→      "Malima Fund",
+   627→      "8500000",
+   628→      "Malima Fund",
+   629→      "Lt. Cdr. S. Bandara",
+   630→      "2025-03-01",
+   631→      "2025-09-30",
+   632→      "Active",
+   633→      "Refit of engine fire suppression system",
+   634→    ].map(csvEscape).join(",");
+   635→    const csv = `${header}\n${sample}\n${sample2}\n`;
+   636→    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+   637→    const url = URL.createObjectURL(blob);
+   638→    const a = document.createElement("a");
+   639→    a.href = url;
+   640→    a.download = "pp.csv";
+   641→    a.click();
+   642→    URL.revokeObjectURL(url);
+   643→    toast({
+   644→      title: "Template downloaded",
+   645→      description: `Columns: ${BULK_CSV_COLUMNS.join(", ")}`,
+   646→    });
+   647→  };
+   648→
+   649→  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   650→    const file = e.target.files?.[0];
+   651→    if (!file) return;
+   652→    if (!file.name.toLowerCase().endsWith(".csv")) {
+   653→      toast({ title: "Please upload a CSV file", variant: "destructive" });
+   654→      e.target.value = "";
+   655→      return;
+   656→    }
+   657→    try {
+   658→      const text = await file.text();
+   659→      const parsed = parseCsv(text);
+   660→      if (parsed.length === 0) {
+   661→        toast({ title: "CSV file is empty", variant: "destructive" });
+   662→        e.target.value = "";
+   663→        return;
+   664→      }
+   665→      // Find columns by header name (case-insensitive, space-insensitive)
+   666→      const header = parsed[0].map((c) => c.trim().toLowerCase().replace(/\s+/g, ""));
+   667→      const colIndex: Record<keyof BulkProjectRow, number> = {
+   668→        ProjectName: header.findIndex((h) => h === "projectname" || h.includes("projectname")),
+   669→        NameAbbreviation: header.findIndex((h) => h === "nameabbreviation" || h.includes("abbreviation") || h === "abbrev"),
+   670→        VoteNumber: header.findIndex((h) => h === "votenumber" || h.includes("votenumber")),
+   671→        ProjectType: header.findIndex((h) => h === "projecttype" || h.includes("projecttype")),
+   672→        FinancialMean: header.findIndex((h) => h === "financialmean" || h.includes("financialmean") || h.includes("financial")),
+   673→        VoteAllocation: header.findIndex((h) => h === "voteallocation" || h.includes("allocation") || h.includes("budget")),
+   674→        Benefactor: header.findIndex((h) => h === "benefactor" || h.includes("benefactor") || h.includes("department")),
+   675→        ProjectOfficer: header.findIndex((h) => h === "projectofficer" || h.includes("officer")),
+   676→        StartDate: header.findIndex((h) => h === "startdate" || h.includes("startdate") || h.includes("start")),
+   677→        EndDate: header.findIndex((h) => h === "enddate" || h.includes("enddate") || h === "edc" || h.includes("edc")),
+   678→        Status: header.findIndex((h) => h === "status" || h.includes("status")),
+   679→        Description: header.findIndex((h) => h === "description" || h.includes("description") || h.includes("desc")),
+   680→      };
+   681→      const dataRows = parsed.slice(1);
+   682→      const mapped: BulkProjectRow[] = dataRows
+   683→        .map((r) => {
+   684→          const get = (k: keyof BulkProjectRow) => {
+   685→            const idx = colIndex[k];
+   686→            return idx >= 0 ? (r[idx] || "").trim() : "";
+   687→          };
+   688→          return {
+   689→            ProjectName: get("ProjectName"),
+   690→            NameAbbreviation: get("NameAbbreviation"),
+   691→            VoteNumber: get("VoteNumber"),
+   692→            ProjectType: get("ProjectType"),
+   693→            FinancialMean: get("FinancialMean"),
+   694→            VoteAllocation: get("VoteAllocation"),
+   695→            Benefactor: get("Benefactor"),
+   696→            ProjectOfficer: get("ProjectOfficer"),
+   697→            StartDate: get("StartDate"),
+   698→            EndDate: get("EndDate"),
+   699→            Status: get("Status"),
+   700→            Description: get("Description"),
+   701→          };
+   702→        })
+   703→        .filter((r) => r.ProjectName);
+   704→      if (mapped.length === 0) {
+   705→        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+   706→        e.target.value = "";
+   707→        return;
+   708→      }
+   709→      setRows(mapped);
+   710→      setSuccessCount(0);
+   711→      setErrorCount(0);
+   712→      setErrors([]);
+   713→      setProgress(0);
+   714→    } catch {
+   715→      toast({ title: "Failed to read CSV file", variant: "destructive" });
+   716→    }
+   717→    e.target.value = "";
+   718→  };
+   719→
+   720→  const runImport = async () => {
+   721→    if (!rows || rows.length === 0) return;
+   722→    setImporting(true);
+   723→    setSuccessCount(0);
+   724→    setErrorCount(0);
+   725→    setErrors([]);
+   726→    setProgress(0);
+   727→    let ok = 0;
+   728→    let fail = 0;
+   729→    const errs: string[] = [];
+   730→    for (let i = 0; i < rows.length; i++) {
+   731→      const r = rows[i]!;
+   732→      // Build the API payload — defaults to safe values when missing
+   733→      const payload: Record<string, unknown> = {
+   734→        name: r.ProjectName,
+   735→        nameAbbreviation: r.NameAbbreviation || null,
+   736→        voteNumber: r.VoteNumber || "NON-NAVAL",
+   737→        voteAllocation: Number(r.VoteAllocation) || 0,
+   738→        committed: 0,
+   739→        actualSpent: 0,
+   740→        startDate: r.StartDate || null,
+   741→        endDate: r.EndDate || null,
+   742→        benefactor: r.Benefactor || null,
+   743→        projectType: PROJECT_TYPES.includes(r.ProjectType as typeof PROJECT_TYPES[number])
+   744→          ? r.ProjectType
+   745→          : "New Construction",
+   746→        financialMean: FINANCIAL_MEANS.includes(r.FinancialMean as typeof FINANCIAL_MEANS[number])
+   747→          ? r.FinancialMean
+   748→          : "Vote/Funds",
+   749→        projectOfficer: r.ProjectOfficer || null,
+   750→        status: PROJECT_STATUSES.includes(r.Status as typeof PROJECT_STATUSES[number])
+   751→          ? r.Status
+   752→          : "Active",
+   753→        description: r.Description || null,
+   754→      };
+   755→      const res = await apiRequest("/api/projects", "POST", payload);
+   756→      if (res.ok) {
+   757→        ok++;
+   758→      } else {
+   759→        fail++;
+   760→        errs.push(`Row ${i + 1} (${r.ProjectName}): ${res.error || "Failed"}`);
+   761→      }
+   762→      setSuccessCount(ok);
+   763→      setErrorCount(fail);
+   764→      setErrors([...errs]);
+   765→      setProgress(Math.round(((i + 1) / rows.length) * 100));
+   766→    }
+   767→    setImporting(false);
+   768→    if (fail === 0) {
+   769→      toast({
+   770→        title: `Imported ${ok} project${ok === 1 ? "" : "s"}`,
+   771→        description: "All rows imported successfully",
+   772→      });
+   773→      onImported();
+   774→      setRows(null);
+   775→    } else {
+   776→      toast({
+   777→        title: `Imported ${ok} of ${rows.length} projects`,
+   778→        description: `${fail} failed — see error list`,
+   779→        variant: "destructive",
+   780→      });
+   781→    }
+   782→  };
+   783→
+   784→  const close = () => {
+   785→    if (importing) return;
+   786→    onOpenChange(false);
+   787→    setRows(null);
+   788→    setSuccessCount(0);
+   789→    setErrorCount(0);
+   790→    setErrors([]);
+   791→    setProgress(0);
+   792→  };
+   793→
+   794→  return (
+   795→    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+   796→      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto scrollbar-thin bg-card border-border">
+   797→        <DialogHeader>
+   798→          <DialogTitle className="text-foreground flex items-center gap-2">
+   799→            <Upload className="h-5 w-5 text-primary" />
+   800→            Bulk Upload Projects
+   801→          </DialogTitle>
+   802→          <DialogDescription className="text-muted-foreground">
+   803→            Upload a CSV file using the <span className="font-mono text-foreground">pp.csv</span> template. Each row creates a project via <span className="font-mono text-foreground">POST /api/projects</span>.
+   804→          </DialogDescription>
+   805→        </DialogHeader>
+   806→
+   807→        {/* Toolbar */}
+   808→        <div className="flex flex-wrap items-center gap-2">
+   809→          <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+   810→            <Download className="h-4 w-4" /> Download Template (pp.csv)
+   811→          </Button>
+   812→          <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline" className="gap-1.5" disabled={importing}>
+   813→            <FileSpreadsheet className="h-4 w-4" /> Choose CSV File
+   814→          </Button>
+   815→          <input
+   816→            ref={fileInputRef}
+   817→            type="file"
+   818→            accept=".csv"
+   819→            className="hidden"
+   820→            onChange={handleFileUpload}
+   821→          />
+   822→          {rows && rows.length > 0 && !importing && (
+   823→            <Button onClick={runImport} size="sm" className="gap-1.5 ml-auto">
+   824→              <Check className="h-4 w-4" /> Import {rows.length} Project{rows.length === 1 ? "" : "s"}
+   825→            </Button>
+   826→          )}
+   827→        </div>
+   828→
+   829→        {/* Progress bar (during import) */}
+   830→        {importing && (
+   831→          <div className="space-y-1.5">
+   832→            <div className="flex items-center justify-between text-xs">
+   833→              <span className="text-muted-foreground">Importing… {progress}%</span>
+   834→              <span className="text-foreground">
+   835→                <span className="text-emerald-400 font-medium">{successCount} ok</span>
+   836→                {" · "}
+   837→                <span className="text-red-400 font-medium">{errorCount} failed</span>
+   838→              </span>
+   839→            </div>
+   840→            <Progress value={progress} className="h-2" />
+   841→          </div>
+   842→        )}
+   843→
+   844→        {/* Summary chips (post-import) */}
+   845→        {!importing && (successCount > 0 || errorCount > 0) && (
+   846→          <div className="flex flex-wrap items-center gap-2">
+   847→            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">
+   848→              <Check className="h-3 w-3 mr-1 inline" /> {successCount} imported
+   849→            </CustomBadge>
+   850→            {errorCount > 0 && (
+   851→              <CustomBadge className="border-0 bg-red-500/15 text-red-400">
+   852→                {errorCount} failed
+   853→              </CustomBadge>
+   854→            )}
+   855→          </div>
+   856→        )}
+   857→
+   858→        {/* Preview table */}
+   859→        {rows && rows.length > 0 ? (
+   860→          <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+   861→            <Table>
+   862→              <TableHeader>
+   863→                <TableRow className="hover:bg-transparent border-border">
+   864→                  <TableHead className="text-muted-foreground w-10">#</TableHead>
+   865→                  <TableHead className="text-muted-foreground">Project Name</TableHead>
+   866→                  <TableHead className="text-muted-foreground">Abbrev</TableHead>
+   867→                  <TableHead className="text-muted-foreground">Vote Number</TableHead>
+   868→                  <TableHead className="text-muted-foreground">Type</TableHead>
+   869→                  <TableHead className="text-muted-foreground">Financial</TableHead>
+   870→                  <TableHead className="text-muted-foreground text-right">Allocation</TableHead>
+   871→                  <TableHead className="text-muted-foreground">Benefactor</TableHead>
+   872→                  <TableHead className="text-muted-foreground">Officer</TableHead>
+   873→                  <TableHead className="text-muted-foreground">Start</TableHead>
+   874→                  <TableHead className="text-muted-foreground">EDC</TableHead>
+   875→                  <TableHead className="text-muted-foreground">Status</TableHead>
+   876→                  <TableHead className="text-muted-foreground">Description</TableHead>
+   877→                </TableRow>
+   878→              </TableHeader>
+   879→              <TableBody>
+   880→                {rows.map((r, i) => (
+   881→                  <TableRow key={i} className="border-border">
+   882→                    <TableCell className="text-xs text-muted-foreground tabular-nums">{i + 1}</TableCell>
+   883→                    <TableCell className="text-foreground font-medium">{r.ProjectName || <span className="text-muted-foreground italic">—</span>}</TableCell>
+   884→                    <TableCell className="font-mono text-xs text-primary">{r.NameAbbreviation || "—"}</TableCell>
+   885→                    <TableCell className="font-mono text-xs">{r.VoteNumber || "—"}</TableCell>
+   886→                    <TableCell className="text-xs">{r.ProjectType || "—"}</TableCell>
+   887→                    <TableCell className="text-xs">{r.FinancialMean || "—"}</TableCell>
+   888→                    <TableCell className="text-right font-mono text-xs">{r.VoteAllocation ? Number(r.VoteAllocation).toLocaleString("en-IN") : "—"}</TableCell>
+   889→                    <TableCell className="text-xs">{r.Benefactor || "—"}</TableCell>
+   890→                    <TableCell className="text-xs">{r.ProjectOfficer || "—"}</TableCell>
+   891→                    <TableCell className="text-xs">{r.StartDate || "—"}</TableCell>
+   892→                    <TableCell className="text-xs">{r.EndDate || "—"}</TableCell>
+   893→                    <TableCell className="text-xs">{r.Status || "—"}</TableCell>
+   894→                    <TableCell className="text-xs text-muted-foreground max-w-[240px] truncate" title={r.Description}>{r.Description || "—"}</TableCell>
+   895→                  </TableRow>
+   896→                ))}
+   897→              </TableBody>
+   898→            </Table>
+   899→          </div>
+   900→        ) : (
+   901→          <div className="border border-dashed border-border rounded-lg p-10 text-center">
+   902→            <FileSpreadsheet className="h-10 w-10 mx-auto text-muted-foreground/40 mb-2" />
+   903→            <p className="text-sm text-muted-foreground">
+   904→              No file selected. Download the <span className="font-mono">pp.csv</span> template, fill it in, then choose the CSV file to preview rows here.
+   905→            </p>
+   906→          </div>
+   907→        )}
+   908→
+   909→        {/* Error list */}
+   910→        {errors.length > 0 && (
+   911→          <div className="border border-red-500/40 rounded-lg p-3 bg-red-500/[0.04] max-h-40 overflow-y-auto scrollbar-thin">
+   912→            <p className="text-xs font-semibold text-red-400 mb-2">Errors ({errors.length}):</p>
+   913→            <ul className="space-y-1 text-xs text-foreground/80">
+   914→              {errors.map((e, i) => (
+   915→                <li key={i} className="font-mono">{e}</li>
+   916→              ))}
+   917→            </ul>
+   918→          </div>
+   919→        )}
+   920→
+   921→        <DialogFooter>
+   922→          <Button variant="outline" onClick={close} disabled={importing}>
+   923→            {successCount > 0 && errorCount === 0 ? "Done" : "Close"}
+   924→          </Button>
+   925→        </DialogFooter>
+   926→      </DialogContent>
+   927→    </Dialog>
+   928→  );
+   929→}
+   930→
+   931→// CSV escape — wraps in quotes if the field contains a comma, quote, or newline
+   932→function csvEscape(value: string): string {
+   933→  if (/[",\n]/.test(value)) {
+   934→    return `"${value.replace(/"/g, '""')}"`;
+   935→  }
+   936→  return value;
+   937→}
+   938→
+   939→// RFC-4180 CSV parser — handles quoted fields with embedded commas/newlines
+   940→function parseCsv(text: string): string[][] {
+   941→  const rows: string[][] = [];
+   942→  let cur: string[] = [];
+   943→  let field = "";
+   944→  let inQuotes = false;
+   945→  for (let i = 0; i < text.length; i++) {
+   946→    const ch = text[i];
+   947→    if (inQuotes) {
+   948→      if (ch === '"' && text[i + 1] === '"') {
+   949→        field += '"';
+   950→        i++;
+   951→      } else if (ch === '"') {
+   952→        inQuotes = false;
+   953→      } else {
+   954→        field += ch;
+   955→      }
+   956→    } else {
+   957→      if (ch === '"') inQuotes = true;
+   958→      else if (ch === ",") {
+   959→        cur.push(field);
+   960→        field = "";
+   961→      } else if (ch === "\n" || ch === "\r") {
+   962→        if (ch === "\r" && text[i + 1] === "\n") i++;
+   963→        cur.push(field);
+   964→        rows.push(cur);
+   965→        cur = [];
+   966→        field = "";
+   967→      } else {
+   968→        field += ch;
+   969→      }
+   970→    }
+   971→  }
+   972→  if (field.length > 0 || cur.length > 0) {
+   973→    cur.push(field);
+   974→    rows.push(cur);
+   975→  }
+   976→  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+   977→}
+   978→
