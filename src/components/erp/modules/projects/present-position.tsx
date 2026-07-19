@@ -1,11 +1,12 @@
 "use client";
-import { Fragment, useState, useMemo } from "react";
+import { Fragment, useState, useMemo, useRef } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,8 @@ import {
   FILE_CATEGORIES,
   positionColor,
   estimateStatusColor,
+  financialMeanColor,
+  confidenceColor,
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -72,6 +75,13 @@ import {
   Archive,
   ArchiveRestore,
   FolderKey,
+  Upload,
+  FileSpreadsheet,
+  Check,
+  FileUp,
+  Lock,
+  Wand2,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +97,9 @@ interface Project {
   reference?: string | null;
   endDate?: string | null;
   startDate?: string | null;
+  projectType?: string | null;
+  financialMean?: string | null;
+  requirementGroup?: string | null;
 }
 
 interface Allocation {
@@ -157,6 +170,8 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Bulk initiate dialog open state
   const [bulkInitiateOpen, setBulkInitiateOpen] = useState(false);
+  // Bulk file upload dialog (uploads FILES into this project via pp.csv)
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   // Archive (NFA) dialog target — when set, opens the small reason-prompt dialog
   const [archiveTarget, setArchiveTarget] = useState<ProjectFile | null>(null);
   const { toast } = useToast();
@@ -579,27 +594,48 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      {/* Header */}
+      {/* Header — project metadata is LOCKED (read-only). Editing project name,
+          vote number, funding source, or abbreviation must be done from the
+          Projects list / Add Project wizard — NOT from this window. Only the
+          files within the project can be edited here. */}
       <div className="border-b border-border bg-card shrink-0">
         <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground shrink-0">
+            <button onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Close project window">
               <X className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <h2 className="font-semibold text-foreground text-sm sm:text-base truncate flex items-center gap-2">
-                {project.name}
+              <h2 className="font-semibold text-foreground text-sm sm:text-base truncate flex items-center gap-2 flex-wrap">
+                <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" title="Project data is locked — edit from the Projects list" />
+                <span className="truncate">{project.name}</span>
                 {project.nameAbbreviation && (
-                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0" title="Project abbreviation (locked)">
                     {project.nameAbbreviation}
                   </span>
                 )}
+                {project.financialMean && (
+                  <CustomBadge
+                    className={cn("border", financialMeanColor(project.financialMean))}
+                    title="Funding source (locked — edit from the Projects list)"
+                  >
+                    {project.financialMean}
+                  </CustomBadge>
+                )}
+                {project.projectType && (
+                  <span className="text-[10px] text-muted-foreground shrink-0" title="Project type (locked)">
+                    · {project.projectType}
+                  </span>
+                )}
               </h2>
-              <p className="text-xs text-muted-foreground">
-                {project.voteNumber}
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1" title="Vote number (locked)">
+                  <Lock className="h-3 w-3 text-muted-foreground/70" />
+                  <span className="font-mono">{project.voteNumber || "—"}</span>
+                </span>
                 {project.benefactor && ` · Benefactor: ${project.benefactor}`}
                 {project.reference && ` · Ref: ${project.reference}`}
                 {project.endDate && ` · EDC: ${new Date(project.endDate).toLocaleDateString("en-GB")}`}
+                <span className="text-[10px] text-muted-foreground/70 italic ml-1">· fields locked</span>
               </p>
             </div>
           </div>
@@ -661,7 +697,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               {/* PR raised summary chips */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <MiniStat label="PR Raised (Files)" value={String(files?.length || 0)} sub={formatCurrency(totalFileCost)} tone="text-blue-400" />
-                <MiniStat label="Initiated from Estimate" value={String(initiatedCount)} sub="forwarded PRs" tone="text-violet-400" />
+                <MiniStat label="Initiated from Estimate" value={String(initiatedCount)} sub="raised PRs" tone="text-violet-400" />
                 <MiniStat label="Items to Raise PR" value={String(pendingEstimateItems.length)} sub="from estimate" tone="text-amber-400" />
               </div>
 
@@ -719,7 +755,18 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                   {groupByFile ? "Grouped by File" : "Group by File"}
                 </Button>
                 {!showArchived && (
-                  <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setBulkUploadOpen(true)}
+                      className="gap-1.5"
+                      title="Bulk upload multiple files into this project using the pp.csv template"
+                    >
+                      <Upload className="h-4 w-4" /> Upload Bulk
+                    </Button>
+                    <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" /> Add File</Button>
+                  </>
                 )}
               </div>
 
@@ -1043,10 +1090,10 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
           ) : (
             /* PR from Estimate tab */
             <>
-              <div className="bg-secondary/40 rounded-lg p-3 flex items-center gap-2 flex-wrap">
-                <FileSignature className="h-4 w-4 text-amber-400" />
+              <div className="bg-secondary/40 rounded-lg p-3 flex items-start gap-2 flex-wrap">
+                <FileSignature className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
                 <p className="text-sm text-foreground">
-                  Items pending PR initiation from processed estimates. Click <span className="font-medium text-primary">Initiate File</span> to raise a PR — it will be forwarded to the &quot;PR Raised Files&quot; tab.
+                  Items pending PR initiation from processed estimates. Click <span className="font-medium text-primary">Initiate File</span> to raise a PR. The item&apos;s status updates in place (Pending → Initiated) and <span className="font-medium text-primary">you stay on this tab</span> — no auto-jump. The raised file appears in the &quot;PR Raised Files&quot; tab when you choose to switch.
                 </p>
               </div>
               {estimates && estimates.length > 0 ? (
@@ -1138,6 +1185,22 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
           onConfirm={handleBulkInitiate}
         />
       )}
+      {/* Bulk Files Upload dialog — uploads multiple FILES into this project
+          via the pp.csv template (file-level bulk upload). Saves the source
+          CSV file to /api/upload, then POSTs the parsed rows to
+          /api/projects/[id]/files/bulk which auto-generates file group keys. */}
+      <BulkFilesUploadDialog
+        projectId={project.id}
+        projectName={project.name}
+        projectAbbreviation={project.nameAbbreviation || null}
+        open={bulkUploadOpen}
+        onOpenChange={setBulkUploadOpen}
+        onImported={() => {
+          setBulkUploadOpen(false);
+          refresh();
+          onChanged();
+        }}
+      />
     </div>
   );
 }
@@ -1959,4 +2022,727 @@ function AllocationHistoryDialog({ project, open, onOpenChange, onChanged }: { p
       </DialogContent>
     </Dialog>
   );
+}
+
+// ─── Bulk Files Upload Dialog (file-level bulk upload into a project) ───
+// New CSV column order (pp.csv):
+//   File Group Key, PR Number, File Number, Item Name, Deno, Qty, Unit Cost,
+//   Present Position, Supplier
+//
+// Total Cost, File Cost, and Category are auto-generated/selected (NOT in CSV).
+// AI Variation Matching: Item Name, Present Position, and Supplier are matched
+// against the canonical item master, PRESENT_POSITIONS list, and supplier
+// directory via POST /api/projects/[id]/files/bulk-match (z-ai-web-dev-sdk
+// server-side). After matching, rows are grouped by their File Group Key
+// (rows sharing a key collapse into a single grouped file in the register).
+interface BulkFileRow {
+  FileGroupKey: string;
+  PRNumber: string;
+  FileNumber: string;
+  ItemName: string;
+  Deno: string;
+  Qty: string;
+  UnitCost: string;
+  PresentPosition: string;
+  Supplier: string;
+}
+
+const BULK_FILE_CSV_COLUMNS: (keyof BulkFileRow)[] = [
+  "FileGroupKey",
+  "PRNumber",
+  "FileNumber",
+  "ItemName",
+  "Deno",
+  "Qty",
+  "UnitCost",
+  "PresentPosition",
+  "Supplier",
+];
+
+// Mirrors BulkMatchResultRow from @/lib/ai (declared locally to keep this
+// file client-only — the AI lib imports server-only modules).
+interface BulkMatchResult {
+  rowIndex: number;
+  fileGroupKey: string;
+  prNumber: string;
+  fileNumber: string;
+  originalItemName: string;
+  originalPresentPosition: string;
+  originalSupplier: string;
+  matchedItemName: string;
+  matchedItemCode: string | null;
+  matchedPresentPosition: string;
+  matchedSupplier: string;
+  itemNameConfidence: "high" | "medium" | "low" | "none";
+  positionConfidence: "high" | "medium" | "low" | "none";
+  supplierConfidence: "high" | "medium" | "low" | "none";
+  overallConfidence: "high" | "medium" | "low" | "none";
+  notes: string;
+}
+
+// Auto-select a category based on the item name keywords. Falls back to "General".
+function autoSelectCategory(itemName: string): string {
+  const n = (itemName || "").toLowerCase();
+  if (/\b(bms|battery management)\b/.test(n)) return "BMS";
+  if (/(pump|valve|pipe|fitting|flange|gasket|elbow|reducer|strainer|coupling)/.test(n)) return "Plumbing";
+  if (/(paint|primer|thinner|enamel|epoxy|coating)/.test(n)) return "Paint";
+  if (/(aluminium|aluminum)/.test(n)) return "Aluminium";
+  if (/(metal|steel|\bss\b|\bms\b|\bgi\b|iron)/.test(n)) return "Metal";
+  if (/(cable|wire|led|light|bulb|lamp|fixture|switch|socket|breaker|contactor|relay|motor|alternator)/.test(n)) return "Electrical";
+  if (/(tool|spanner|wrench|hammer|drill|saw|grinder|screwdriver|plier)/.test(n)) return "Tools";
+  if (/(oil|lubricant|grease|hydraulic)/.test(n)) return "Lubricant Oil";
+  if (/(^|\s)gen(erator)?\b/.test(n)) return "GEN";
+  return "General";
+}
+
+// Compute the effective file group key for each parsed row (preview only).
+// Rows that provide a File Group Key use it as-is; rows without one get an
+// auto-generated {ABBREV}-{SEQ} placeholder. The seq counter is a local
+// mutation inside this helper (the React Compiler would flag a reassignment
+// in the component body).
+function computeProjectedKeys(rows: BulkFileRow[] | null, abbrev: string): string[] {
+  let seq = 0;
+  return (rows || []).map((r) => {
+    if (r.FileGroupKey.trim()) return r.FileGroupKey;
+    seq += 1;
+    return `${abbrev}-${String(seq).padStart(3, "0")}`;
+  });
+}
+
+function BulkFilesUploadDialog({
+  projectId,
+  projectName,
+  projectAbbreviation,
+  open,
+  onOpenChange,
+  onImported,
+}: {
+  projectId: string;
+  projectName: string;
+  projectAbbreviation: string | null;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onImported: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rows, setRows] = useState<BulkFileRow[] | null>(null);
+  const [matched, setMatched] = useState<BulkMatchResult[] | null>(null);
+  const [matching, setMatching] = useState(false);
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState<"idle" | "upload" | "bulk" | "match">("idle");
+  const [uploadedPath, setUploadedPath] = useState<string | null>(null);
+  const [result, setResult] = useState<{ ok: number; fail: number; errors: string[] } | null>(null);
+  const { toast } = useToast();
+
+  const abbrev = projectAbbreviation || "PRJ";
+
+  const downloadTemplate = () => {
+    // pp.csv template — new column order. Sample rows demonstrate the File
+    // Group Key grouping: rows 1+2 share the same key (collapse into a single
+    // grouped file), row 3 has a different key (separate file).
+    const header = BULK_FILE_CSV_COLUMNS.join(",");
+    const sample1 = [
+      `${abbrev}-001`,
+      "PR-2025-001",
+      "FILE/2025/001",
+      "Centrifugal Pump 15kW",
+      "NOS",
+      "2",
+      "185000",
+      "PR Raised",
+      "Marine Engineering Services",
+    ].map(csvEscapeFile).join(",");
+    const sample2 = [
+      `${abbrev}-001`,
+      "PR-2025-001",
+      "FILE/2025/001",
+      "Mechanical Seal 35mm",
+      "NOS",
+      "4",
+      "12500",
+      "PR Raised",
+      "Marine Engineering Services",
+    ].map(csvEscapeFile).join(",");
+    const sample3 = [
+      `${abbrev}-002`,
+      "PR-2025-002",
+      "FILE/2025/002",
+      "LED Floodlight 200W",
+      "NOS",
+      "6",
+      "18500",
+      "GS Approval",
+      "Dockyard Stores",
+    ].map(csvEscapeFile).join(",");
+    const csv = `${header}\n${sample1}\n${sample2}\n${sample3}\n`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "pp.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Template downloaded",
+      description: `Columns: ${BULK_FILE_CSV_COLUMNS.join(", ")}`,
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast({ title: "Please upload a CSV file", variant: "destructive" });
+      e.target.value = "";
+      return;
+    }
+    try {
+      const text = await file.text();
+      const parsed = parseCsvFile(text);
+      if (parsed.length === 0) {
+        toast({ title: "CSV file is empty", variant: "destructive" });
+        e.target.value = "";
+        return;
+      }
+      // Detect columns by header name (case/space insensitive)
+      const header = parsed[0].map((c) => c.trim().toLowerCase().replace(/\s+/g, ""));
+      const colIndex: Record<keyof BulkFileRow, number> = {
+        FileGroupKey: header.findIndex((h) => h === "filegroupkey" || h.includes("filegroupkey") || h.includes("groupkey") || (h.includes("group") && h.includes("file")) || h === "group"),
+        PRNumber: header.findIndex((h) => h === "prnumber" || h.includes("prnumber") || h === "prno" || h === "pr"),
+        FileNumber: header.findIndex((h) => h === "filenumber" || h.includes("filenumber") || (h.includes("file") && h.includes("number")) || h === "fileno"),
+        ItemName: header.findIndex((h) => h === "itemname" || h.includes("itemname") || (h.includes("item") && h.includes("name")) || h.includes("description") || h === "name" || h === "item"),
+        Deno: header.findIndex((h) => h === "deno" || h.includes("deno") || h === "unit" || h.includes("unit") || h.includes("denomination")),
+        Qty: header.findIndex((h) => h === "qty" || h.includes("qty") || h.includes("quantity")),
+        UnitCost: header.findIndex((h) => h === "unitcost" || h.includes("unitcost") || (h.includes("cost") && h.includes("unit")) || (h.includes("price") && h.includes("unit")) || h === "unitprice" || h === "price"),
+        PresentPosition: header.findIndex((h) => h === "presentposition" || h.includes("presentposition") || h.includes("position")),
+        Supplier: header.findIndex((h) => h === "supplier" || h.includes("supplier") || h.includes("vendor")),
+      };
+      const dataRows = parsed.slice(1);
+      const mapped: BulkFileRow[] = dataRows
+        .map((r) => {
+          const get = (k: keyof BulkFileRow) => {
+            const idx = colIndex[k];
+            return idx >= 0 ? (r[idx] || "").trim() : "";
+          };
+          return {
+            FileGroupKey: get("FileGroupKey"),
+            PRNumber: get("PRNumber"),
+            FileNumber: get("FileNumber"),
+            ItemName: get("ItemName"),
+            Deno: get("Deno"),
+            Qty: get("Qty"),
+            UnitCost: get("UnitCost"),
+            PresentPosition: get("PresentPosition"),
+            Supplier: get("Supplier"),
+          };
+        })
+        // Require at least an ItemName or PRNumber to consider a row valid.
+        .filter((r) => r.ItemName || r.PRNumber);
+      if (mapped.length === 0) {
+        toast({ title: "No valid rows found in CSV", variant: "destructive" });
+        e.target.value = "";
+        return;
+      }
+      setRows(mapped);
+      setMatched(null);
+      setSourceFile(file);
+      setResult(null);
+      setUploadedPath(null);
+      setProgress(0);
+      setPhase("idle");
+    } catch {
+      toast({ title: "Failed to read CSV file", variant: "destructive" });
+    }
+    e.target.value = "";
+  };
+
+  // Run AI variation matching — POST the parsed rows to the bulk-match
+  // endpoint and receive canonical values (item name + code, present position,
+  // supplier) with per-field confidence levels.
+  const runAIMatching = async () => {
+    if (!rows || rows.length === 0) return;
+    setMatching(true);
+    setPhase("match");
+    setMatched(null);
+    try {
+      const payload = rows.map((r) => ({
+        fileGroupKey: r.FileGroupKey,
+        prNumber: r.PRNumber,
+        fileNumber: r.FileNumber,
+        itemName: r.ItemName,
+        deno: r.Deno,
+        qty: Number(r.Qty) || 0,
+        unitCost: Number(r.UnitCost) || 0,
+        presentPosition: r.PresentPosition,
+        supplier: r.Supplier,
+      }));
+      const res = await apiRequest(
+        `/api/projects/${projectId}/files/bulk-match`,
+        "POST",
+        { rows: payload }
+      );
+      setMatching(false);
+      setPhase("idle");
+      if (res.ok) {
+        const data = (res.data as { ok?: boolean; matched?: BulkMatchResult[] }) || {};
+        const matchedRows = Array.isArray(data.matched) ? data.matched : [];
+        setMatched(matchedRows);
+        const highCount = matchedRows.filter((m) => m.overallConfidence === "high").length;
+        const medCount = matchedRows.filter((m) => m.overallConfidence === "medium").length;
+        const lowCount = matchedRows.filter((m) => m.overallConfidence === "low" || m.overallConfidence === "none").length;
+        toast({
+          title: `AI matching complete — ${matchedRows.length} rows`,
+          description: `${highCount} high · ${medCount} medium · ${lowCount} low/none confidence`,
+        });
+      } else {
+        toast({
+          title: "AI matching failed",
+          description: res.error,
+          variant: "destructive",
+        });
+      }
+    } catch (e) {
+      setMatching(false);
+      setPhase("idle");
+      toast({
+        title: "AI matching failed",
+        description: (e as Error).message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const runImport = async () => {
+    if (!rows || rows.length === 0) return;
+    setImporting(true);
+    setProgress(0);
+    setResult(null);
+    const errs: string[] = [];
+
+    // ── Phase 1: Upload the source CSV file to /api/upload (best-effort) ──
+    setPhase("upload");
+    let savedPath: string | null = null;
+    if (sourceFile) {
+      try {
+        const fd = new FormData();
+        fd.append("file", sourceFile, sourceFile.name);
+        const upRes = await fetch("/api/upload", { method: "POST", body: fd });
+        if (upRes.ok) {
+          const upJson = (await upRes.json()) as { ok?: boolean; fileName?: string; path?: string; size?: number };
+          savedPath = upJson.path || upJson.fileName || null;
+          setUploadedPath(savedPath);
+        } else {
+          errs.push(`Source-file upload failed (HTTP ${upRes.status}) — proceeding with bulk create anyway.`);
+        }
+      } catch (e) {
+        errs.push(`Source-file upload error: ${(e as Error).message} — proceeding with bulk create anyway.`);
+      }
+    }
+    setProgress(40);
+
+    // ── Phase 2: POST the matched + grouped rows to /api/projects/[id]/files/bulk ──
+    // Use matched values when available; fall back to original CSV values.
+    // Total Cost / File Cost = Qty × Unit Cost (auto-calculated, NOT from CSV).
+    // Category = auto-selected based on the (matched) item name keywords.
+    setPhase("bulk");
+    const filesPayload = rows.map((r, i) => {
+      const m = matched?.[i];
+      const itemName = m?.matchedItemName || r.ItemName;
+      const presentPosition = m?.matchedPresentPosition || r.PresentPosition || "PR Raised";
+      const supplier = m?.matchedSupplier || r.Supplier;
+      const itemCode = m?.matchedItemCode || "TBC";
+      const qty = Number(r.Qty) || 0;
+      const unitPrice = Number(r.UnitCost) || 0;
+      const fileCost = qty * unitPrice;
+      const fileCategory = autoSelectCategory(itemName);
+      return {
+        prNumber: r.PRNumber || `PR-${Date.now()}`,
+        itemCode,
+        itemName,
+        unit: r.Deno || "NOS",
+        qty,
+        unitPrice,
+        fileCost,
+        supplier: supplier || null,
+        presentPosition,
+        fileCategory,
+        fileGroupKey: r.FileGroupKey || undefined,
+        fileNumber: r.FileNumber || null,
+      };
+    });
+    const res = await apiRequest(`/api/projects/${projectId}/files/bulk`, "POST", { files: filesPayload });
+    setProgress(100);
+    setImporting(false);
+    setPhase("idle");
+
+    if (res.ok) {
+      const data = (res.data as { ok?: boolean; count?: number }) || {};
+      const created = typeof data.count === "number" ? data.count : rows.length;
+      setResult({ ok: created, fail: 0, errors: errs });
+      toast({
+        title: `Imported ${created} file${created === 1 ? "" : "s"} into ${projectName}`,
+        description: savedPath
+          ? `Source CSV saved to ${savedPath}`
+          : "Source CSV upload skipped (bulk create succeeded).",
+      });
+      // Brief delay so the user can see the success state, then close + refresh.
+      setTimeout(() => {
+        onImported();
+        setRows(null);
+        setMatched(null);
+        setSourceFile(null);
+        setUploadedPath(null);
+        setResult(null);
+        setProgress(0);
+      }, 900);
+    } else {
+      setResult({ ok: 0, fail: rows.length, errors: [...errs, res.error || "Bulk create failed"] });
+      toast({
+        title: "Bulk upload failed",
+        description: res.error,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const close = () => {
+    if (importing || matching) return;
+    onOpenChange(false);
+    setRows(null);
+    setMatched(null);
+    setSourceFile(null);
+    setResult(null);
+    setUploadedPath(null);
+    setProgress(0);
+    setPhase("idle");
+  };
+
+  // Project the effective file group keys for the preview (informational).
+  // Rows that provide a File Group Key use it as-is; rows without one get an
+  // auto-generated {ABBREV}-{SEQ} placeholder (the server actually assigns these).
+  // Computed inside a helper so the seq counter is a local mutation (not a
+  // component-body reassignment that the React Compiler would flag).
+  const projectedKeys = computeProjectedKeys(rows, abbrev);
+
+  // Group rows by their effective file group key for the summary count.
+  const groupedByKey = (() => {
+    if (!rows) return [] as { key: string; indices: number[] }[];
+    const map = new Map<string, number[]>();
+    rows.forEach((_, i) => {
+      const k = projectedKeys[i];
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(i);
+    });
+    return Array.from(map.entries()).map(([key, indices]) => ({ key, indices }));
+  })();
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto scrollbar-thin bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground flex items-center gap-2">
+            <FileUp className="h-5 w-5 text-primary" />
+            Bulk Upload Files — {projectName}
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Upload a CSV using the <span className="font-mono text-foreground">pp.csv</span> template. Columns: <span className="font-mono text-foreground">{BULK_FILE_CSV_COLUMNS.join(", ")}</span>. Total Cost, File Cost, and Category are auto-generated. Click <span className="font-medium text-foreground">Run AI Matching</span> to canonicalize Item Name, Present Position, and Supplier against the item master / PRESENT_POSITIONS / supplier directory. Rows sharing a File Group Key collapse into a single grouped file. The source CSV is also saved to <span className="font-mono text-foreground">/upload/</span>.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={downloadTemplate} size="sm" variant="outline" className="gap-1.5">
+            <Download className="h-4 w-4" /> Download Template (pp.csv)
+          </Button>
+          <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline" className="gap-1.5" disabled={importing || matching}>
+            <FileSpreadsheet className="h-4 w-4" /> Choose CSV File
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          {sourceFile && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 truncate max-w-[260px]" title={sourceFile.name}>
+              <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{sourceFile.name}</span>
+              <span className="text-muted-foreground/70 shrink-0">({(sourceFile.size / 1024).toFixed(1)} KB)</span>
+            </span>
+          )}
+          {rows && rows.length > 0 && (
+            <>
+              <Button
+                onClick={runAIMatching}
+                size="sm"
+                variant="outline"
+                className="gap-1.5 ml-auto"
+                disabled={matching || importing}
+                title="Use AI to match Item Name, Present Position, and Supplier against the existing item master, PRESENT_POSITIONS list, and supplier directory"
+              >
+                {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                {matched ? "Re-run AI Matching" : "Run AI Matching"}
+              </Button>
+              <Button onClick={runImport} size="sm" className="gap-1.5" disabled={importing || matching}>
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Import {rows.length} File{rows.length === 1 ? "" : "s"}
+              </Button>
+            </>
+          )}
+        </div>
+
+        {/* Progress bar (during import or matching) */}
+        {(importing || matching) && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {phase === "match"
+                  ? "Running AI matching…"
+                  : phase === "upload"
+                  ? "Uploading source CSV…"
+                  : phase === "bulk"
+                  ? "Creating files…"
+                  : "Working…"}{" "}
+                {importing ? `${progress}%` : ""}
+              </span>
+              <span className="text-foreground">
+                {uploadedPath ? (
+                  <span className="text-emerald-400 font-medium">Source saved</span>
+                ) : phase === "upload" ? (
+                  <span className="text-muted-foreground">Saving source…</span>
+                ) : phase === "match" ? (
+                  <span className="text-primary">Matching…</span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </span>
+            </div>
+            {importing && <Progress value={progress} className="h-2" />}
+          </div>
+        )}
+
+        {/* Summary chips (post-import) */}
+        {result && !importing && (
+          <div className="flex flex-wrap items-center gap-2">
+            {result.ok > 0 && (
+              <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">
+                <Check className="h-3 w-3 mr-1 inline" /> {result.ok} imported
+              </CustomBadge>
+            )}
+            {result.fail > 0 && (
+              <CustomBadge className="border-0 bg-red-500/15 text-red-400">
+                {result.fail} failed
+              </CustomBadge>
+            )}
+            {uploadedPath && (
+              <CustomBadge className="border-0 bg-primary/10 text-primary">
+                <FileText className="h-3 w-3 mr-1 inline" /> Source: {uploadedPath}
+              </CustomBadge>
+            )}
+          </div>
+        )}
+
+        {/* Matched-summary chips (after AI matching) */}
+        {matched && matched.length > 0 && !importing && (
+          <div className="flex flex-wrap items-center gap-2">
+            <CustomBadge className="border-0 bg-primary/10 text-primary">
+              <Wand2 className="h-3 w-3 mr-1 inline" /> {matched.length} rows matched
+            </CustomBadge>
+            {(() => {
+              const high = matched.filter((m) => m.overallConfidence === "high").length;
+              const med = matched.filter((m) => m.overallConfidence === "medium").length;
+              const low = matched.filter((m) => m.overallConfidence === "low" || m.overallConfidence === "none").length;
+              return (
+                <>
+                  <CustomBadge className={cn("border-0", confidenceColor("high"))}>{high} high</CustomBadge>
+                  <CustomBadge className={cn("border-0", confidenceColor("medium"))}>{med} medium</CustomBadge>
+                  <CustomBadge className={cn("border-0", confidenceColor("none"))}>{low} low/none</CustomBadge>
+                </>
+              );
+            })()}
+            <span className="text-xs text-muted-foreground ml-1">
+              {groupedByKey.length} file group{groupedByKey.length === 1 ? "" : "s"} (rows sharing a File Group Key collapse into one file)
+            </span>
+          </div>
+        )}
+
+        {/* Preview table — original CSV values + matched values (highlighted) + confidence */}
+        {rows && rows.length > 0 ? (
+          <div className="border border-border rounded-lg overflow-x-auto scrollbar-thin">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border">
+                  <TableHead className="text-muted-foreground w-10">#</TableHead>
+                  <TableHead className="text-muted-foreground">File Group Key</TableHead>
+                  <TableHead className="text-muted-foreground">PR Number</TableHead>
+                  <TableHead className="text-muted-foreground">File Number</TableHead>
+                  <TableHead className="text-muted-foreground">Item Name {matched && <span className="text-primary">→ matched</span>}</TableHead>
+                  <TableHead className="text-muted-foreground">Deno</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Unit Cost</TableHead>
+                  <TableHead className="text-muted-foreground text-right">File Cost (auto)</TableHead>
+                  <TableHead className="text-muted-foreground">Present Position {matched && <span className="text-primary">→ matched</span>}</TableHead>
+                  <TableHead className="text-muted-foreground">Supplier {matched && <span className="text-primary">→ matched</span>}</TableHead>
+                  <TableHead className="text-muted-foreground">Category (auto)</TableHead>
+                  {matched && <TableHead className="text-muted-foreground">Confidence</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r, i) => {
+                  const m = matched?.[i];
+                  const qty = Number(r.Qty) || 0;
+                  const unitCost = Number(r.UnitCost) || 0;
+                  const fileCost = qty * unitCost;
+                  const effKey = projectedKeys[i];
+                  const itemName = m?.matchedItemName || r.ItemName;
+                  const category = autoSelectCategory(itemName);
+                  const itemChanged = m && m.matchedItemName && m.matchedItemName !== r.ItemName;
+                  const posChanged = m && m.matchedPresentPosition && m.matchedPresentPosition !== r.PresentPosition;
+                  const supChanged = m && m.matchedSupplier && m.matchedSupplier !== r.Supplier;
+                  return (
+                    <TableRow key={i} className="border-border">
+                      <TableCell className="text-xs text-muted-foreground tabular-nums">{i + 1}</TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                          <FolderKey className="h-3 w-3" />
+                          {effKey}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-foreground">{r.PRNumber || <span className="text-muted-foreground italic">auto</span>}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.FileNumber || <span className="text-muted-foreground italic">—</span>}</TableCell>
+                      <TableCell className="text-foreground">
+                        {r.ItemName || <span className="text-muted-foreground italic">—</span>}
+                        {m && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            {m.matchedItemCode && (
+                              <span className="inline-block font-mono text-[10px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                {m.matchedItemCode}
+                              </span>
+                            )}
+                            {itemChanged ? (
+                              <span className="text-xs text-emerald-400 font-medium">→ {m.matchedItemName}</span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">(unchanged)</span>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">{r.Deno || "NOS"}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{r.Qty || "—"}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{r.UnitCost ? Number(r.UnitCost).toLocaleString("en-IN") : "—"}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-foreground/90">{fileCost.toLocaleString("en-IN")}</TableCell>
+                      <TableCell className="text-xs">
+                        {r.PresentPosition || <span className="text-muted-foreground italic">PR Raised</span>}
+                        {m && posChanged && (
+                          <span className="block text-xs text-emerald-400 font-medium">→ {m.matchedPresentPosition}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {r.Supplier || <span className="text-muted-foreground italic">—</span>}
+                        {m && supChanged && (
+                          <span className="block text-xs text-emerald-400 font-medium">→ {m.matchedSupplier}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <CustomBadge className="border-0 bg-slate-500/15 text-slate-300">{category}</CustomBadge>
+                      </TableCell>
+                      {matched && (
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5">
+                            <CustomBadge className={cn("border-0", confidenceColor(m?.overallConfidence || "none"))}>
+                              {m?.overallConfidence || "none"}
+                            </CustomBadge>
+                            <span className="text-[10px] text-muted-foreground">
+                              item {m?.itemNameConfidence || "—"} · pos {m?.positionConfidence || "—"} · sup {m?.supplierConfidence || "—"}
+                            </span>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="border border-dashed border-border rounded-lg p-10 text-center">
+            <FileSpreadsheet className="h-10 w-10 mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">
+              No file selected. Download the <span className="font-mono">pp.csv</span> template, fill it in (one row per item; multiple rows may share a File Group Key), then choose the CSV file to preview rows here.
+            </p>
+          </div>
+        )}
+
+        {/* Error list */}
+        {result && result.errors.length > 0 && (
+          <div className="border border-amber-500/40 rounded-lg p-3 bg-amber-500/[0.04] max-h-40 overflow-y-auto scrollbar-thin">
+            <p className="text-xs font-semibold text-amber-400 mb-2">Notes ({result.errors.length}):</p>
+            <ul className="space-y-1 text-xs text-foreground/80">
+              {result.errors.map((e, i) => (
+                <li key={i} className="font-mono">{e}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={close} disabled={importing || matching}>
+            {result && result.fail === 0 ? "Done" : "Close"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// CSV escape — wraps in quotes if the field contains a comma, quote, or newline
+function csvEscapeFile(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+// RFC-4180 CSV parser — handles quoted fields with embedded commas/newlines
+function parseCsvFile(text: string): string[][] {
+  const rows: string[][] = [];
+  let cur: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") {
+        cur.push(field);
+        field = "";
+      } else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        cur.push(field);
+        rows.push(cur);
+        cur = [];
+        field = "";
+      } else {
+        field += ch;
+      }
+    }
+  }
+  if (field.length > 0 || cur.length > 0) {
+    cur.push(field);
+    rows.push(cur);
+  }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
 }

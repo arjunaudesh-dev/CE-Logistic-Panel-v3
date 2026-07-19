@@ -274,8 +274,8 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
     const failed = results.filter((r) => !r.ok);
     if (failed.length === 0) {
       toast({
-        title: `Initiated ${selected.length} file${selected.length === 1 ? "" : "s"} — ${input.prNumber}`,
-        description: "PR raised successfully. Item statuses updated below.",
+        title: `Initiated ${selected.length} file${selected.length === 1 ? "" : "s"} successfully — ${input.prNumber}`,
+        description: "PR raised. Item statuses updated below — you remain on this tab.",
       });
     } else {
       toast({
@@ -286,8 +286,11 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
     }
     clearSelection();
     setBulkInitiateOpen(false);
+    // CRITICAL: do NOT call onChanged?.() here — that would refresh the
+    // PR Raised Files tab and could be perceived as the system "jumping"
+    // to that tab. The user stays on the PR from Estimate tab; the item
+    // statuses update in place via refresh().
     refresh();
-    onChanged?.();
   };
 
   const handleProcess = async () => {
@@ -486,9 +489,14 @@ export function EstimateItemsTable({ estimateId, showProcessButton = false, onCh
           open
           onOpenChange={(o) => !o && setInitiateItem(null)}
           onInitiated={() => {
+            // CRITICAL: do NOT call onChanged?.() here — that propagates up
+            // to the parent PresentPositionDialog which refreshes the PR
+            // Raised Files tab + the projects list, which the user perceives
+            // as the system auto-jumping away from this tab. We close the
+            // dialog + refresh ONLY the estimate items table so the item's
+            // status updates in place (Pending → Initiated) right here.
             setInitiateItem(null);
             refresh();
-            onChanged?.();
           }}
           projectAbbreviation={estimate?.project?.nameAbbreviation}
         />
@@ -757,8 +765,8 @@ function ItemsSection({
                   className="text-right"
                   align="right"
                 />
-                {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
                 {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+                <TableHead className="text-muted-foreground">RC / NR</TableHead>
                 <TableHead className="text-muted-foreground text-right">Last Purchase</TableHead>
                 <TableHead className="text-muted-foreground">Available Stock</TableHead>
                 <TableHead className="text-muted-foreground text-right">Action</TableHead>
@@ -845,6 +853,14 @@ function GroupCard({
               {commonRcNumber}
             </CustomBadge>
           )}
+          {!showRcCols && (
+            <CustomBadge
+              className="border-0 bg-amber-500/15 text-amber-400"
+              title="Non-Rate — none of the items in this file are on an active Rate Contract"
+            >
+              NR
+            </CustomBadge>
+          )}
           {commonFileNumber && (
             <span className="text-[11px] text-muted-foreground hidden md:inline font-mono">
               · {commonFileNumber}
@@ -878,8 +894,8 @@ function GroupCard({
                   <TableHead className="text-muted-foreground">Deno</TableHead>
                   <TableHead className="text-muted-foreground text-right">Unit Cost</TableHead>
                   <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
-                  {showRcCols && <TableHead className="text-muted-foreground">RC No.</TableHead>}
                   {showRcCols && <TableHead className="text-muted-foreground">RC Supplier</TableHead>}
+                  <TableHead className="text-muted-foreground">RC / NR</TableHead>
                   <TableHead className="text-muted-foreground text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
@@ -961,19 +977,30 @@ function ItemRow({
         {formatCurrency(totalCost)}
       </TableCell>
       {showRcCols && (
-        <TableCell>
-          {it.isRC ? (
-            <CustomBadge className="border-0 bg-emerald-500/15 text-emerald-400">{it.rcNumber}</CustomBadge>
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </TableCell>
-      )}
-      {showRcCols && (
         <TableCell className="text-xs text-muted-foreground">
           {it.rcSupplier || "—"}
         </TableCell>
       )}
+      {/* RC / NR badge — always visible. RC items show their RC number as a
+          green badge; non-RC items show an amber "NR" (Non-Rate) badge so
+          users can quickly distinguish RC vs Non-Rate items at a glance. */}
+      <TableCell>
+        {it.isRC ? (
+          <CustomBadge
+            className="border-0 bg-emerald-500/15 text-emerald-400 font-mono"
+            title={it.rcNumber ? `RC Number: ${it.rcNumber}` : "RC item (no RC number on file)"}
+          >
+            {it.rcNumber || "RC"}
+          </CustomBadge>
+        ) : (
+          <CustomBadge
+            className="border-0 bg-amber-500/15 text-amber-400"
+            title="Non-Rate — not on an active Rate Contract; tender/quotation required"
+          >
+            NR
+          </CustomBadge>
+        )}
+      </TableCell>
       {!compact && (
         <>
           <TableCell className="text-right text-xs">
@@ -1121,7 +1148,7 @@ function BulkInitiatePRDialog({
             Initiate {selectedCount} Selected Item{selectedCount === 1 ? "" : "s"} as a Single PR
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Raise one PR/GORF covering all {selectedCount} selected estimate item{selectedCount === 1 ? "" : "s"}. They will share the same PR number, file number, and file group key — collapsing into a single grouped row in the PR Raised Files window. Status updates in place; you stay on this tab.
+            Raise one PR/GORF covering all {selectedCount} selected estimate item{selectedCount === 1 ? "" : "s"}. They will share the same PR number, file number, and file group key — collapsing into a single grouped row when viewed later in the PR Raised Files window. After initiate, item statuses update in place below and <span className="font-medium text-foreground">you stay on this tab</span> — no auto-jump.
           </DialogDescription>
         </DialogHeader>
 

@@ -1,11 +1,282 @@
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
+import { PRESENT_POSITIONS } from "@/lib/constants";
 
 // Shared ZAI instance (created lazily)
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 async function getZAI() {
   if (!zaiInstance) zaiInstance = await ZAI.create();
   return zaiInstance;
+}
+
+// ─── Bulk Upload Variation Matching ───
+export interface BulkMatchInputRow {
+  fileGroupKey: string;
+  prNumber: string;
+  fileNumber: string;
+  itemName: string;
+  deno: string; // unit
+  qty: number;
+  unitCost: number;
+  presentPosition: string;
+  supplier: string;
+}
+
+export interface BulkMatchResultRow {
+  rowIndex: number;
+  fileGroupKey: string;
+  prNumber: string;
+  fileNumber: string;
+  // Original values (as parsed from CSV)
+  originalItemName: string;
+  originalPresentPosition: string;
+  originalSupplier: string;
+  // AI-matched canonical values
+  matchedItemName: string;
+  matchedItemCode: string | null;
+  matchedPresentPosition: string;
+  matchedSupplier: string;
+  // Per-field confidence
+  itemNameConfidence: "high" | "medium" | "low" | "none";
+  positionConfidence: "high" | "medium" | "low" | "none";
+  supplierConfidence: "high" | "medium" | "low" | "none";
+  // Overall confidence (lowest of the three)
+  overallConfidence: "high" | "medium" | "low" | "none";
+  notes: string;
+}
+
+/**
+ * Match bulk-upload CSV rows against the existing item master / store items,
+ * PRESENT_POSITIONS list, and supplier directory. Handles common variations
+ * like "LED Flood Light" vs "LED Floodlight 200W", "PO Placed" vs "Purchase
+ * Order Placed", "Marine Pumps Ltd" vs "Marine Pumps Limited".
+ *
+ * Used by the file-level bulk upload dialog in the Projects module.
+ */
+export async function matchBulkUploadVariations(
+  rows: BulkMatchInputRow[]
+): Promise<BulkMatchResultRow[]> {
+  if (rows.length === 0) return [];
+
+  // Gather DB context: item master + store items + suppliers
+  const [itemMaster, storeItems, suppliers] = await Promise.all([
+    db.itemMaster.findMany({
+      where: { status: "Active" },
+      take: 1000,
+    }),
+    db.storeItem.findMany({ take: 1000 }),
+    db.supplier.findMany({ take: 500 }),
+  ]);
+
+  // Compact context for the model — only the fields we need for matching
+  const itemContext = itemMaster.map((i) => ({
+    canonicalCode: i.canonicalCode,
+    description: i.description,
+    alternateNames: i.alternateNames,
+    category: i.category,
+    unit: i.unit,
+  }));
+  const storeContext = storeItems.map((s) => ({
+    itemCode: s.itemCode,
+    description: s.description,
+    category: s.category,
+    unit: s.unit,
+  }));
+  const supplierContext = suppliers.map((s) => ({
+    name: s.name,
+    contactPerson: s.contactPerson,
+  }));
+
+  const systemPrompt = `You are a senior dockyard procurement cataloguer. You are given a list of bulk-uploaded procurement file rows from a CSV. For each row, you must match the Item Name, Present Position, and Supplier against the existing item master, the predefined PRESENT_POSITIONS list, and the supplier directory — handling common variations, abbreviations, typos, and unit differences.
+
+Matching rules:
+- Item Name: find the canonical item from the ITEM MASTER or STORE INVENTORY. Variations like "LED Flood Light" vs "LED Floodlight 200W", or "Centrifugal Pump 15kW" vs "C/Pump 15KW" should match the same canonical item. If matched, set matchedItemName to the canonical description and matchedItemCode to the canonical code. If no good match exists, keep the original name and set matchedItemCode to null.
+- Present Position: match against the PRESENT_POSITIONS list (case-insensitive, handle variations like "PO Placed" vs "Purchase Order Placed", "PR Raised" vs "PR Raised Files"). If matched, set matchedPresentPosition to the exact PRESENT_POSITIONS entry. If no good match, default to "PR Raised".
+- Supplier: match against the SUPPLIER DIRECTORY (handle "Ltd" vs "Limited", "Pte" vs "Private", missing suffixes, etc.). If matched, set matchedSupplier to the canonical supplier name. If no good match, keep the original supplier name.
+
+Confidence levels:
+- "high": exact or near-exact match (case/punctuation only)
+- "medium": semantic match with minor variation (synonyms, abbreviations, partial name)
+- "low": weak match (single keyword overlap, ambiguous)
+- "none": no match found
+
+overallConfidence = the LOWEST of the three per-field confidences.
+
+Respond with ONLY valid JSON (no markdown fences, no explanation): an array of objects, one per input row, in the same order. Each object must have keys:
+rowIndex, fileGroupKey, prNumber, fileNumber, originalItemName, originalPresentPosition, originalSupplier, matchedItemName, matchedItemCode (string|null), matchedPresentPosition, matchedSupplier, itemNameConfidence, positionConfidence, supplierConfidence, overallConfidence, notes`;
+
+  const userPrompt = `Input rows to match:
+${JSON.stringify(
+  rows.map((r, i) => ({
+    rowIndex: i,
+    fileGroupKey: r.fileGroupKey,
+    prNumber: r.prNumber,
+    fileNumber: r.fileNumber,
+    itemName: r.itemName,
+    deno: r.deno,
+    qty: r.qty,
+    unitCost: r.unitCost,
+    presentPosition: r.presentPosition,
+    supplier: r.supplier,
+  })),
+  null,
+  2
+)}
+
+ITEM MASTER (database):
+${JSON.stringify(itemContext, null, 2)}
+
+STORE INVENTORY (database):
+${JSON.stringify(storeContext, null, 2)}
+
+SUPPLIER DIRECTORY (database):
+${JSON.stringify(supplierContext, null, 2)}
+
+PRESENT_POSITIONS (canonical list — match against this):
+${JSON.stringify([...PRESENT_POSITIONS], null, 2)}
+
+Return a JSON array with exactly ${rows.length} objects.`;
+
+  try {
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: "assistant", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      thinking: { type: "disabled" },
+    });
+    const raw = completion.choices[0]?.message?.content || "[]";
+    const cleaned = raw
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim();
+    const parsed = JSON.parse(cleaned) as BulkMatchResultRow[];
+    // Defensive: ensure rowIndex is in range; otherwise fall back to index
+    return parsed.map((p, i) => ({
+      rowIndex: typeof p.rowIndex === "number" ? p.rowIndex : i,
+      fileGroupKey: p.fileGroupKey || rows[i]?.fileGroupKey || "",
+      prNumber: p.prNumber || rows[i]?.prNumber || "",
+      fileNumber: p.fileNumber || rows[i]?.fileNumber || "",
+      originalItemName: p.originalItemName || rows[i]?.itemName || "",
+      originalPresentPosition:
+        p.originalPresentPosition || rows[i]?.presentPosition || "",
+      originalSupplier: p.originalSupplier || rows[i]?.supplier || "",
+      matchedItemName: p.matchedItemName || rows[i]?.itemName || "",
+      matchedItemCode: p.matchedItemCode ?? null,
+      matchedPresentPosition:
+        p.matchedPresentPosition ||
+        rows[i]?.presentPosition ||
+        "PR Raised",
+      matchedSupplier: p.matchedSupplier || rows[i]?.supplier || "",
+      itemNameConfidence: p.itemNameConfidence || "none",
+      positionConfidence: p.positionConfidence || "none",
+      supplierConfidence: p.supplierConfidence || "none",
+      overallConfidence: p.overallConfidence || "none",
+      notes: p.notes || "",
+    }));
+  } catch (e) {
+    console.error("AI bulk-match failed:", e);
+    // Deterministic fallback: case-insensitive substring match against
+    // PRESENT_POSITIONS, supplier names, and store-item descriptions.
+    return rows.map((r, i) =>
+      fallbackBulkMatch(r, i, storeItems, suppliers)
+    );
+  }
+}
+
+function fallbackBulkMatch(
+  r: BulkMatchInputRow,
+  i: number,
+  storeItems: { itemCode: string | null; description: string; category: string }[],
+  suppliers: { name: string }[]
+): BulkMatchResultRow {
+  const itemNameLower = r.itemName.toLowerCase();
+  const positionLower = r.presentPosition.toLowerCase().trim();
+  const supplierLower = r.supplier.toLowerCase().trim();
+
+  // Item match — first store item whose description overlaps
+  const itemMatch = storeItems.find(
+    (s) =>
+      s.description.toLowerCase().includes(itemNameLower) ||
+      itemNameLower.includes(s.description.toLowerCase())
+  );
+  const matchedItemName = itemMatch?.description || r.itemName;
+  const matchedItemCode = itemMatch?.itemCode || null;
+  const itemNameConfidence: BulkMatchResultRow["itemNameConfidence"] = itemMatch
+    ? "medium"
+    : "none";
+
+  // Position match — exact case-insensitive match against PRESENT_POSITIONS
+  const exactPos = PRESENT_POSITIONS.find(
+    (p) => p.toLowerCase() === positionLower
+  );
+  const partialPos = !exactPos
+    ? PRESENT_POSITIONS.find(
+        (p) =>
+          p.toLowerCase().includes(positionLower) ||
+          positionLower.includes(p.toLowerCase())
+      )
+    : undefined;
+  const matchedPresentPosition = exactPos || partialPos || "PR Raised";
+  const positionConfidence: BulkMatchResultRow["positionConfidence"] = exactPos
+    ? "high"
+    : partialPos
+    ? "medium"
+    : "none";
+
+  // Supplier match — exact case-insensitive match against supplier names
+  const exactSup = suppliers.find(
+    (s) => s.name.toLowerCase() === supplierLower
+  );
+  const partialSup = !exactSup
+    ? suppliers.find(
+        (s) =>
+          s.name.toLowerCase().includes(supplierLower) ||
+          supplierLower.includes(s.name.toLowerCase())
+      )
+    : undefined;
+  const matchedSupplier = exactSup?.name || partialSup?.name || r.supplier;
+  const supplierConfidence: BulkMatchResultRow["supplierConfidence"] = exactSup
+    ? "high"
+    : partialSup
+    ? "medium"
+    : "none";
+
+  const confidences = [
+    itemNameConfidence,
+    positionConfidence,
+    supplierConfidence,
+  ];
+  const order = { high: 3, medium: 2, low: 1, none: 0 } as const;
+  const overall = confidences.reduce(
+    (min, c) => (order[c] < order[min] ? c : min),
+    confidences[0] || "none"
+  );
+
+  return {
+    rowIndex: i,
+    fileGroupKey: r.fileGroupKey,
+    prNumber: r.prNumber,
+    fileNumber: r.fileNumber,
+    originalItemName: r.itemName,
+    originalPresentPosition: r.presentPosition,
+    originalSupplier: r.supplier,
+    matchedItemName,
+    matchedItemCode,
+    matchedPresentPosition,
+    matchedSupplier,
+    itemNameConfidence,
+    positionConfidence,
+    supplierConfidence,
+    overallConfidence: overall,
+    notes:
+      itemNameConfidence === "none" &&
+      positionConfidence === "none" &&
+      supplierConfidence === "none"
+        ? "No matches found (AI unavailable, deterministic fallback)"
+        : "Matched via deterministic fallback (AI unavailable)",
+  };
 }
 
 export interface EstimateLineInput {
