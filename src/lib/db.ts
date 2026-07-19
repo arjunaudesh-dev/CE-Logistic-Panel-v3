@@ -1,9 +1,19 @@
 import { PrismaClient } from '@prisma/client'
+import path from 'path'
+
+// Resolve the absolute path to the SQLite database file dynamically
+const customDbPath = path.join(process.cwd(), 'db', 'custom.db')
+const dbUrl = `file:${customDbPath}`
 
 // 1. Raw client used for seeds, migrations, and applying sync data without loop feedbacks
 export const rawDb =
   (globalThis as any).prisma ??
   new PrismaClient({
+    datasources: {
+      db: {
+        url: dbUrl,
+      },
+    },
     log: ['query'],
   })
 
