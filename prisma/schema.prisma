@@ -640,3 +640,26 @@ model ThemeProfile {
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
 }
+
+// ───────────────────────── SYNCHRONIZATION AND REPLICATION ─────────────────────────
+model ChangeLog {
+  id           String   @id @default(cuid())
+  tableName    String   // The affected model name (e.g. "Project", "ProjectFile")
+  recordId     String   // The primary key ID of the record modified
+  operation    String   // "CREATE" | "UPDATE" | "DELETE"
+  data         String   // JSON stringified payload of the record (empty for DELETE)
+  timestamp    DateTime @default(now())
+  sourceNodeId String   // The ID of the node that generated this change
+  synced       Boolean  @default(false) // Tracks whether this change has been pushed
+
+  @@index([synced])
+  @@index([timestamp])
+}
+
+model SyncStatus {
+  id           String   @id @default(cuid())
+  nodeId       String   @unique // The node ID this status represents
+  lastSyncTime DateTime // The timestamp of the last pulled change log
+  updatedAt    DateTime @updatedAt
+}
+
