@@ -4229,10 +4229,9 @@ function SendToAreaStoreDialog({
 interface SplitOrderEntryData {
   id: string;
   subId: string;
-  srNo: number;
   date: string;
   vehicleNumber: string | null;
-  qty: number;
+  receivedQty: number;
   driverName: string | null;
   sentToQCI: boolean;
   sentToQCIAt: string | null;
@@ -4242,10 +4241,8 @@ interface SplitOrderSubData {
   id: string;
   headerId: string;
   poNumber: string;
-  supplier: string | null;
-  poQty: number;
-  unitPrice: number;
-  totalPrice: number;
+  allocatedQty: number;
+  receivedQty: number;
   entries: SplitOrderEntryData[];
 }
 
@@ -4254,10 +4251,9 @@ interface SplitOrderHeaderData {
   fileNumber: string;
   itemName: string;
   totalQty: number;
-  unit: string;
-  remarks: string | null;
+  supplier: string | null;
   createdAt: string;
-  subs: SplitOrderSubData[];
+  splits: SplitOrderSubData[];
 }
 
 function SplitOrdersTab() {
@@ -4307,8 +4303,8 @@ function SplitOrdersTab() {
       ) : (
         <div className="space-y-4">
           {headers.map((h) => {
-            const deliveredTotal = h.subs.reduce(
-              (acc, s) => acc + s.entries.reduce((eAcc, e) => eAcc + e.qty, 0),
+            const deliveredTotal = (h.splits || []).reduce(
+              (acc, s) => acc + (s.entries || []).reduce((eAcc, e) => eAcc + e.receivedQty, 0),
               0
             );
             const progressPct = h.totalQty > 0 ? Math.min(100, Math.round((deliveredTotal / h.totalQty) * 100)) : 0;
@@ -4324,16 +4320,16 @@ function SplitOrdersTab() {
                       </span>
                       <h4 className="font-semibold text-foreground text-sm">{h.itemName}</h4>
                       <CustomBadge className="bg-secondary text-muted-foreground border-border">
-                        Total: {h.totalQty} {h.unit}
+                        Total: {h.totalQty}
                       </CustomBadge>
                     </div>
-                    {h.remarks && <p className="text-xs text-muted-foreground italic">{h.remarks}</p>}
+                    {h.supplier && <p className="text-xs text-muted-foreground italic">Supplier: {h.supplier}</p>}
                   </div>
                   <div className="flex items-center gap-3 text-right">
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Delivered / Progress</p>
                       <p className="text-sm font-semibold text-emerald-400">
-                        {deliveredTotal} / {h.totalQty} {h.unit} ({progressPct}%)
+                        {deliveredTotal} / {h.totalQty} ({progressPct}%)
                       </p>
                     </div>
                   </div>
@@ -4341,9 +4337,9 @@ function SplitOrdersTab() {
 
                 {/* Sub-POs Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {h.subs.map((s) => {
-                    const subDelivered = s.entries.reduce((acc, e) => acc + e.qty, 0);
-                    const subBalance = s.poQty - subDelivered;
+                  {(h.splits || []).map((s) => {
+                    const subDelivered = (s.entries || []).reduce((acc, e) => acc + e.receivedQty, 0);
+                    const subBalance = s.allocatedQty - subDelivered;
 
                     return (
                       <div key={s.id} className="rounded-lg border border-border/70 bg-secondary/20 p-4 space-y-3">
@@ -4352,11 +4348,10 @@ function SplitOrdersTab() {
                             <span className="font-mono text-xs font-semibold text-foreground flex items-center gap-1">
                               <FileText className="h-3.5 w-3.5 text-primary" /> {s.poNumber}
                             </span>
-                            <p className="text-xs text-muted-foreground">{s.supplier || "Vendor Not Specified"}</p>
                           </div>
                           <div className="text-right">
                             <span className="text-xs font-semibold text-foreground">
-                              {subDelivered} / {s.poQty} delivered
+                              {subDelivered} / {s.allocatedQty} delivered
                             </span>
                             <p className="text-[10px] text-muted-foreground">
                               Bal: <span className={cn(subBalance > 0 ? "text-amber-400" : "text-emerald-400")}>{subBalance}</span>
@@ -4384,12 +4379,12 @@ function SplitOrdersTab() {
                                   </TableCell>
                                 </TableRow>
                               ) : (
-                                s.entries.map((e) => (
+                                (s.entries || []).map((e, idx) => (
                                   <TableRow key={e.id} className="text-xs hover:bg-secondary/40">
-                                    <TableCell className="py-1.5 font-mono text-[11px]">#{e.srNo}</TableCell>
+                                    <TableCell className="py-1.5 font-mono text-[11px]">#{idx + 1}</TableCell>
                                     <TableCell className="py-1.5 text-muted-foreground text-[11px]">{e.date}</TableCell>
                                     <TableCell className="py-1.5 font-mono text-[11px]">{e.vehicleNumber || "—"}</TableCell>
-                                    <TableCell className="py-1.5 text-right font-medium">{e.qty}</TableCell>
+                                    <TableCell className="py-1.5 text-right font-medium">{e.receivedQty}</TableCell>
                                     <TableCell className="py-1.5 text-right">
                                       {e.sentToQCI ? (
                                         <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]">
@@ -4630,7 +4625,7 @@ function AddSplitEntryDialog({
     const res = await apiRequest(`/api/collection/split-orders/${sub.id}/entries`, "POST", {
       date,
       vehicleNumber,
-      qty: Number(qty),
+      receivedQty: Number(qty),
       driverName,
     });
     setSubmitting(false);

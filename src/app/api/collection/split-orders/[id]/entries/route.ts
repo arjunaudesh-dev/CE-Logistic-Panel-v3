@@ -8,7 +8,7 @@ export async function POST(
   try {
     const { id: subId } = await params;
     const body = await req.json();
-    const { action, entryId, vehicleNumber, qty, driverName, qcOfficer } = body;
+    const { action, entryId, vehicleType, vehicleNumber, receivedQty, driverName, qcOfficer } = body;
 
     const sub = await db.splitOrderSub.findUnique({
       where: { id: subId },
@@ -22,7 +22,6 @@ export async function POST(
       const entry = await db.splitOrderEntry.findUnique({ where: { id: entryId } });
       if (!entry) return NextResponse.json({ error: "Entry not found" }, { status: 404 });
 
-      // Count existing QC Inspections to generate QCI number
       const count = await db.qCInspection.count();
       const qciNumber = `QCI-${String(count + 1).padStart(4, "0")}`;
 
@@ -34,8 +33,8 @@ export async function POST(
           fileNumber: sub.header.fileNumber,
           poNumber: sub.poNumber,
           itemName: sub.header.itemName,
-          supplier: sub.supplier || "—",
-          qty: entry.qty,
+          supplier: sub.header.supplier || "—",
+          qty: entry.receivedQty,
           qcLevel: "Satisfactory",
           qcOfficer: qcOfficer || "QC Inspector",
           remarks: `Sent from Split Order ${sub.header.fileNumber} (${sub.poNumber})`,
@@ -53,18 +52,25 @@ export async function POST(
       return NextResponse.json({ entry: updatedEntry, qc });
     }
 
-    // Default action: Add new entry under sub-PO
-    const srNo = sub.entries.length + 1;
+    // Default action: Add delivery entry
+    const qtyNum = Number(receivedQty) || 0;
     const newEntry = await db.splitOrderEntry.create({
       data: {
         subId,
-        srNo,
         date: body.date || new Date().toISOString().slice(0, 10),
+        receivedQty: qtyNum,
+        vehicleType: vehicleType || "Civil",
         vehicleNumber: vehicleNumber || null,
-        qty: Number(qty) || 0,
         driverName: driverName || null,
         sentToQCI: false,
       },
+    });
+
+    // Update receivedQty on sub
+    const newTotalReceived = sub.receivedQty + qtyNum;
+    await db.splitOrderSub.update({
+      where: { id: subId },
+      data: { receivedQty: newTotalReceived },
     });
 
     return NextResponse.json(newEntry, { status: 201 });

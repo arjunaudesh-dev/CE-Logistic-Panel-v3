@@ -5,9 +5,9 @@ export async function GET() {
   try {
     let orders = await db.splitOrderHeader.findMany({
       include: {
-        subs: {
+        splits: {
           include: {
-            entries: { orderBy: { srNo: "asc" } },
+            entries: { orderBy: { createdAt: "asc" } },
           },
         },
       },
@@ -21,23 +21,20 @@ export async function GET() {
           fileNumber: "FILE/2025-004",
           itemName: "Portland Cement (50kg Bag)",
           totalQty: 30,
-          unit: "BAGS",
-          remarks: "Split delivery across two purchase orders",
-          subs: {
+          supplier: "Tokyo / Insee Cement",
+          splits: {
             create: [
               {
                 poNumber: "PO/2025/0001",
-                supplier: "Tokyo Cement PLC",
-                poQty: 20,
-                unitPrice: 2450,
-                totalPrice: 49000,
+                allocatedQty: 20,
+                receivedQty: 10,
                 entries: {
                   create: [
                     {
-                      srNo: 1,
                       date: new Date().toISOString().slice(0, 10),
+                      receivedQty: 10,
+                      vehicleType: "Civil",
                       vehicleNumber: "WP CAB-1042",
-                      qty: 10,
                       driverName: "K. Perera",
                       sentToQCI: false,
                     },
@@ -46,17 +43,15 @@ export async function GET() {
               },
               {
                 poNumber: "PO/2025/0002",
-                supplier: "Insee Cement (Siam City)",
-                poQty: 10,
-                unitPrice: 2500,
-                totalPrice: 25000,
+                allocatedQty: 10,
+                receivedQty: 5,
                 entries: {
                   create: [
                     {
-                      srNo: 1,
                       date: new Date().toISOString().slice(0, 10),
+                      receivedQty: 5,
+                      vehicleType: "Civil",
                       vehicleNumber: "WP GB-8821",
-                      qty: 5,
                       driverName: "M. Silva",
                       sentToQCI: false,
                     },
@@ -67,9 +62,9 @@ export async function GET() {
           },
         },
         include: {
-          subs: {
+          splits: {
             include: {
-              entries: { orderBy: { srNo: "asc" } },
+              entries: { orderBy: { createdAt: "asc" } },
             },
           },
         },
@@ -87,29 +82,26 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { fileNumber, itemName, totalQty, unit, remarks, subs } = body;
+    const { fileNumber, itemName, totalQty, supplier, splits } = body;
 
     const created = await db.splitOrderHeader.create({
       data: {
         fileNumber: fileNumber?.trim() || "FILE/2025-SPLIT",
         itemName: itemName?.trim() || "Item",
         totalQty: Number(totalQty) || 0,
-        unit: unit || "NOS",
-        remarks: remarks || null,
-        subs: {
-          create: (subs || []).map((s: any) => ({
+        supplier: supplier || null,
+        splits: {
+          create: (splits || []).map((s: any) => ({
             poNumber: s.poNumber,
-            supplier: s.supplier || null,
-            poQty: Number(s.poQty) || 0,
-            unitPrice: Number(s.unitPrice) || 0,
-            totalPrice: (Number(s.poQty) || 0) * (Number(s.unitPrice) || 0),
+            allocatedQty: Number(s.allocatedQty || s.poQty) || 0,
+            receivedQty: 0,
           })),
         },
       },
       include: {
-        subs: {
+        splits: {
           include: {
-            entries: { orderBy: { srNo: "asc" } },
+            entries: { orderBy: { createdAt: "asc" } },
           },
         },
       },
