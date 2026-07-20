@@ -133,6 +133,7 @@ interface StoreItem {
   unitCost: number;
   totalCost: number;
   location: string | null;
+  bookNo?: string | null;
   minStock: number;
   maxStock: number;
   lastMovement: string | null;
@@ -1104,6 +1105,7 @@ function StoresTab(props: StoresTabProps) {
                         )}
                       </span>
                     </TableHead>
+                    <TableHead>Book No</TableHead>
                     <TableHead>Location</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -1169,6 +1171,11 @@ function StoresTab(props: StoresTabProps) {
                           <div className="text-[10px] text-muted-foreground">
                             @{formatCurrency(item.unitCost)}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                            {item.bookNo || "—"}
+                          </span>
                         </TableCell>
                         <TableCell>
                           <CustomBadge className="bg-secondary/60 text-muted-foreground border-border">
@@ -1267,6 +1274,7 @@ interface ItemForm {
   unit: string;
   qty: string;
   unitCost: string;
+  bookNo: string;
   location: string;
   minStock: string;
   maxStock: string;
@@ -1282,6 +1290,7 @@ const DEFAULT_FORM: ItemForm = {
   unit: "NOS",
   qty: "0",
   unitCost: "0",
+  bookNo: "",
   location: "",
   minStock: "0",
   maxStock: "0",
@@ -1308,6 +1317,7 @@ function ItemFormDialog({
           unit: editing.unit,
           qty: String(editing.qty ?? 0),
           unitCost: String(editing.unitCost ?? 0),
+          bookNo: editing.bookNo ?? "",
           location: editing.location ?? "",
           minStock: String(editing.minStock ?? 0),
           maxStock: String(editing.maxStock ?? 0),
@@ -1343,6 +1353,7 @@ function ItemFormDialog({
       unit: form.unit || "NOS",
       qty: qtyNum,
       unitCost: unitCostNum,
+      bookNo: form.bookNo.trim() || null,
       location: form.location.trim() || form.zoneName,
       minStock: Number(form.minStock) || 0,
       maxStock: Number(form.maxStock) || 0,
@@ -1454,6 +1465,16 @@ function ItemFormDialog({
             <div className="h-9 px-3 rounded-md border border-border bg-secondary/40 flex items-center text-sm font-semibold text-foreground tabular-nums">
               {formatCurrency(fileCost)}
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Stock Book No</Label>
+            <Input
+              value={form.bookNo}
+              onChange={(e) => set("bookNo", e.target.value)}
+              placeholder="e.g. Book 01"
+              className="bg-background border-border"
+            />
           </div>
 
           <div className="space-y-1.5">

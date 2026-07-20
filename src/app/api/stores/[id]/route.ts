@@ -40,6 +40,7 @@ export async function PUT(
         unitCost,
         totalCost: qty * unitCost,
         location: body.location ?? existing.location,
+        bookNo: body.bookNo ?? existing.bookNo,
         minStock: body.minStock != null ? Number(body.minStock) : existing.minStock,
         maxStock: body.maxStock != null ? Number(body.maxStock) : existing.maxStock,
         supplier: body.supplier ?? existing.supplier,

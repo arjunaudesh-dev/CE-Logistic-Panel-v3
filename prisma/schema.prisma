@@ -385,6 +385,7 @@ model StoreItem {
   unitCost      Float    @default(0)
   totalCost     Float    @default(0)
   location      String?
+  bookNo        String?
   minStock      Float    @default(0)
   maxStock      Float    @default(0)
   lastMovement  String?

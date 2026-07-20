@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
         unitCost,
         totalCost: qty * unitCost,
         location: body.location || body.zoneName || null,
+        bookNo: body.bookNo || null,
         minStock: Number(body.minStock) || 0,
         maxStock: Number(body.maxStock) || 0,
         supplier: body.supplier || null,
