@@ -301,6 +301,41 @@ export function StoresModule() {
 
   const { toast } = useToast();
 
+  const [syncingCmsys, setSyncingCmsys] = useState(false);
+
+  const handleSyncCmsys = async () => {
+    setSyncingCmsys(true);
+    toast({
+      title: "Connecting to CMSys v2.2 Firebase...",
+      description: "Synchronizing live inventory & zone stores from ncw-ps-operations...",
+    });
+    try {
+      const res = await apiRequest("/api/sync/firebase-stores", "POST");
+      setSyncingCmsys(false);
+      if (res.ok) {
+        toast({
+          title: "CMSys Sync Complete! 🎉",
+          description: (res.data as any)?.message || "Successfully synchronized live inventory from CMSys v2.2 Firebase.",
+        });
+        refreshItems();
+        refreshZones();
+      } else {
+        toast({
+          title: "CMSys Sync Failed",
+          description: res.error || "Could not fetch inventory from Firebase.",
+          variant: "destructive",
+        });
+      }
+    } catch (e: any) {
+      setSyncingCmsys(false);
+      toast({
+        title: "CMSys Sync Error",
+        description: e.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   // Derived: filtered + sorted list
   const filtered = useMemo(() => {
     if (!items) return [];
@@ -424,13 +459,24 @@ export function StoresModule() {
   };
 
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Store Management"
         description="Zones, inventory & stock-level monitoring across the dockyard"
         icon={Warehouse}
         actions={
           <div className="flex flex-wrap items-center gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={syncingCmsys}
+              onClick={handleSyncCmsys}
+              className="gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+              title="Synchronize live inventory from CMSys v2.2 Firebase DB"
+            >
+              {syncingCmsys ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {syncingCmsys ? "Syncing CMSys..." : "Sync CMSys v2.2"}
+            </Button>
             <Button
               variant="outline"
               size="sm"
