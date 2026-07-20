@@ -119,7 +119,11 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: radial-gradient(circle at top right, color-mix(in srgb, var(--primary) 8%, transparent), transparent 50%),
+                radial-gradient(circle at bottom left, color-mix(in srgb, var(--chart-4) 6%, transparent), transparent 50%),
+                var(--background);
+    background-attachment: fixed;
   }
 }
 

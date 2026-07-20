@@ -56,12 +56,14 @@ import {
   PROCESS_FLOW_TYPES,
   processFlowColor,
   NUMBER_PREFIX_TYPES,
+  PREFIX_PROCESS_TYPES,
   THEME_PROFILE_PRESETS,
   type ThemeProfilePreset,
   formatCurrency,
   VOTE_DEPARTMENTS,
   FINANCIAL_AUTHORITIES,
   PROCESS_STEP_STAGES,
+  STAGE_AUTO_DETAILS,
   SETTINGS_DEPARTMENTS,
 } from "@/lib/constants";
 import {
@@ -92,7 +94,6 @@ import {
   Gavel,
   ClipboardCheck,
   Banknote,
-  ArrowRight,
   ListTree,
   KeyRound,
   Vote,
@@ -102,7 +103,6 @@ import {
   LogIn,
   LogOut,
   Info,
-  Coins,
   Calendar,
   Crown,
   UserCog,
@@ -159,18 +159,23 @@ interface StoreConfig {
 interface ProcessStep {
   id: string;
   flowId: string;
-  stepOrder: number;
-  positionName: string;
-  description: string | null;
+  stepOrder?: number | null;
+  positionName?: string | null;
+  predefinedStage?: string | null;
+  description?: string | null;
+  beforeStepId?: string | null;
+  afterStepId?: string | null;
   department?: string | null;
   responsibleOfficers?: string | string[] | null;
   responsibleSailors?: string | string[] | null;
   financialDelegationId?: string | null;
-  defaultResponsiblePerson: string | null;
-  financialDelegationLevel: string | null;
+  defaultResponsiblePerson?: string | null;
+  financialDelegationLevel?: string | null;
   isTenderStage: boolean;
   isEvaluationStage: boolean;
   prefixedNumber?: string | null;
+  expectedDays?: number;
+  expectedPercentage?: number;
   createdAt: string;
 }
 
@@ -179,6 +184,9 @@ interface ProcessFlow {
   name: string;
   description: string | null;
   financialDelegationId?: string | null;
+  conditionMethod?: string | null;
+  conditionMinValue?: number | null;
+  conditionMaxValue?: number | null;
   createdAt: string;
   steps: ProcessStep[];
 }
@@ -212,6 +220,8 @@ interface SessionResponse {
 interface NumberPrefix {
   id: string;
   docType: string;
+  subCategory?: string | null;
+  processType?: string | null;
   prefix: string;
   suffix: string | null;
   nextNumber: number;
@@ -2690,15 +2700,12 @@ function VoteManagementTab() {
     const votes = list ?? [];
     const capital = votes.filter((v) => v.voteType === "Capital");
     const recurring = votes.filter((v) => v.voteType === "Recurring");
-    const totalAllocation = votes.reduce(
-      (acc, v) => acc + (v.allocation ?? 0),
-      0
-    );
+    const active = votes.filter((v) => v.active);
     return {
       total: votes.length,
       capital: capital.length,
       recurring: recurring.length,
-      totalAllocation,
+      active: active.length,
     };
   }, [list]);
 
@@ -2778,16 +2785,16 @@ function VoteManagementTab() {
         </div>
         <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-xl p-4 flex items-start gap-3 hover:from-emerald-500/15 hover:to-teal-500/10 transition-all">
           <div className="h-10 w-10 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
-            <Coins className="h-5 w-5" />
+            <CheckCircle2 className="h-5 w-5" />
           </div>
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Total Allocation
+              Active Votes
             </p>
-            <p className="text-xl font-bold text-foreground mt-0.5 truncate">
-              {formatCurrency(stats.totalAllocation)}
+            <p className="text-2xl font-bold text-foreground mt-0.5">
+              {stats.active}
             </p>
-            <p className="text-xs text-muted-foreground">Combined value</p>
+            <p className="text-xs text-muted-foreground">Operational</p>
           </div>
         </div>
       </div>
@@ -2848,7 +2855,6 @@ function VoteManagementTab() {
                   <TableHead>Description</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Department</TableHead>
-                  <TableHead className="text-right">Allocation</TableHead>
                   <TableHead>Financial Year</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -2899,9 +2905,6 @@ function VoteManagementTab() {
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium text-foreground">
-                      {formatCurrency(v.allocation ?? 0)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {v.financialYear ? (
@@ -3047,9 +3050,6 @@ function VoteFormDialog({
   const [voteType, setVoteType] = useState<string>(
     initial?.voteType ?? "Capital"
   );
-  const [allocation, setAllocation] = useState<string>(
-    initial ? String(initial.allocation) : "0"
-  );
   const [department, setDepartment] = useState<string>(
     initial?.department ?? "SLN"
   );
@@ -3069,7 +3069,6 @@ function VoteFormDialog({
       voteNumber: voteNumber.trim(),
       description: description.trim(),
       voteType,
-      allocation: Number(allocation) || 0,
       department: department.trim() || null,
       financialYear: financialYear.trim() || null,
       active,
@@ -3107,9 +3106,9 @@ function VoteFormDialog({
             {isEdit ? "Edit Vote" : "Add Vote / Fund"}
           </DialogTitle>
           <DialogDescription>
-            Configure a Treasury vote (fund) — used to track the financial
-            allocation for projects and maintenance. Only active votes appear
-            in the Projects wizard.
+            Configure a Treasury vote (fund) — used to identify the source of
+            funding for projects and maintenance. Only active votes appear in
+            the Projects wizard.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -3130,40 +3129,28 @@ function VoteFormDialog({
               className="bg-background"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Vote Type">
-              <Select value={voteType} onValueChange={setVoteType}>
-                <SelectTrigger className="bg-background">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {VOTE_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "h-2 w-2 rounded-full",
-                            t === "Capital" ? "bg-blue-500" : "bg-amber-500"
-                          )}
-                        />
-                        {t}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Allocation (Rs.)">
-              <Input
-                type="number"
-                min={0}
-                value={allocation}
-                onChange={(e) => setAllocation(e.target.value)}
-                placeholder="0"
-                className="bg-background"
-              />
-            </Field>
-          </div>
+          <Field label="Vote Type">
+            <Select value={voteType} onValueChange={setVoteType}>
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                {VOTE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2 w-2 rounded-full",
+                          t === "Capital" ? "bg-blue-500" : "bg-amber-500"
+                        )}
+                      />
+                      {t}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Department">
             <div className="relative">
               <Input
@@ -3244,7 +3231,8 @@ function VoteFormDialog({
               <span className="text-blue-400 font-medium">Capital</span> votes
               fund one-time construction/renovation.{" "}
               <span className="text-amber-400 font-medium">Recurring</span>{" "}
-              votes fund annual maintenance.
+              votes fund annual maintenance. Allocations are tracked per-project
+              in the Projects module, not on the vote itself.
             </p>
           </div>
           <DialogFooter>
@@ -4154,7 +4142,7 @@ function ProcessFlowsTab() {
     if (res.ok) {
       toast({
         title: "Step removed",
-        description: `${deleteStepTarget.step.positionName} from ${deleteStepTarget.flow.name} flow`,
+        description: `${deleteStepTarget.step.positionName ?? deleteStepTarget.step.predefinedStage ?? "Step"} from ${deleteStepTarget.flow.name} flow`,
       });
       setDeleteStepTarget(null);
       refresh();
@@ -4220,7 +4208,7 @@ function ProcessFlowsTab() {
           }
         />
       ) : (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
           {flowsArr.map((flow) => (
             <FlowCard
               key={flow.id}
@@ -4348,9 +4336,11 @@ function ProcessFlowsTab() {
             <AlertDialogDescription>
               Remove{" "}
               <span className="font-semibold text-foreground">
-                {deleteStepTarget?.step.positionName}
+                {deleteStepTarget?.step.positionName ??
+                  deleteStepTarget?.step.predefinedStage ??
+                  "this step"}
               </span>{" "}
-              (Step {deleteStepTarget?.step.stepOrder}) from the{" "}
+              from the{" "}
               <span className="font-semibold text-foreground">
                 {deleteStepTarget?.flow.name}
               </span>{" "}
@@ -4381,7 +4371,66 @@ function ProcessFlowsTab() {
 }
 
 // ─────────────────────────────────────────────────────────
-// Flow Card (header + vertical timeline of steps)
+// Timeline helpers — build ordered list from before/after links
+// ─────────────────────────────────────────────────────────
+
+/** Display name for a step: predefined stage label OR custom position name. */
+function stepDisplayName(step: ProcessStep): string {
+  return step.predefinedStage || step.positionName || "Unnamed Step";
+}
+
+/**
+ * Build an ordered timeline from before/after links.
+ * Strategy: find root steps (beforeStepId == null/empty/unknown), follow the
+ * afterStepId chain. Fall back to children lookup (steps whose beforeStepId
+ * === step.id) for legacy data without an explicit after chain. Any orphans
+ * are appended at the end. Cycles are guarded against via a visited set.
+ */
+function buildTimeline(steps: ProcessStep[]): ProcessStep[] {
+  if (!steps || steps.length === 0) return [];
+  const map = new Map(steps.map((s) => [s.id, s]));
+  const visited = new Set<string>();
+  const ordered: ProcessStep[] = [];
+
+  const byStableOrder = (a: ProcessStep, b: ProcessStep) => {
+    const ao = a.stepOrder ?? 0;
+    const bo = b.stepOrder ?? 0;
+    if (ao !== bo) return ao - bo;
+    return (a.createdAt || "").localeCompare(b.createdAt || "");
+  };
+
+  // Roots: beforeStepId is null/empty/unknown
+  const roots = steps
+    .filter((s) => !s.beforeStepId || !map.has(s.beforeStepId))
+    .sort(byStableOrder);
+
+  function visit(step: ProcessStep) {
+    if (visited.has(step.id)) return;
+    visited.add(step.id);
+    ordered.push(step);
+    // Follow the explicit after-chain first
+    if (step.afterStepId && map.has(step.afterStepId)) {
+      visit(map.get(step.afterStepId)!);
+    }
+    // Then visit any children that point to this step as their before (in
+    // case afterStepId wasn't auto-set, e.g. legacy data).
+    const children = steps
+      .filter((s) => s.beforeStepId === step.id)
+      .sort(byStableOrder);
+    for (const c of children) visit(c);
+  }
+
+  for (const r of roots) visit(r);
+
+  // Append any orphan steps not visited (defensive)
+  const orphans = steps.filter((s) => !visited.has(s.id)).sort(byStableOrder);
+  for (const o of orphans) ordered.push(o);
+
+  return ordered;
+}
+
+// ─────────────────────────────────────────────────────────
+// Flow Card (compact header + vertical timeline of steps)
 // ─────────────────────────────────────────────────────────
 interface FlowCardProps {
   flow: ProcessFlow;
@@ -4401,125 +4450,117 @@ function FlowCard({
   onDeleteFlow,
 }: FlowCardProps) {
   const accent = flowAccent(flow.name);
-  const steps = [...(flow.steps ?? [])].sort(
-    (a, b) => a.stepOrder - b.stepOrder
-  );
-
+  const steps = buildTimeline(flow.steps ?? []);
   const tenderCount = steps.filter((s) => s.isTenderStage).length;
   const evalCount = steps.filter((s) => s.isEvaluationStage).length;
-  const delegationCount = steps.filter(
-    (s) => s.financialDelegationLevel && s.financialDelegationLevel !== "—"
-  ).length;
 
   return (
     <div
       className={cn(
-        "bg-card border rounded-xl overflow-hidden",
+        "bg-card border rounded-xl overflow-hidden flex flex-col h-full",
         accent.border
       )}
     >
-      {/* Colored header */}
+      {/* Colored header — compact */}
       <div
         className={cn(
-          "flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-5 border-b",
+          "flex flex-col gap-2.5 p-4 border-b",
           accent.headerBg,
           accent.border
         )}
       >
-        <div className="flex items-start gap-3 min-w-0">
+        <div className="flex items-start gap-2 min-w-0">
           <div
             className={cn(
-              "h-11 w-11 rounded-lg flex items-center justify-center shrink-0 ring-2",
+              "h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ring-2",
               accent.headerBg,
               accent.ring
             )}
           >
-            <GitBranch className={cn("h-6 w-6", accent.text)} />
+            <GitBranch className={cn("h-5 w-5", accent.text)} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-lg font-bold text-foreground">{flow.name}</h3>
-              <CustomBadge className={accent.badge}>{flow.name} Flow</CustomBadge>
-              <CustomBadge className="bg-secondary text-muted-foreground border-border">
+              <h3 className="text-base font-bold text-foreground truncate">
+                {flow.name}
+              </h3>
+              <CustomBadge className={cn("text-[10px]", accent.badge)}>
                 {steps.length} step{steps.length === 1 ? "" : "s"}
               </CustomBadge>
-              {tenderCount > 0 && (
-                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
-                  <Gavel className="h-3 w-3 mr-1" />
-                  {tenderCount} Tender
-                </CustomBadge>
-              )}
-              {evalCount > 0 && (
-                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
-                  <ClipboardCheck className="h-3 w-3 mr-1" />
-                  {evalCount} Evaluation
-                </CustomBadge>
-              )}
-              {delegationCount > 0 && (
-                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
-                  <Banknote className="h-3 w-3 mr-1" />
-                  {delegationCount} Delegation{delegationCount === 1 ? "" : "s"}
-                </CustomBadge>
-              )}
             </div>
             {flow.description && (
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                 {flow.description}
               </p>
             )}
+            {(tenderCount > 0 || evalCount > 0) && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {tenderCount > 0 && (
+                  <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">
+                    <Gavel className="h-2.5 w-2.5 mr-0.5" />
+                    {tenderCount} Tender
+                  </CustomBadge>
+                )}
+                {evalCount > 0 && (
+                  <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]">
+                    <ClipboardCheck className="h-2.5 w-2.5 mr-0.5" />
+                    {evalCount} Eval
+                  </CustomBadge>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="sm"
             onClick={onEditFlow}
-            className="bg-background/60"
+            className="bg-background/60 h-7 text-xs flex-1"
           >
-            <Pencil className="h-3.5 w-3.5 mr-1" />
+            <Pencil className="h-3 w-3 mr-1" />
             Edit
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={onDeleteFlow}
-            className="bg-background/60 text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30"
+            className="bg-background/60 text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/30 h-7 text-xs px-2"
+            title="Delete flow"
           >
-            <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Delete
+            <Trash2 className="h-3 w-3" />
           </Button>
-          <Button size="sm" onClick={onAddStep}>
-            <Plus className="h-3.5 w-3.5 mr-1" />
+          <Button size="sm" onClick={onAddStep} className="h-7 text-xs flex-1">
+            <Plus className="h-3 w-3 mr-1" />
             Add Step
           </Button>
         </div>
       </div>
 
-      {/* Body — vertical timeline */}
-      <div className="p-5">
+      {/* Body — compact vertical timeline */}
+      <div className="p-4 flex-1">
         {steps.length === 0 ? (
-          <EmptyState
-            icon={ListTree}
-            title="No steps defined"
-            description="Add steps to outline the procurement file's journey through this flow."
-            action={
-              <Button size="sm" onClick={onAddStep}>
-                <Plus className="h-4 w-4 mr-1" />
+          <div className="text-center py-6 text-xs text-muted-foreground">
+            <ListTree className="h-6 w-6 mx-auto mb-1 opacity-40" />
+            No steps yet.
+            <div className="mt-2">
+              <Button size="sm" onClick={onAddStep} className="h-7 text-xs">
+                <Plus className="h-3 w-3 mr-1" />
                 Add First Step
               </Button>
-            }
-          />
+            </div>
+          </div>
         ) : (
-          <div className="relative pl-8 sm:pl-10">
+          <div className="relative pl-5 max-h-[60vh] overflow-y-auto scrollbar-thin">
             {/* vertical line */}
             <div
               className={cn(
-                "absolute left-3 sm:left-4 top-2 bottom-2 w-0.5",
+                "absolute left-1.5 top-2 bottom-2 w-0.5",
                 accent.dot,
                 "opacity-30"
               )}
             />
-            <ol className="space-y-4">
+            <ol className="space-y-2.5">
               {steps.map((step, idx) => (
                 <StepTimelineItem
                   key={step.id}
@@ -4539,7 +4580,7 @@ function FlowCard({
 }
 
 // ─────────────────────────────────────────────────────────
-// Step Timeline Item
+// Step Timeline Item (compact, side-by-side friendly)
 // ─────────────────────────────────────────────────────────
 interface StepTimelineItemProps {
   step: ProcessStep;
@@ -4555,13 +4596,13 @@ function StepTimelineItem({
   onEdit,
   onDelete,
 }: StepTimelineItemProps) {
+  const name = stepDisplayName(step);
+  const officers = parseJsonArray(step.responsibleOfficers);
+  const sailors = parseJsonArray(step.responsibleSailors);
   const hasDelegation =
-    step.financialDelegationLevel &&
+    !!step.financialDelegationLevel &&
     step.financialDelegationLevel.trim() !== "" &&
     step.financialDelegationLevel !== "—";
-  const isBranch = step.isTenderStage || step.isEvaluationStage;
-
-  // Branch styling: tender = amber, evaluation = violet, both = combined
   const branchBorder = step.isTenderStage
     ? "border-l-amber-500"
     : step.isEvaluationStage
@@ -4573,139 +4614,122 @@ function StepTimelineItem({
       {/* Dot — colored by branch or by flow accent */}
       <div
         className={cn(
-          "absolute -left-[1.4rem] sm:-left-[1.6rem] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-card",
+          "absolute -left-[0.875rem] top-2.5 h-2.5 w-2.5 rounded-full ring-2 ring-card",
           step.isTenderStage
             ? "bg-amber-500"
             : step.isEvaluationStage
             ? "bg-violet-500"
             : accent.stepDot
         )}
-      >
-        {step.isTenderStage && step.isEvaluationStage && (
-          <div className="absolute inset-0 rounded-full bg-violet-500 mix-blend-lighten" />
-        )}
-      </div>
+      />
 
       <div
         className={cn(
-          "bg-secondary/30 border border-l-4 rounded-lg p-4 transition-colors hover:bg-secondary/50",
+          "bg-secondary/30 border border-l-2 rounded-md p-2.5 transition-colors hover:bg-secondary/50",
           branchBorder
         )}
       >
-        {/* Top row: order + position + branch tags */}
-        <div className="flex flex-wrap items-center gap-2 mb-2">
-          <span
-            className={cn(
-              "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold",
-              accent.headerBg,
-              accent.text,
-              "border",
-              accent.border
-            )}
-          >
-            #{step.stepOrder}
-          </span>
+        {/* Top row: name + prefixed number + actions */}
+        <div className="flex items-start gap-1.5">
           <CustomBadge
             className={cn(
-              "text-sm font-semibold",
+              "text-xs font-semibold flex-1 min-w-0",
               accent.badge
             )}
           >
-            {step.positionName}
+            <span className="truncate block">{name}</span>
           </CustomBadge>
-
-          {step.isTenderStage && (
-            <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
-              <Gavel className="h-3 w-3 mr-1" />
-              TENDER
+          {step.prefixedNumber && (
+            <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 font-mono text-[10px] shrink-0">
+              <Hash className="h-2.5 w-2.5 mr-0.5" />
+              {step.prefixedNumber}
             </CustomBadge>
           )}
-          {step.isEvaluationStage && (
-            <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
-              <ClipboardCheck className="h-3 w-3 mr-1" />
-              EVALUATION
-            </CustomBadge>
-          )}
-
-          <div className="ml-auto flex items-center gap-1">
+          <div className="flex items-center gap-0.5 shrink-0">
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="h-6 w-6 p-0"
               onClick={onEdit}
               title="Edit step"
             >
-              <Pencil className="h-3.5 w-3.5" />
+              <Pencil className="h-3 w-3" />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+              className="h-6 w-6 p-0 text-red-400 hover:text-red-500 hover:bg-red-500/10"
               onClick={onDelete}
               title="Delete step"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3 w-3" />
             </Button>
           </div>
         </div>
 
+        {/* Branch tags */}
+        {(step.isTenderStage || step.isEvaluationStage) && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {step.isTenderStage && (
+              <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px]">
+                <Gavel className="h-2 w-2 mr-0.5" />
+                TENDER
+              </CustomBadge>
+            )}
+            {step.isEvaluationStage && (
+              <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[9px]">
+                <ClipboardCheck className="h-2 w-2 mr-0.5" />
+                EVAL
+              </CustomBadge>
+            )}
+          </div>
+        )}
+
         {/* Description */}
         {step.description && (
-          <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+          <p className="text-[11px] text-muted-foreground mt-1.5 leading-snug line-clamp-3">
             {step.description}
           </p>
         )}
 
-        {/* Body: responsible person + financial delegation */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="rounded-lg border border-border bg-background/40 p-3">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
-              <UserCircle2 className="h-3 w-3" />
-              Default Responsible Person
-            </p>
-            <p className="text-sm font-medium text-foreground">
-              {step.defaultResponsiblePerson || "—"}
-            </p>
-          </div>
-          <div
-            className={cn(
-              "rounded-lg border p-3",
-              hasDelegation
-                ? "border-blue-500/40 bg-blue-500/5"
-                : "border-border bg-background/40"
-            )}
-          >
-            <p
-              className={cn(
-                "text-[10px] uppercase tracking-wide mb-1 flex items-center gap-1",
-                hasDelegation
-                  ? "text-blue-400"
-                  : "text-muted-foreground"
-              )}
-            >
-              <Award className="h-3 w-3" />
-              Financial Delegation Level
-            </p>
-            <p
-              className={cn(
-                "text-sm font-semibold",
-                hasDelegation ? "text-blue-300" : "text-muted-foreground"
-              )}
-            >
-              {step.financialDelegationLevel || "—"}
-            </p>
-          </div>
+        {/* Meta info — department + responsible persons */}
+        <div className="mt-1.5 space-y-0.5">
+          {step.department && (
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Building2 className="h-2.5 w-2.5 shrink-0" />
+              <span className="text-foreground font-medium truncate">
+                {step.department}
+              </span>
+            </div>
+          )}
+          {officers.length > 0 && (
+            <div className="text-[10px] text-muted-foreground truncate">
+              <span className="text-blue-400 font-medium">Officers:</span>{" "}
+              <span className="text-foreground">{officers.join(", ")}</span>
+            </div>
+          )}
+          {sailors.length > 0 && (
+            <div className="text-[10px] text-muted-foreground truncate">
+              <span className="text-emerald-400 font-medium">Sailors:</span>{" "}
+              <span className="text-foreground">{sailors.join(", ")}</span>
+            </div>
+          )}
+          {step.defaultResponsiblePerson && (
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <UserCircle2 className="h-2.5 w-2.5 shrink-0" />
+              <span className="text-foreground truncate">
+                {step.defaultResponsiblePerson}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Branch helper caption */}
-        {isBranch && (
-          <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-            <ArrowRight className="h-3 w-3" />
-            {step.isTenderStage && step.isEvaluationStage
-              ? "Combined tender & evaluation branch — quotation opening and BEC evaluation occur at this stage."
-              : step.isTenderStage
-              ? "Tender branch — quotation/tender is called, received and opened at this stage."
-              : "Evaluation branch — Bid Evaluation Committee (BEC) reviews and recommends at this stage."}
+        {/* Financial delegation — read-only backward-compat hint */}
+        {hasDelegation && (
+          <div className="mt-1.5 flex items-center gap-1 text-[10px] text-blue-400 bg-blue-500/5 border border-blue-500/20 rounded px-1.5 py-0.5">
+            <Award className="h-2.5 w-2.5 shrink-0" />
+            <span className="font-medium shrink-0">Delegation:</span>
+            <span className="truncate">{step.financialDelegationLevel}</span>
           </div>
         )}
       </div>
@@ -4738,6 +4762,13 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
   const [financialDelegationId, setFinancialDelegationId] = useState<string>(
     initial?.financialDelegationId ?? ""
   );
+  const [conditionMethod, setConditionMethod] = useState<string>(initial?.conditionMethod ?? "");
+  const [conditionMinValue, setConditionMinValue] = useState<string>(
+    initial?.conditionMinValue !== undefined && initial?.conditionMinValue !== null ? String(initial.conditionMinValue) : ""
+  );
+  const [conditionMaxValue, setConditionMaxValue] = useState<string>(
+    initial?.conditionMaxValue !== undefined && initial?.conditionMaxValue !== null ? String(initial.conditionMaxValue) : ""
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -4750,6 +4781,9 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
       name: name.trim(),
       description: description.trim() || null,
       financialDelegationId: financialDelegationId || null,
+      conditionMethod: conditionMethod || null,
+      conditionMinValue: conditionMinValue ? Number(conditionMinValue) : null,
+      conditionMaxValue: conditionMaxValue ? Number(conditionMaxValue) : null,
     };
     const res = isEdit
       ? await apiRequest(`/api/process-flows/${initial!.id}`, "PUT", body)
@@ -4859,6 +4893,35 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
               delegation link.
             </p>
           </Field>
+          
+          <div className="rounded-lg border border-border p-3 space-y-3 bg-secondary/10">
+            <h4 className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <Settings className="h-4 w-4 text-primary" /> Auto-Selection Conditions
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              Define the conditions under which this process is automatically assigned to a file.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Field label="Procurement Method">
+                <Select value={conditionMethod || "__none__"} onValueChange={(v) => setConditionMethod(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="bg-background"><SelectValue placeholder="Any" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Any</SelectItem>
+                    <SelectItem value="RC">RC</SelectItem>
+                    <SelectItem value="Non-Rate">Non-Rate</SelectItem>
+                    <SelectItem value="Contract">Contract</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Min Value (Rs.)">
+                <Input type="number" min="0" value={conditionMinValue} onChange={(e) => setConditionMinValue(e.target.value)} placeholder="0" className="bg-background" />
+              </Field>
+              <Field label="Max Value (Rs.)">
+                <Input type="number" min="0" value={conditionMaxValue} onChange={(e) => setConditionMaxValue(e.target.value)} placeholder="e.g. 500000" className="bg-background" />
+              </Field>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-1.5">
             <p className="font-medium text-foreground flex items-center gap-1.5">
               <TrendingUp className="h-3.5 w-3.5" />
@@ -4933,32 +4996,31 @@ function StepFormDialog({
 
   const accent = flowAccent(flow.name);
 
-  // Fetch stakeholders + financial delegations + number prefixes for the form
+  // Fetch stakeholders + number prefixes for the form
   const { data: stakeholders, loading: stakeholdersLoading } =
     useFetch<Stakeholder[]>("/api/stakeholders");
-  const { data: delegations } = useFetch<FinancialDelegation[]>(
-    "/api/financial-delegations"
-  );
   const { data: numberPrefixes } = useFetch<NumberPrefix[]>(
     "/api/number-prefixes"
   );
 
-  const nextOrder = useMemo(() => {
-    const max = flow.steps?.reduce(
-      (m, s) => Math.max(m, s.stepOrder),
-      0
-    );
-    return (max ?? 0) + 1;
-  }, [flow.steps]);
+  // Existing steps in the flow (excluding the one being edited) — used for
+  // the Before/After dropdowns.
+  const existingSteps = useMemo(() => {
+    return (flow.steps ?? []).filter((s) => !initial || s.id !== initial.id);
+  }, [flow.steps, initial]);
 
-  const [stepOrder, setStepOrder] = useState<string>(
-    String(initial?.stepOrder ?? nextOrder)
+  // Form state
+  const [predefinedStage, setPredefinedStage] = useState<string>(
+    initial?.predefinedStage ?? ""
   );
-  const [stageSelect, setStageSelect] = useState<string>(
-    initial?.positionName ?? ""
+  const [customName, setCustomName] = useState<string>(
+    !initial?.predefinedStage ? (initial?.positionName ?? "") : ""
   );
-  const [positionName, setPositionName] = useState(
-    initial?.positionName ?? ""
+  const [beforeStepId, setBeforeStepId] = useState<string>(
+    initial?.beforeStepId ?? "__start__"
+  );
+  const [afterStepId, setAfterStepId] = useState<string>(
+    initial?.afterStepId ?? "__none__"
   );
   const [description, setDescription] = useState(initial?.description ?? "");
   const [department, setDepartment] = useState<string>(
@@ -4970,17 +5032,8 @@ function StepFormDialog({
   const [responsibleSailors, setResponsibleSailors] = useState<string[]>(
     () => parseJsonArray(initial?.responsibleSailors)
   );
-  const [financialDelegationId, setFinancialDelegationId] = useState<string>(
-    initial?.financialDelegationId ?? ""
-  );
   const [defaultResponsiblePerson, setDefaultResponsiblePerson] = useState(
     initial?.defaultResponsiblePerson ?? ""
-  );
-  const [financialDelegationLevel, setFinancialDelegationLevel] = useState(
-    initial?.financialDelegationLevel ?? ""
-  );
-  const [prefixedNumber, setPrefixedNumber] = useState(
-    initial?.prefixedNumber ?? ""
   );
   const [isTenderStage, setIsTenderStage] = useState(
     initial?.isTenderStage ?? false
@@ -4988,48 +5041,45 @@ function StepFormDialog({
   const [isEvaluationStage, setIsEvaluationStage] = useState(
     initial?.isEvaluationStage ?? false
   );
+  const [prefixedNumber, setPrefixedNumber] = useState(
+    initial?.prefixedNumber ?? ""
+  );
+  const [expectedDays, setExpectedDays] = useState<number>(
+    initial?.expectedDays ?? 2
+  );
+  const [expectedPercentage, setExpectedPercentage] = useState<number>(
+    initial?.expectedPercentage ?? Math.round(100 / ((flow.steps?.length ?? 0) + (isEdit ? 0 : 1)))
+  );
 
-  // When a predefined stage is selected, auto-fill positionName + auto-check
-  // tender/evaluation flags based on the stage name.
-  function applyStage(stage: string) {
-    setStageSelect(stage);
-    setPositionName(stage);
-    const lower = stage.toLowerCase();
-    // Tender-related stages
-    if (
-      lower.includes("tender called") ||
-      lower.includes("tender opening") ||
-      lower.includes("quotation received") ||
-      lower.includes("pre-tender") ||
-      lower.includes("post tender")
-    ) {
-      setIsTenderStage(true);
+  // Auto-fill from STAGE_AUTO_DETAILS when a predefined stage is selected
+  const stageInfo = predefinedStage ? STAGE_AUTO_DETAILS[predefinedStage] : null;
+
+  function applyPredefinedStage(stage: string) {
+    setPredefinedStage(stage);
+    if (!stage) return;
+    const info = STAGE_AUTO_DETAILS[stage];
+    if (!info) return;
+    setIsTenderStage(info.isTenderStage);
+    setIsEvaluationStage(info.isEvaluationStage);
+    if (info.prefixedNumber) {
+      // Try to resolve the full prefix string from /api/number-prefixes
+      const np = (numberPrefixes ?? []).find(
+        (p) => p.docType === info.prefixedNumber
+      );
+      setPrefixedNumber(np?.prefix || info.prefixedNumber);
+    } else {
+      setPrefixedNumber("");
     }
-    // Evaluation-related stages
-    if (lower.includes("bec evaluation") || lower.includes("evaluation")) {
-      setIsEvaluationStage(true);
-    }
-    // Auto-suggest a prefixed number based on the stage name
-    suggestPrefixForStage(stage);
+    // Auto-fill description only if the user hasn't typed a custom one
+    setDescription((prev) =>
+      prev && prev.trim() !== "" ? prev : info.description
+    );
   }
 
-  function suggestPrefixForStage(stage: string) {
-    if (!numberPrefixes || numberPrefixes.length === 0) return;
-    const lower = stage.toLowerCase();
-    // Map stage keywords → docType
-    let docType: string | null = null;
-    if (lower.includes("pr raised") || lower.includes("pr")) docType = "PR";
-    if (lower.includes("collection and qci") || lower.includes("nav 255"))
-      docType = "NAV255";
-    if (lower.includes("nav 254")) docType = "NAV254";
-    if (lower.includes("po placed") || lower.includes("order placed"))
-      docType = "PO";
-    if (lower.includes("file")) docType = "FILE";
-    if (!docType) return;
-    const match = numberPrefixes.find((p) => p.docType === docType);
-    if (match) {
-      setPrefixedNumber(match.prefix);
-    }
+  function clearPredefinedStage() {
+    setPredefinedStage("");
+    // Leave isTenderStage / isEvaluationStage / prefixedNumber / description
+    // as they are — the user can manually adjust if needed.
   }
 
   // Filter stakeholders by department + category
@@ -5047,42 +5097,50 @@ function StepFormDialog({
     });
   }, [stakeholders, deptForStakeholder]);
 
-  // Show the Financial Delegation Select only when the step is a financial
-  // authority step (or when an existing step already has one set).
-  const isFinancialAuthorityStep =
-    positionName.toLowerCase().includes("financial authority") ||
-    positionName.toLowerCase().includes("financial delegation") ||
-    positionName.toLowerCase().includes("aoe approval") ||
-    !!financialDelegationId;
+  // The resolved step name (predefined stage OR custom name)
+  const resolvedName = predefinedStage || customName.trim();
+
+  function stepLabel(s: ProcessStep): string {
+    return s.predefinedStage || s.positionName || "Unnamed step";
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const orderNum = Number(stepOrder);
-    if (!positionName.trim()) {
-      toast({ title: "Position name is required", variant: "destructive" });
+    if (!resolvedName) {
+      toast({
+        title: "Step name required",
+        description: "Pick a predefined stage OR enter a custom step name.",
+        variant: "destructive",
+      });
       return;
     }
-    if (isNaN(orderNum) || orderNum < 1) {
+    if (!beforeStepId) {
       toast({
-        title: "Step order must be a positive number",
+        title: "Before step is required",
+        description: "Select which step precedes this one (or 'Start').",
         variant: "destructive",
       });
       return;
     }
     setSaving(true);
     const body = {
-      stepOrder: orderNum,
-      positionName: positionName.trim(),
+      predefinedStage: predefinedStage || null,
+      positionName: resolvedName,
+      beforeStepId: beforeStepId === "__start__" ? null : beforeStepId,
+      afterStepId: afterStepId === "__none__" ? null : afterStepId,
       description: description.trim() || null,
       department,
       responsibleOfficers,
       responsibleSailors,
-      financialDelegationId: financialDelegationId || null,
       defaultResponsiblePerson: defaultResponsiblePerson.trim() || null,
-      financialDelegationLevel: financialDelegationLevel.trim() || null,
+      // Preserve any existing backward-compat delegation level (read-only at
+      // the step level — managed via the Value & Step tab now).
+      financialDelegationLevel: initial?.financialDelegationLevel ?? null,
       isTenderStage,
       isEvaluationStage,
       prefixedNumber: prefixedNumber.trim() || null,
+      expectedDays,
+      expectedPercentage,
     };
     const res = isEdit
       ? await apiRequest(
@@ -5095,7 +5153,7 @@ function StepFormDialog({
     if (res.ok) {
       toast({
         title: isEdit ? "Step updated" : "Step added",
-        description: `${body.positionName} → ${flow.name} flow`,
+        description: `${resolvedName} → ${flow.name} flow`,
       });
       onSaved();
     } else {
@@ -5106,10 +5164,6 @@ function StepFormDialog({
       });
     }
   }
-
-  const selectedDelegation = delegations?.find(
-    (d) => d.id === financialDelegationId
-  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -5122,67 +5176,175 @@ function StepFormDialog({
           <DialogDescription>
             Configure a step in the{" "}
             <CustomBadge className={accent.badge}>{flow.name}</CustomBadge> flow
-            — pick a predefined stage, set the department, responsible
-            officers/sailors, and (if a financial authority step) link a
-            financial delegation.
+            — pick a predefined stage (or type a custom name), then link it
+            before/after existing steps.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Field label="Step Order" required>
-              <Input
-                type="number"
-                min={1}
-                value={stepOrder}
-                onChange={(e) => setStepOrder(e.target.value)}
-                placeholder="1"
-                className="bg-background"
-                required
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Field label="Select Predefined Stage" required>
-                <Select
-                  value={stageSelect}
-                  onValueChange={(v) => {
-                    if (v === "__custom__") {
-                      setStageSelect("__custom__");
-                      return;
-                    }
-                    applyStage(v);
-                  }}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Pick a stage or type custom below" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PROCESS_STEP_STAGES.map((stage) => (
-                      <SelectItem key={stage} value={stage}>
-                        {stage}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__custom__">
-                      — Custom (type below) —
+          {/* Predefined Stage OR Custom Step Name — only ONE required */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Predefined Stage">
+              <Select
+                value={predefinedStage || "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__none__") clearPredefinedStage();
+                  else applyPredefinedStage(v);
+                }}
+              >
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="— None — pick a stage —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— None —</SelectItem>
+                  {PROCESS_STEP_STAGES.map((stage) => (
+                    <SelectItem key={stage} value={stage}>
+                      {stage}
                     </SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Auto-fills description, prefixed number &amp; tender/evaluation
+                flags.
+              </p>
+            </Field>
+            <Field label="Custom Step Name (if not using a predefined stage)">
+              <Input
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="e.g. Local Inspection"
+                className="bg-background"
+                disabled={!!predefinedStage}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {predefinedStage
+                  ? "Disabled — predefined stage selected above."
+                  : "Required if no predefined stage is picked."}
+              </p>
+            </Field>
           </div>
 
-          <Field label="Position Name" required>
-            <Input
-              value={positionName}
-              onChange={(e) => setPositionName(e.target.value)}
-              placeholder="e.g. PR Raised / Tender Called / BEC Evaluation / Financial Authority"
-              className="bg-background"
-              required
-            />
+          {/* Before / After link selectors */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Before (which step precedes this)" required>
+              <Select value={beforeStepId} onValueChange={setBeforeStepId}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Pick the preceding step" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__start__">
+                    — Start (no preceding step) —
+                  </SelectItem>
+                  {existingSteps.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {stepLabel(s)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Mandatory. Select &quot;Start&quot; if this is the first step in
+                the flow.
+              </p>
+            </Field>
+            <Field label="After (which step follows this)">
+              <Select value={afterStepId} onValueChange={setAfterStepId}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="— None (terminal step) —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">
+                    — None (terminal step) —
+                  </SelectItem>
+                  {existingSteps.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {stepLabel(s)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Optional. Leave as &quot;None&quot; if this is the end step of
+                the flow.
+              </p>
+            </Field>
+          </div>
+
+          {/* Auto-set read-only hints block — visible when a predefined stage
+              is selected OR when prefixedNumber has a value (legacy). */}
+          {(stageInfo || prefixedNumber) && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                {predefinedStage
+                  ? `Auto-set from "${predefinedStage}" stage`
+                  : "Prefixed Number (auto)"}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                {stageInfo && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Tender:</span>
+                      <CustomBadge
+                        className={
+                          stageInfo.isTenderStage
+                            ? "bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]"
+                            : "bg-muted text-muted-foreground border-border text-[10px]"
+                        }
+                      >
+                        {stageInfo.isTenderStage ? "Yes" : "No"}
+                      </CustomBadge>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Evaluation:</span>
+                      <CustomBadge
+                        className={
+                          stageInfo.isEvaluationStage
+                            ? "bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]"
+                            : "bg-muted text-muted-foreground border-border text-[10px]"
+                        }
+                      >
+                        {stageInfo.isEvaluationStage ? "Yes" : "No"}
+                      </CustomBadge>
+                    </div>
+                  </>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Prefix:</span>
+                  {prefixedNumber ? (
+                    <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 font-mono text-[10px]">
+                      <Hash className="h-2.5 w-2.5 mr-0.5" />
+                      {prefixedNumber}
+                    </CustomBadge>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Prefixed Number — read-only field, auto from stage */}
+          <Field label="Prefixed Number (auto)">
+            <div className="rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 flex items-center gap-2">
+              <Hash className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+              <span className="text-sm font-mono text-cyan-400">
+                {prefixedNumber || "—"}
+              </span>
+              {prefixedNumber && (
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  (auto)
+                </span>
+              )}
+            </div>
             <p className="text-[11px] text-muted-foreground">
-              Auto-filled when you pick a stage above. Edit freely if needed.
+              {predefinedStage
+                ? "Auto-set from the predefined stage. Not editable."
+                : "Will be auto-set when you pick a predefined stage above."}
             </p>
           </Field>
 
+          {/* Description (auto-filled but editable) */}
           <Field label="Description">
             <Textarea
               value={description}
@@ -5190,8 +5352,14 @@ function StepFormDialog({
               placeholder="Brief description of what happens at this step..."
               className="bg-background min-h-[70px]"
             />
+            {stageInfo && (
+              <p className="text-[11px] text-muted-foreground">
+                Auto-filled from stage definition — edit freely if needed.
+              </p>
+            )}
           </Field>
 
+          {/* Department */}
           <Field label="Department">
             <Select
               value={department}
@@ -5219,6 +5387,7 @@ function StepFormDialog({
             </p>
           </Field>
 
+          {/* Responsible officers + sailors */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <MultiStakeholderPicker
               label="Responsible Officers"
@@ -5238,85 +5407,7 @@ function StepFormDialog({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Prefixed Number (auto-suggested)">
-              <Input
-                value={prefixedNumber}
-                onChange={(e) => setPrefixedNumber(e.target.value)}
-                placeholder="e.g. PR/2025/ — auto-suggested by stage"
-                className="bg-background font-mono"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Auto-suggests a prefix from /api/number-prefixes based on the
-                stage (e.g. PR Raised → PR prefix, Collection and QCI → NAV 255
-                prefix). Edit freely.
-              </p>
-            </Field>
-            <Field label="Default Responsible Person (legacy free-text)">
-              <Input
-                value={defaultResponsiblePerson}
-                onChange={(e) => setDefaultResponsiblePerson(e.target.value)}
-                placeholder="e.g. ASO(E) — Lt. Cdr. K. Silva"
-                className="bg-background"
-              />
-            </Field>
-          </div>
-
-          {/* Financial Delegation — only shown when step is a financial
-              authority step (or already has one set). */}
-          {isFinancialAuthorityStep && (
-            <div className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-3 space-y-3">
-              <div className="flex items-center gap-2">
-                <Award className="h-4 w-4 text-blue-400" />
-                <p className="text-sm font-semibold text-blue-400">
-                  Financial Authority Step
-                </p>
-              </div>
-              <Field label="Link Financial Delegation">
-                <Select
-                  value={financialDelegationId || "__none__"}
-                  onValueChange={(v) =>
-                    setFinancialDelegationId(v === "__none__" ? "" : v)
-                  }
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Pick a delegation level" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {(delegations ?? [])
-                      .filter((d) => d.active)
-                      .map((d) => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.label || `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {selectedDelegation && (
-                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
-                  <Award className="h-3 w-3 mr-1" />
-                  {selectedDelegation.label}
-                </CustomBadge>
-              )}
-              <Field label="Financial Delegation Level (legacy free-text)">
-                <Input
-                  value={financialDelegationLevel}
-                  onChange={(e) =>
-                    setFinancialDelegationLevel(e.target.value)
-                  }
-                  placeholder="e.g. Up to Rs. 2,000,000 — Capt"
-                  className="bg-background"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Optional free-text fallback for backward compatibility.
-                </p>
-              </Field>
-            </div>
-          )}
-
-          {/* Branch flags */}
+          {/* Branch flags (auto-set by stage but still togglable for override) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label
               htmlFor="tender-stage"
@@ -5341,8 +5432,7 @@ function StepFormDialog({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Marks this as part of the tender branch — quotation called,
-                  received or opened. Auto-checked for tender-related stages.
+                  Auto-set by stage. Toggle manually if needed.
                 </p>
               </div>
             </label>
@@ -5370,12 +5460,72 @@ function StepFormDialog({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Marks this as part of the BEC evaluation branch — bid
-                  evaluation & recommendation. Auto-checked for BEC Evaluation.
+                  Auto-set by stage. Toggle manually if needed.
                 </p>
               </div>
             </label>
           </div>
+
+          {/* Default Responsible Person (legacy free-text) */}
+          <Field label="Default Responsible Person (legacy free-text)">
+            <Input
+              value={defaultResponsiblePerson}
+              onChange={(e) => setDefaultResponsiblePerson(e.target.value)}
+              placeholder="e.g. ASO(E) — Lt. Cdr. K. Silva"
+              className="bg-background"
+            />
+          </Field>
+
+          {/* Expectations */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Expected Time Taken (Days)" required>
+              <Input
+                type="number"
+                min="0"
+                value={expectedDays}
+                onChange={(e) => setExpectedDays(Number(e.target.value))}
+                className="bg-background"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Target duration to complete this step. Used for pending/delay alerts.
+              </p>
+            </Field>
+            <Field label="Expected Percentage Cover (%)" required>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                value={expectedPercentage}
+                onChange={(e) => setExpectedPercentage(Number(e.target.value))}
+                className="bg-background"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                How much progress this step contributes to the overall process.
+              </p>
+            </Field>
+          </div>
+
+          {/* Backward-compat: existing financial delegation read-only hint.
+              Not editable at the step level — managed via the Value & Step tab. */}
+          {initial?.financialDelegationLevel &&
+            initial.financialDelegationLevel.trim() !== "" &&
+            initial.financialDelegationLevel !== "—" && (
+              <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 flex items-start gap-2">
+                <Award className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-blue-400">
+                    Existing Financial Delegation (read-only)
+                  </p>
+                  <p className="text-sm text-foreground">
+                    {initial.financialDelegationLevel}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Financial delegation is now managed in the &quot;Value &amp;
+                    Step&quot; tab — not editable at the step level.
+                  </p>
+                </div>
+              </div>
+            )}
 
           {/* Live preview */}
           <div className="rounded-lg border border-border bg-background/40 p-3">
@@ -5383,18 +5533,8 @@ function StepFormDialog({
               Live Preview
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
-                  accent.headerBg,
-                  accent.text,
-                  accent.border
-                )}
-              >
-                #{stepOrder || "?"}
-              </span>
               <CustomBadge className={cn("font-semibold", accent.badge)}>
-                {positionName || "Position Name"}
+                {resolvedName || "Step Name"}
               </CustomBadge>
               {department && (
                 <CustomBadge
@@ -5428,12 +5568,6 @@ function StepFormDialog({
                   {prefixedNumber}
                 </CustomBadge>
               )}
-              {selectedDelegation && (
-                <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
-                  <Award className="h-3 w-3 mr-1" />
-                  {selectedDelegation.label}
-                </CustomBadge>
-              )}
               {responsibleOfficers.length > 0 && (
                 <CustomBadge className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px]">
                   {responsibleOfficers.length} officer
@@ -5446,13 +5580,6 @@ function StepFormDialog({
                   {responsibleSailors.length === 1 ? "" : "s"}
                 </CustomBadge>
               )}
-              {financialDelegationLevel &&
-                financialDelegationLevel.trim() !== "" && (
-                  <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
-                    <Award className="h-3 w-3 mr-1" />
-                    {financialDelegationLevel}
-                  </CustomBadge>
-                )}
             </div>
           </div>
 
@@ -5545,6 +5672,41 @@ function docTypeDotColor(docType: string): string {
   }
 }
 
+function prefixProcessTypeColor(processType: string | null | undefined): string {
+  switch (processType) {
+    case "RC":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Non-Rate":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Contractual":
+      return "bg-violet-500/15 text-violet-400 border-violet-500/30";
+    case "NHQ":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+function prefixProcessTypeDotColor(
+  processType: string | null | undefined
+): string {
+  switch (processType) {
+    case "RC":
+      return "bg-emerald-500";
+    case "Non-Rate":
+      return "bg-amber-500";
+    case "Contractual":
+      return "bg-violet-500";
+    case "NHQ":
+      return "bg-blue-500";
+    default:
+      return "bg-slate-500";
+  }
+}
+
+// Static example end-number used in live previews (NOT padded).
+const PREFIX_PREVIEW_EXAMPLE = "0142";
+
 function NumberPrefixesTab() {
   const {
     data: list,
@@ -5565,7 +5727,10 @@ function NumberPrefixesTab() {
     const map = new Map<string, { positionName: string; flowName: string }>();
     (flows ?? []).forEach((f) => {
       (f.steps ?? []).forEach((s) => {
-        map.set(s.id, { positionName: s.positionName, flowName: f.name });
+        map.set(s.id, {
+          positionName: s.positionName ?? s.predefinedStage ?? "Unnamed step",
+          flowName: f.name,
+        });
       });
     });
     return map;
@@ -5632,9 +5797,8 @@ function NumberPrefixesTab() {
           {NUMBER_PREFIX_TYPES.map((t) => {
             const configured = byType[t.docType];
             const prefixPart = configured?.prefix || t.placeholder;
-            const endNum = configured
-              ? String(configured.nextNumber).padStart(4, "0")
-              : "0142";
+            // Static example end-number — NOT padded with zeros.
+            const endNum = PREFIX_PREVIEW_EXAMPLE;
             const suffixPart = configured?.suffix ?? "";
             const example = `${prefixPart}${endNum}${suffixPart}`;
             return (
@@ -5655,6 +5819,25 @@ function NumberPrefixesTab() {
                     {t.label}
                   </span>
                 </div>
+                {(configured?.subCategory || configured?.processType) && (
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    {configured.subCategory && (
+                      <CustomBadge className="bg-slate-500/15 text-slate-300 border-slate-500/30 text-[10px]">
+                        {configured.subCategory}
+                      </CustomBadge>
+                    )}
+                    {configured.processType && (
+                      <CustomBadge
+                        className={cn(
+                          "border text-[10px]",
+                          prefixProcessTypeColor(configured.processType)
+                        )}
+                      >
+                        {configured.processType}
+                      </CustomBadge>
+                    )}
+                  </div>
+                )}
                 <p className="text-[11px] text-muted-foreground">Example:</p>
                 <p className="font-mono text-sm text-foreground break-all flex items-center flex-wrap gap-1">
                   <span className="text-foreground">{prefixPart}</span>
@@ -5706,9 +5889,10 @@ function NumberPrefixesTab() {
             <TableHeader>
               <TableRow className="border-border bg-muted/20 hover:bg-muted/20">
                 <TableHead className="text-xs">Document Type</TableHead>
+                <TableHead className="text-xs">Sub-Category</TableHead>
+                <TableHead className="text-xs">Process (Main)</TableHead>
                 <TableHead className="text-xs">Prefix</TableHead>
                 <TableHead className="text-xs">Suffix</TableHead>
-                <TableHead className="text-xs text-right">Next Number</TableHead>
                 <TableHead className="text-xs">Linked Step</TableHead>
                 <TableHead className="text-xs">Description</TableHead>
                 <TableHead className="text-xs text-right">Actions</TableHead>
@@ -5718,7 +5902,7 @@ function NumberPrefixesTab() {
               {!list || list.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="text-center text-muted-foreground py-8"
                   >
                     No number prefixes configured. Click &quot;Add Prefix&quot;
@@ -5738,17 +5922,41 @@ function NumberPrefixesTab() {
                         </CustomBadge>
                       </TableCell>
                       <TableCell>
+                        {p.subCategory ? (
+                          <CustomBadge className="bg-slate-500/15 text-slate-300 border-slate-500/30 text-[10px]">
+                            {p.subCategory}
+                          </CustomBadge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {p.processType ? (
+                          <CustomBadge
+                            className={cn(
+                              "border text-[10px]",
+                              prefixProcessTypeColor(p.processType)
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "h-1.5 w-1.5 rounded-full mr-1",
+                                prefixProcessTypeDotColor(p.processType)
+                              )}
+                            />
+                            {p.processType}
+                          </CustomBadge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <span className="font-mono text-foreground bg-secondary/60 px-2 py-0.5 rounded-md text-sm">
                           {p.prefix || "—"}
                         </span>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm font-mono">
                         {p.suffix || "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="font-mono font-semibold text-foreground">
-                          {String(p.nextNumber).padStart(4, "0")}
-                        </span>
                       </TableCell>
                       <TableCell>
                         {linkedStep ? (
@@ -5883,18 +6091,22 @@ function PrefixFormDialog({
   const { data: flows } = useFetch<ProcessFlow[]>("/api/process-flows");
 
   const [docType, setDocType] = useState<string>(initial?.docType ?? "PR");
+  const [subCategory, setSubCategory] = useState<string>(
+    initial?.subCategory ?? ""
+  );
+  const [processType, setProcessType] = useState<string>(
+    initial?.processType ?? ""
+  );
   const [prefix, setPrefix] = useState(initial?.prefix ?? "");
   const [suffix, setSuffix] = useState(initial?.suffix ?? "");
-  const [nextNumber, setNextNumber] = useState<string>(
-    String(initial?.nextNumber ?? 1)
-  );
   const [description, setDescription] = useState(initial?.description ?? "");
   const [stepId, setStepId] = useState<string>(initial?.stepId ?? "");
 
   const selectedMeta =
     NUMBER_PREFIX_TYPES.find((t) => t.docType === docType) ??
     NUMBER_PREFIX_TYPES[0];
-  const previewEnd = String(Number(nextNumber) || 0).padStart(4, "0");
+  // Static example end-number — NOT padded with zeros.
+  const previewEnd = PREFIX_PREVIEW_EXAMPLE;
   const previewFull = `${prefix || selectedMeta.placeholder}${previewEnd}${
     suffix || ""
   }`;
@@ -5905,7 +6117,7 @@ function PrefixFormDialog({
     return flows.flatMap((f) =>
       (f.steps ?? []).map((s) => ({
         id: s.id,
-        positionName: s.positionName,
+        positionName: s.positionName ?? s.predefinedStage ?? "Unnamed step",
         flowName: f.name,
       }))
     );
@@ -5923,20 +6135,13 @@ function PrefixFormDialog({
       toast({ title: "Prefix is required", variant: "destructive" });
       return;
     }
-    const nNum = Number(nextNumber);
-    if (isNaN(nNum) || nNum < 1) {
-      toast({
-        title: "Next number must be a positive integer",
-        variant: "destructive",
-      });
-      return;
-    }
     setSaving(true);
     const body = {
       docType,
+      subCategory: subCategory.trim() || null,
+      processType: processType || null,
       prefix: prefix.trim(),
       suffix: suffix.trim() || null,
-      nextNumber: nNum,
       description: description.trim() || null,
       stepId: stepId || null,
     };
@@ -5947,7 +6152,9 @@ function PrefixFormDialog({
     if (res.ok) {
       toast({
         title: isEdit ? "Prefix updated" : "Prefix created",
-        description: `${docType} · ${prefix}${previewEnd}${suffix || ""}`,
+        description: `${docType}${
+          processType ? ` · ${processType}` : ""
+        } · ${prefix}${previewEnd}${suffix || ""}`,
       });
       onSaved();
     } else {
@@ -6003,6 +6210,48 @@ function PrefixFormDialog({
               </SelectContent>
             </Select>
           </Field>
+          <Field label="Sub-Category (Optional)">
+            <Input
+              value={subCategory}
+              onChange={(e) => setSubCategory(e.target.value)}
+              placeholder="e.g. RC, Non-Rate, Contractual"
+              className="bg-background"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Optional sub-category for this document type (free text). Lets you
+              distinguish multiple prefixes of the same type.
+            </p>
+          </Field>
+          <Field label="Process (Main)">
+            <Select
+              value={processType || "__none__"}
+              onValueChange={(v) => setProcessType(v === "__none__" ? "" : v)}
+            >
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select the process this prefix belongs to" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— None —</SelectItem>
+                {PREFIX_PROCESS_TYPES.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2 w-2 rounded-full",
+                          prefixProcessTypeDotColor(p)
+                        )}
+                      />
+                      <span className="font-medium">{p}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Sets which process (RC, Non-Rate, Contractual, NHQ) this prefix
+              belongs to.
+            </p>
+          </Field>
           <Field label="Prefix" required>
             <Input
               value={prefix}
@@ -6015,27 +6264,14 @@ function PrefixFormDialog({
               (e.g. <span className="font-mono">PR/2025/</span>).
             </p>
           </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Suffix (optional)">
-              <Input
-                value={suffix}
-                onChange={(e) => setSuffix(e.target.value)}
-                placeholder="e.g. /V1"
-                className="bg-background font-mono"
-              />
-            </Field>
-            <Field label="Next Number" required>
-              <Input
-                type="number"
-                min={1}
-                value={nextNumber}
-                onChange={(e) => setNextNumber(e.target.value)}
-                placeholder="1"
-                className="bg-background font-mono"
-                required
-              />
-            </Field>
-          </div>
+          <Field label="Suffix (optional)">
+            <Input
+              value={suffix}
+              onChange={(e) => setSuffix(e.target.value)}
+              placeholder="e.g. /V1"
+              className="bg-background font-mono"
+            />
+          </Field>
           <Field label="Description (optional)">
             <Input
               value={description}
@@ -7350,9 +7586,12 @@ function StepManagementSection() {
   const generalFlow = flows?.find((f) => f.name === GENERAL_STEPS_FLOW_NAME);
   const steps = useMemo(() => {
     if (!generalFlow) return [];
-    return [...(generalFlow.steps ?? [])].sort(
-      (a, b) => a.stepOrder - b.stepOrder
-    );
+    // No step order — sort by predefined stage / position name for stable display
+    return [...(generalFlow.steps ?? [])].sort((a, b) => {
+      const an = (a.predefinedStage || a.positionName || "").toLowerCase();
+      const bn = (b.predefinedStage || b.positionName || "").toLowerCase();
+      return an.localeCompare(bn);
+    });
   }, [generalFlow]);
 
   async function handleDelete() {
@@ -7366,7 +7605,7 @@ function StepManagementSection() {
     if (res.ok) {
       toast({
         title: "Step deleted",
-        description: deleteTarget.positionName,
+        description: deleteTarget.positionName ?? deleteTarget.predefinedStage ?? "Step",
       });
       setDeleteTarget(null);
       refresh();
@@ -7466,16 +7705,28 @@ function StepManagementSection() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
-                              "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                            )}
-                          >
-                            #{s.stepOrder}
-                          </span>
+                          {s.prefixedNumber ? (
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-0.5 h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
+                                "bg-cyan-500/10 text-cyan-400 border-cyan-500/30 font-mono"
+                              )}
+                            >
+                              <Hash className="h-2.5 w-2.5" />
+                              {s.prefixedNumber}
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                "inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-xs font-bold border",
+                                "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                              )}
+                            >
+                              {idx + 1}
+                            </span>
+                          )}
                           <span className="font-medium text-foreground">
-                            {s.positionName}
+                            {s.predefinedStage || s.positionName || "Unnamed step"}
                           </span>
                           {s.isTenderStage && (
                             <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">
@@ -7665,20 +7916,24 @@ function GeneralStepFormDialog({
 
   const { data: stakeholders, loading: stakeholdersLoading } =
     useFetch<Stakeholder[]>("/api/stakeholders");
-
-  const nextOrder = useMemo(() => {
-    const max = existingSteps.reduce((m, s) => Math.max(m, s.stepOrder), 0);
-    return max + 1;
-  }, [existingSteps]);
-
-  const [stepOrder, setStepOrder] = useState<string>(
-    String(initial?.stepOrder ?? nextOrder)
+  const { data: numberPrefixes } = useFetch<NumberPrefix[]>(
+    "/api/number-prefixes"
   );
-  const [stageSelect, setStageSelect] = useState<string>(
-    initial?.positionName ?? ""
+
+  // Existing steps (excluding the one being edited) — kept for parity with
+  // the flow-scoped StepFormDialog so the GeneralStepFormDialog interface
+  // stays backward-compatible. General steps aren't linked via before/after
+  // (they live in a flat pool), but the prop is still required by callers.
+  void existingSteps;
+
+  // Form state — NO step order. Steps are linked via before/after at the
+  // flow level (handled in the Process tab's StepFormDialog). General steps
+  // in this pool are unordered; consumers reference them by name/stage.
+  const [predefinedStage, setPredefinedStage] = useState<string>(
+    initial?.predefinedStage ?? ""
   );
-  const [positionName, setPositionName] = useState(
-    initial?.positionName ?? ""
+  const [customName, setCustomName] = useState<string>(
+    !initial?.predefinedStage ? (initial?.positionName ?? "") : ""
   );
   const [description, setDescription] = useState(initial?.description ?? "");
   const [department, setDepartment] = useState<string>(
@@ -7696,6 +7951,38 @@ function GeneralStepFormDialog({
   const [isEvaluationStage, setIsEvaluationStage] = useState(
     initial?.isEvaluationStage ?? false
   );
+  const [prefixedNumber, setPrefixedNumber] = useState(
+    initial?.prefixedNumber ?? ""
+  );
+
+  // Auto-fill from STAGE_AUTO_DETAILS when a predefined stage is selected
+  const stageInfo = predefinedStage ? STAGE_AUTO_DETAILS[predefinedStage] : null;
+
+  function applyPredefinedStage(stage: string) {
+    setPredefinedStage(stage);
+    if (!stage) return;
+    const info = STAGE_AUTO_DETAILS[stage];
+    if (!info) return;
+    setIsTenderStage(info.isTenderStage);
+    setIsEvaluationStage(info.isEvaluationStage);
+    if (info.prefixedNumber) {
+      const np = (numberPrefixes ?? []).find(
+        (p) => p.docType === info.prefixedNumber
+      );
+      setPrefixedNumber(np?.prefix || info.prefixedNumber);
+    } else {
+      setPrefixedNumber("");
+    }
+    setDescription((prev) =>
+      prev && prev.trim() !== "" ? prev : info.description
+    );
+  }
+
+  function clearPredefinedStage() {
+    setPredefinedStage("");
+    // Leave isTenderStage / isEvaluationStage / prefixedNumber / description
+    // as they are — the user can manually adjust if needed.
+  }
 
   const deptForStakeholder = department === "CCED" ? "CE" : "CSLOG";
   const officerList = useMemo(() => {
@@ -7711,48 +7998,30 @@ function GeneralStepFormDialog({
     });
   }, [stakeholders, deptForStakeholder]);
 
-  function applyStage(stage: string) {
-    setStageSelect(stage);
-    setPositionName(stage);
-    const lower = stage.toLowerCase();
-    if (
-      lower.includes("tender called") ||
-      lower.includes("tender opening") ||
-      lower.includes("quotation received") ||
-      lower.includes("pre-tender") ||
-      lower.includes("post tender")
-    ) {
-      setIsTenderStage(true);
-    }
-    if (lower.includes("bec evaluation") || lower.includes("evaluation")) {
-      setIsEvaluationStage(true);
-    }
-  }
+  // The resolved step name (predefined stage OR custom name)
+  const resolvedName = predefinedStage || customName.trim();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const orderNum = Number(stepOrder);
-    if (!positionName.trim()) {
-      toast({ title: "Step name is required", variant: "destructive" });
-      return;
-    }
-    if (isNaN(orderNum) || orderNum < 1) {
+    if (!resolvedName) {
       toast({
-        title: "Step order must be a positive number",
+        title: "Step name required",
+        description: "Pick a predefined stage OR enter a custom step name.",
         variant: "destructive",
       });
       return;
     }
     setSaving(true);
     const body = {
-      stepOrder: orderNum,
-      positionName: positionName.trim(),
+      predefinedStage: predefinedStage || null,
+      positionName: resolvedName,
       description: description.trim() || null,
       department,
       responsibleOfficers,
       responsibleSailors,
       isTenderStage,
       isEvaluationStage,
+      prefixedNumber: prefixedNumber.trim() || null,
     };
     const res = isEdit
       ? await apiRequest(
@@ -7765,7 +8034,7 @@ function GeneralStepFormDialog({
     if (res.ok) {
       toast({
         title: isEdit ? "Step updated" : "Step added",
-        description: `${body.positionName} → General Steps pool`,
+        description: `${resolvedName} → General Steps pool`,
       });
       onSaved();
     } else {
@@ -7786,62 +8055,130 @@ function GeneralStepFormDialog({
             {isEdit ? "Edit General Step" : "Add General Step"}
           </DialogTitle>
           <DialogDescription>
-            Define a reusable process step. Pick a predefined stage or type a
-            custom one. Set the department to filter the stakeholder
-            directory.
+            Define a reusable process step — no step order required. Pick a
+            predefined stage or type a custom one; set the department to filter
+            the stakeholder directory for the responsible officer / sailor
+            dropdowns.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Field label="Step Order" required>
-              <Input
-                type="number"
-                min={1}
-                value={stepOrder}
-                onChange={(e) => setStepOrder(e.target.value)}
-                placeholder="1"
-                className="bg-background"
-                required
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Field label="Select Predefined Stage" required>
-                <Select
-                  value={stageSelect}
-                  onValueChange={(v) => {
-                    if (v === "__custom__") {
-                      setStageSelect("__custom__");
-                      return;
-                    }
-                    applyStage(v);
-                  }}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Pick a stage or type custom below" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PROCESS_STEP_STAGES.map((stage) => (
-                      <SelectItem key={stage} value={stage}>
-                        {stage}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__custom__">
-                      — Custom (type below) —
+          {/* Predefined Stage OR Custom Step Name — only ONE required */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Predefined Stage">
+              <Select
+                value={predefinedStage || "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__none__") clearPredefinedStage();
+                  else applyPredefinedStage(v);
+                }}
+              >
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="— None — pick a stage —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— None —</SelectItem>
+                  {PROCESS_STEP_STAGES.map((stage) => (
+                    <SelectItem key={stage} value={stage}>
+                      {stage}
                     </SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Auto-fills description, prefixed number &amp; tender/evaluation
+                flags. Includes Spec making, Pre Tender, Post Tender, Split
+                Order, Part Supply, NHQ, DPC, etc.
+              </p>
+            </Field>
+            <Field label="Custom Step Name (if not using a predefined stage)">
+              <Input
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="e.g. Local Inspection"
+                className="bg-background"
+                disabled={!!predefinedStage}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {predefinedStage
+                  ? "Disabled — predefined stage selected above."
+                  : "Required if no predefined stage is picked."}
+              </p>
+            </Field>
           </div>
-          <Field label="Step Name" required>
-            <Input
-              value={positionName}
-              onChange={(e) => setPositionName(e.target.value)}
-              placeholder="e.g. PR Raised / Tender Called / BEC Evaluation"
-              className="bg-background"
-              required
-            />
+
+          {/* Auto-set read-only hints block */}
+          {(stageInfo || prefixedNumber) && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                {predefinedStage
+                  ? `Auto-set from "${predefinedStage}" stage`
+                  : "Prefixed Number (auto)"}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                {stageInfo && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Tender:</span>
+                      <CustomBadge
+                        className={
+                          stageInfo.isTenderStage
+                            ? "bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]"
+                            : "bg-muted text-muted-foreground border-border text-[10px]"
+                        }
+                      >
+                        {stageInfo.isTenderStage ? "Yes" : "No"}
+                      </CustomBadge>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Evaluation:</span>
+                      <CustomBadge
+                        className={
+                          stageInfo.isEvaluationStage
+                            ? "bg-violet-500/15 text-violet-400 border-violet-500/30 text-[10px]"
+                            : "bg-muted text-muted-foreground border-border text-[10px]"
+                        }
+                      >
+                        {stageInfo.isEvaluationStage ? "Yes" : "No"}
+                      </CustomBadge>
+                    </div>
+                  </>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Prefix:</span>
+                  {prefixedNumber ? (
+                    <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 font-mono text-[10px]">
+                      <Hash className="h-2.5 w-2.5 mr-0.5" />
+                      {prefixedNumber}
+                    </CustomBadge>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Prefixed Number — read-only, auto from stage */}
+          <Field label="Prefixed Number (auto)">
+            <div className="rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 flex items-center gap-2">
+              <Hash className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+              <span className="text-sm font-mono text-cyan-400">
+                {prefixedNumber || "—"}
+              </span>
+              {prefixedNumber && (
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  (auto)
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {predefinedStage
+                ? "Auto-set from the predefined stage. Not editable."
+                : "Will be auto-set when you pick a predefined stage above."}
+            </p>
           </Field>
+
           <Field label="Description">
             <Textarea
               value={description}
@@ -7849,6 +8186,11 @@ function GeneralStepFormDialog({
               placeholder="Brief description of this step..."
               className="bg-background min-h-[70px]"
             />
+            {stageInfo && (
+              <p className="text-[11px] text-muted-foreground">
+                Auto-filled from stage definition — edit freely if needed.
+              </p>
+            )}
           </Field>
           <Field label="Department">
             <Select
@@ -7870,6 +8212,10 @@ function GeneralStepFormDialog({
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Filters the stakeholder directory for the multi-selects below.
+              CCED → CE officers/sailors, CSLOG → CSLOG officers/sailors.
+            </p>
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <MultiStakeholderPicker
@@ -7945,6 +8291,63 @@ function GeneralStepFormDialog({
               </div>
             </label>
           </div>
+
+          {/* Live preview */}
+          <div className="rounded-lg border border-border bg-background/40 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+              Live Preview
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <CustomBadge className="bg-sky-500/15 text-sky-400 border-sky-500/30 font-semibold">
+                {resolvedName || "Step Name"}
+              </CustomBadge>
+              {department && (
+                <CustomBadge
+                  className={cn(
+                    "border",
+                    department === "CSLOG"
+                      ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                      : department === "CCED"
+                      ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                      : "bg-slate-500/15 text-slate-300 border-slate-500/30"
+                  )}
+                >
+                  {department}
+                </CustomBadge>
+              )}
+              {isTenderStage && (
+                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                  <Gavel className="h-3 w-3 mr-1" />
+                  TENDER
+                </CustomBadge>
+              )}
+              {isEvaluationStage && (
+                <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30">
+                  <ClipboardCheck className="h-3 w-3 mr-1" />
+                  EVALUATION
+                </CustomBadge>
+              )}
+              {prefixedNumber && (
+                <CustomBadge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 font-mono">
+                  <Hash className="h-3 w-3 mr-1" />
+                  {prefixedNumber}
+                </CustomBadge>
+              )}
+              {responsibleOfficers.length > 0 && (
+                <CustomBadge className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px]">
+                  {responsibleOfficers.length} officer
+                  {responsibleOfficers.length === 1 ? "" : "s"}
+                </CustomBadge>
+              )}
+              {responsibleSailors.length > 0 && (
+                <CustomBadge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px]">
+                  {responsibleSailors.length} sailor
+                  {responsibleSailors.length === 1 ? "" : "s"}
+                </CustomBadge>
+              )}
+            </div>
+          </div>
+
           <DialogFooter>
             <Button
               type="button"
