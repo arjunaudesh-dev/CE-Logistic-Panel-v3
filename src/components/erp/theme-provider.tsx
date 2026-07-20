@@ -1,7 +1,7 @@
 "use client";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { ReactNode, useEffect } from "react";
-import { useThemeProfile, DEFAULT_PROFILE_AS_ANY } from "./theme-profile-init";
+import { DEFAULT_PROFILE_AS_ANY } from "./theme-profile-init";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // The ThemeProfileInitializer reads localStorage and applies the profile

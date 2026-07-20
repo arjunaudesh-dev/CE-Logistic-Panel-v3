@@ -416,6 +416,53 @@ export const PROCESS_STEP_STAGES = [
 // ─── Settings Departments ───
 export const SETTINGS_DEPARTMENTS = ["CCED", "CSLOG", "Others"] as const;
 
+// ─── Stage Auto-fill Details ───
+// Maps each predefined stage to tender/evaluation flags and an optional NAV prefix
+export interface StageAutoDetail {
+  isTenderStage: boolean;
+  isEvaluationStage: boolean;
+  prefixedNumber: string | null; // matches docType in NUMBER_PREFIX_TYPES
+  description: string;
+}
+
+export const STAGE_AUTO_DETAILS: Record<string, StageAutoDetail> = {
+  "PR Raised":              { isTenderStage: false, isEvaluationStage: false, prefixedNumber: "PR",     description: "Purchase Requisition raised" },
+  "GS Approval":            { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "General Staff approval pending" },
+  "RC Verification":        { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Rate Contract item verification" },
+  "Finalizing Specification": { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,  description: "Technical specification being finalized" },
+  "Pre-tender":             { isTenderStage: true,  isEvaluationStage: false, prefixedNumber: null,     description: "Pre-tender activities in progress" },
+  "Tender Called":          { isTenderStage: true,  isEvaluationStage: false, prefixedNumber: null,     description: "Tender advertised and open for bids" },
+  "Tender Opening":         { isTenderStage: true,  isEvaluationStage: false, prefixedNumber: null,     description: "Bids being opened and tabulated" },
+  "Quotation Received":     { isTenderStage: true,  isEvaluationStage: false, prefixedNumber: null,     description: "Supplier quotations received" },
+  "BEC Evaluation":         { isTenderStage: true,  isEvaluationStage: true,  prefixedNumber: null,     description: "Board of Evaluation & Committee review" },
+  "Financial Authority":    { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Financial delegation approval" },
+  "AOE Approval":           { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Approval of Expenditure" },
+  "Contract Award":         { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Contract awarded to supplier" },
+  "PO Placed":              { isTenderStage: false, isEvaluationStage: false, prefixedNumber: "PO",     description: "Purchase Order placed" },
+  "Order Placed":           { isTenderStage: false, isEvaluationStage: false, prefixedNumber: "PO",     description: "Order confirmed with supplier" },
+  "Part Supply":            { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Partial supply of items" },
+  "Items Dispatched":       { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Goods dispatched from supplier" },
+  "In Transit":             { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Goods in transit" },
+  "Items Received":         { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Goods received at dockyard" },
+  "Collection and QCI":     { isTenderStage: false, isEvaluationStage: false, prefixedNumber: "NAV255", description: "Collection and Quality Control Inspection" },
+  "QC Pending":             { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Quality check pending" },
+  "QC Passed":              { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Items passed quality check" },
+  "To be Oncharge":         { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Items ready to be charged to stores" },
+  "Awaiting Payment":       { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Payment processing pending" },
+  "Payment Done":           { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Payment completed" },
+  "Post Tender":            { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "Post-tender activities" },
+  "Complete":               { isTenderStage: false, isEvaluationStage: false, prefixedNumber: null,     description: "File closed and complete" },
+};
+
+// ─── Prefix Process Types ───
+// Determines which process type a number prefix belongs to
+export const PREFIX_PROCESS_TYPES = [
+  "RC",
+  "Non-Rate",
+  "ARO (Contractual)",
+  "All",
+] as const;
+
 // ─── Dimension Units ───
 export const DIMENSION_UNITS = ["meter", "inch"] as const;
 

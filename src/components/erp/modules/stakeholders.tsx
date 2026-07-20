@@ -835,7 +835,7 @@ function OfficersSailorsTab() {
 
       {/* Navy List — officer seniority management */}
       <NavyListSection
-        stakeholders={list}
+        stakeholders={list ?? undefined}
         onStakeholdersRefresh={refresh}
       />
 

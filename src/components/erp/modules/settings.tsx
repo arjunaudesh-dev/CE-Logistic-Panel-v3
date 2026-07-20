@@ -1987,6 +1987,7 @@ function ModuleFormDialog({
       officer,
       clerk,
       viewer,
+      custom: initial?.custom ?? true,
     });
   }
 

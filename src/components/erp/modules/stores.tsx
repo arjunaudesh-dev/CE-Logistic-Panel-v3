@@ -3625,8 +3625,8 @@ function BulkUploadItemMasterSection() {
     if (res.ok) {
       // createMany returns {count}; skipDuplicates → some rows may be skipped
       const created =
-        typeof res.data?.count === "number"
-          ? res.data.count
+        typeof (res.data as { count?: number })?.count === "number"
+          ? (res.data as { count: number }).count
           : validRows.length;
       const skipped = Math.max(0, validRows.length - created);
       setProgress({

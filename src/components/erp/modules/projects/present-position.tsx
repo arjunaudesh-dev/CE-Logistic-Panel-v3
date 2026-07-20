@@ -606,7 +606,9 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
             </button>
             <div className="min-w-0">
               <h2 className="font-semibold text-foreground text-sm sm:text-base truncate flex items-center gap-2 flex-wrap">
-                <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" title="Project data is locked — edit from the Projects list" />
+                <span title="Project data is locked — edit from the Projects list" className="shrink-0 cursor-help">
+                  <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                </span>
                 <span className="truncate">{project.name}</span>
                 {project.nameAbbreviation && (
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0" title="Project abbreviation (locked)">
