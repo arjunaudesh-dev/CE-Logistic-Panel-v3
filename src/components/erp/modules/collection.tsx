@@ -524,12 +524,15 @@ export function CollectionModule() {
         icon={PackageCheck}
       />
       <Tabs defaultValue="dashboard" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4 max-w-2xl">
+        <TabsList className="grid w-full grid-cols-5 max-w-3xl">
           <TabsTrigger value="dashboard" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Dashboard
           </TabsTrigger>
           <TabsTrigger value="part-supply" className="gap-1.5">
             <Layers className="h-4 w-4" /> Part Supply
+          </TabsTrigger>
+          <TabsTrigger value="split-orders" className="gap-1.5">
+            <Boxes className="h-4 w-4" /> Split Orders
           </TabsTrigger>
           <TabsTrigger value="daily" className="gap-1.5">
             <CalendarDays className="h-4 w-4" /> Daily Collection
@@ -543,6 +546,9 @@ export function CollectionModule() {
         </TabsContent>
         <TabsContent value="part-supply">
           <PartSupplyTab />
+        </TabsContent>
+        <TabsContent value="split-orders">
+          <SplitOrdersTab />
         </TabsContent>
         <TabsContent value="daily">
           <DailyCollectionTab />
@@ -4210,6 +4216,469 @@ function SendToAreaStoreDialog({
               <Send className="h-4 w-4" />
             )}
             {submitting ? "Sending..." : `Send to ${storeName} Store`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Split Orders Tab
+// ─────────────────────────────────────────────────────────
+interface SplitOrderEntryData {
+  id: string;
+  subId: string;
+  srNo: number;
+  date: string;
+  vehicleNumber: string | null;
+  qty: number;
+  driverName: string | null;
+  sentToQCI: boolean;
+  sentToQCIAt: string | null;
+}
+
+interface SplitOrderSubData {
+  id: string;
+  headerId: string;
+  poNumber: string;
+  supplier: string | null;
+  poQty: number;
+  unitPrice: number;
+  totalPrice: number;
+  entries: SplitOrderEntryData[];
+}
+
+interface SplitOrderHeaderData {
+  id: string;
+  fileNumber: string;
+  itemName: string;
+  totalQty: number;
+  unit: string;
+  remarks: string | null;
+  createdAt: string;
+  subs: SplitOrderSubData[];
+}
+
+function SplitOrdersTab() {
+  const { data: headers, loading, refresh } = useFetch<SplitOrderHeaderData[]>(
+    "/api/collection/split-orders"
+  );
+  const [createOpen, setCreateOpen] = useState(false);
+  const [entryOpenSub, setEntryOpenSub] = useState<SplitOrderSubData | null>(null);
+  const [sendingEntryId, setSendingEntryId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const handleSendToQci = async (subId: string, entryId: string) => {
+    setSendingEntryId(entryId);
+    const res = await apiRequest(`/api/collection/split-orders/${subId}/entries`, "POST", {
+      action: "send-qci",
+      entryId,
+    });
+    setSendingEntryId(null);
+    if (res.ok) {
+      toast({ title: "Entry sent to QC Inspection successfully" });
+      refresh();
+    } else {
+      toast({ title: "Failed to send to QCI", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <Boxes className="h-5 w-5 text-primary" /> Split Orders Management
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Manage single file procurements split into multiple purchase orders with separate delivery schedules.
+          </p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
+          <Plus className="h-4 w-4" /> Create Split Order
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="p-8 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></div>
+      ) : !headers || headers.length === 0 ? (
+        <EmptyState icon={Boxes} title="No Split Orders Found" description="Create your first split order to track deliveries across multiple POs." />
+      ) : (
+        <div className="space-y-4">
+          {headers.map((h) => {
+            const deliveredTotal = h.subs.reduce(
+              (acc, s) => acc + s.entries.reduce((eAcc, e) => eAcc + e.qty, 0),
+              0
+            );
+            const progressPct = h.totalQty > 0 ? Math.min(100, Math.round((deliveredTotal / h.totalQty) * 100)) : 0;
+
+            return (
+              <div key={h.id} className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+                {/* Card Header */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                        {h.fileNumber}
+                      </span>
+                      <h4 className="font-semibold text-foreground text-sm">{h.itemName}</h4>
+                      <CustomBadge className="bg-secondary text-muted-foreground border-border">
+                        Total: {h.totalQty} {h.unit}
+                      </CustomBadge>
+                    </div>
+                    {h.remarks && <p className="text-xs text-muted-foreground italic">{h.remarks}</p>}
+                  </div>
+                  <div className="flex items-center gap-3 text-right">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Delivered / Progress</p>
+                      <p className="text-sm font-semibold text-emerald-400">
+                        {deliveredTotal} / {h.totalQty} {h.unit} ({progressPct}%)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-POs Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {h.subs.map((s) => {
+                    const subDelivered = s.entries.reduce((acc, e) => acc + e.qty, 0);
+                    const subBalance = s.poQty - subDelivered;
+
+                    return (
+                      <div key={s.id} className="rounded-lg border border-border/70 bg-secondary/20 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-mono text-xs font-semibold text-foreground flex items-center gap-1">
+                              <FileText className="h-3.5 w-3.5 text-primary" /> {s.poNumber}
+                            </span>
+                            <p className="text-xs text-muted-foreground">{s.supplier || "Vendor Not Specified"}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs font-semibold text-foreground">
+                              {subDelivered} / {s.poQty} delivered
+                            </span>
+                            <p className="text-[10px] text-muted-foreground">
+                              Bal: <span className={cn(subBalance > 0 ? "text-amber-400" : "text-emerald-400")}>{subBalance}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Deliveries Table */}
+                        <div className="rounded-md border border-border overflow-hidden bg-background">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="hover:bg-transparent text-[11px]">
+                                <TableHead className="py-2 h-7">Sr</TableHead>
+                                <TableHead className="py-2 h-7">Date</TableHead>
+                                <TableHead className="py-2 h-7">Vehicle</TableHead>
+                                <TableHead className="py-2 h-7 text-right">Qty</TableHead>
+                                <TableHead className="py-2 h-7 text-right">QCI Action</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {s.entries.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={5} className="text-center text-xs py-3 text-muted-foreground italic">
+                                    No deliveries recorded yet
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                s.entries.map((e) => (
+                                  <TableRow key={e.id} className="text-xs hover:bg-secondary/40">
+                                    <TableCell className="py-1.5 font-mono text-[11px]">#{e.srNo}</TableCell>
+                                    <TableCell className="py-1.5 text-muted-foreground text-[11px]">{e.date}</TableCell>
+                                    <TableCell className="py-1.5 font-mono text-[11px]">{e.vehicleNumber || "—"}</TableCell>
+                                    <TableCell className="py-1.5 text-right font-medium">{e.qty}</TableCell>
+                                    <TableCell className="py-1.5 text-right">
+                                      {e.sentToQCI ? (
+                                        <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]">
+                                          <ShieldCheck className="h-3 w-3 mr-1" /> Sent QCI
+                                        </CustomBadge>
+                                      ) : (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-6 px-2 text-[10px] gap-1 border-primary/40 text-primary hover:bg-primary/10"
+                                          disabled={sendingEntryId === e.id}
+                                          onClick={() => handleSendToQci(s.id, e.id)}
+                                        >
+                                          {sendingEntryId === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                                          Send QCI
+                                        </Button>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full text-xs gap-1 text-primary hover:bg-primary/10 h-7"
+                          onClick={() => setEntryOpenSub(s)}
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add Delivery Entry
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create Split Order Dialog */}
+      <CreateSplitOrderDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={() => {
+          setCreateOpen(false);
+          refresh();
+        }}
+      />
+
+      {/* Add Delivery Entry Dialog */}
+      {entryOpenSub && (
+        <AddSplitEntryDialog
+          sub={entryOpenSub}
+          open={!!entryOpenSub}
+          onOpenChange={(o) => !o && setEntryOpenSub(null)}
+          onAdded={() => {
+            setEntryOpenSub(null);
+            refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateSplitOrderDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onCreated: () => void;
+}) {
+  const [fileNumber, setFileNumber] = useState("FILE/2025-005");
+  const [itemName, setItemName] = useState("");
+  const [totalQty, setTotalQty] = useState("");
+  const [unit, setUnit] = useState("NOS");
+  const [remarks, setRemarks] = useState("");
+  const [subs, setSubs] = useState<Array<{ poNumber: string; supplier: string; poQty: string; unitPrice: string }>>([
+    { poNumber: "PO/2025/0010", supplier: "", poQty: "", unitPrice: "" },
+    { poNumber: "PO/2025/0011", supplier: "", poQty: "", unitPrice: "" },
+  ]);
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  const addSub = () => {
+    setSubs([...subs, { poNumber: `PO/2025/00${subs.length + 10}`, supplier: "", poQty: "", unitPrice: "" }]);
+  };
+
+  const removeSub = (idx: number) => {
+    if (subs.length <= 1) return;
+    setSubs(subs.filter((_, i) => i !== idx));
+  };
+
+  const handleSubmit = async () => {
+    if (!fileNumber.trim() || !itemName.trim() || !totalQty) {
+      toast({ title: "File Number, Item Name and Total Qty are required", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    const res = await apiRequest("/api/collection/split-orders", "POST", {
+      fileNumber,
+      itemName,
+      totalQty: Number(totalQty) || 0,
+      unit,
+      remarks,
+      subs,
+    });
+    setSubmitting(false);
+    if (res.ok) {
+      toast({ title: "Split Order created successfully" });
+      onCreated();
+    } else {
+      toast({ title: "Failed to create split order", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Boxes className="h-5 w-5 text-primary" /> Create Split Order
+          </DialogTitle>
+          <DialogDescription>
+            Bind a single file item to multiple POs with separate quantities & suppliers.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs">File Number *</Label>
+              <Input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} className="bg-background border-border font-mono text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs">Unit</Label>
+              <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="bg-background border-border text-xs" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <Label className="text-xs">Item Description *</Label>
+              <Input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. Portland Cement" className="bg-background border-border text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs">Total Qty *</Label>
+              <Input type="number" value={totalQty} onChange={(e) => setTotalQty(e.target.value)} placeholder="30" className="bg-background border-border text-xs font-mono" />
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase">Sub POs ({subs.length})</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addSub} className="h-7 text-xs gap-1">
+                <Plus className="h-3 w-3" /> Add PO
+              </Button>
+            </div>
+
+            {subs.map((s, idx) => (
+              <div key={idx} className="p-3 rounded-lg border border-border bg-secondary/20 space-y-2 relative">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-semibold text-primary">PO #{idx + 1}</span>
+                  {subs.length > 1 && (
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => removeSub(idx)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-[10px]">PO Number</Label>
+                    <Input value={s.poNumber} onChange={(e) => { const next = [...subs]; next[idx].poNumber = e.target.value; setSubs(next); }} className="bg-background border-border font-mono text-xs h-8" />
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">Supplier</Label>
+                    <Input value={s.supplier} onChange={(e) => { const next = [...subs]; next[idx].supplier = e.target.value; setSubs(next); }} placeholder="Vendor" className="bg-background border-border text-xs h-8" />
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">PO Qty</Label>
+                    <Input type="number" value={s.poQty} onChange={(e) => { const next = [...subs]; next[idx].poQty = e.target.value; setSubs(next); }} className="bg-background border-border font-mono text-xs h-8" />
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">Unit Price</Label>
+                    <Input type="number" value={s.unitPrice} onChange={(e) => { const next = [...subs]; next[idx].unitPrice = e.target.value; setSubs(next); }} className="bg-background border-border font-mono text-xs h-8" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <Label className="text-xs">Remarks / Notes</Label>
+            <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional note" className="bg-background border-border text-xs" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Create Split Order
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddSplitEntryDialog({
+  sub,
+  open,
+  onOpenChange,
+  onAdded,
+}: {
+  sub: SplitOrderSubData;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onAdded: () => void;
+}) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [vehicleNumber, setVehicleNumber] = useState("");
+  const [qty, setQty] = useState("");
+  const [driverName, setDriverName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  const handleSubmit = async () => {
+    if (!qty || Number(qty) <= 0) {
+      toast({ title: "Please enter a valid delivered quantity", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    const res = await apiRequest(`/api/collection/split-orders/${sub.id}/entries`, "POST", {
+      date,
+      vehicleNumber,
+      qty: Number(qty),
+      driverName,
+    });
+    setSubmitting(false);
+    if (res.ok) {
+      toast({ title: "Delivery entry recorded successfully" });
+      onAdded();
+    } else {
+      toast({ title: "Failed to record entry", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Plus className="h-5 w-5 text-primary" /> Add Delivery Entry — {sub.poNumber}
+          </DialogTitle>
+          <DialogDescription>
+            Record a partial delivery under this Purchase Order.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs">Date *</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-background border-border text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs">Delivered Qty *</Label>
+              <Input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty" className="bg-background border-border text-xs font-mono" />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Vehicle Number</Label>
+            <Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. WP CAB-1042" className="bg-background border-border text-xs font-mono" />
+          </div>
+          <div>
+            <Label className="text-xs">Driver Name</Label>
+            <Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Driver / Representative" className="bg-background border-border text-xs" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Save Entry
           </Button>
         </DialogFooter>
       </DialogContent>

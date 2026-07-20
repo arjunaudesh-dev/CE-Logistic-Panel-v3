@@ -47,6 +47,9 @@ import {
   estimateStatusColor,
   financialMeanColor,
   confidenceColor,
+  FINANCIAL_MEANS,
+  PROJECT_TYPES,
+  PROJECT_STATUSES,
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -82,6 +85,8 @@ import {
   Lock,
   Wand2,
   AlertCircle,
+  Building2,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +105,10 @@ interface Project {
   projectType?: string | null;
   financialMean?: string | null;
   requirementGroup?: string | null;
+  department?: string | null;
+  projectOfficer?: string | null;
+  status?: string;
+  description?: string | null;
 }
 
 interface Allocation {
@@ -123,6 +132,8 @@ interface ProcessStep {
   positionName: string;
   defaultResponsiblePerson: string | null;
   financialDelegationLevel: string | null;
+  expectedDays?: number;
+  expectedPercentage?: number;
 }
 
 interface ProcessFlow {
@@ -138,7 +149,39 @@ interface Props {
   onChanged: () => void;
 }
 
-type FileNumberFilter = "all" | "with" | "without";
+type FileNumberFilter = "all" | "processing" | "pending" | "initiated";
+
+const ACTUAL_POSITIONS = [
+  "Payment Done",
+  "Bill Sent for Payment",
+  "Closed",
+  "Complete",
+  "Sent for Payment",
+  "Paid",
+  "Actual File",
+];
+
+function isActualPosition(pos: string) {
+  if (!pos) return false;
+  return ACTUAL_POSITIONS.some((p) => pos.toLowerCase().includes(p.toLowerCase()));
+}
+
+function checkIsOvertime(f: ProjectFile, flows?: ProcessFlow[] | null) {
+  let expectedDays = 2;
+  if (flows) {
+    for (const flow of flows) {
+      const step = flow.steps?.find((s) => s.positionName === f.presentPosition);
+      if (step && step.expectedDays && step.expectedDays > 0) {
+        expectedDays = step.expectedDays;
+        break;
+      }
+    }
+  }
+  const lastLog = f.logs?.find((l) => l.newPosition === f.presentPosition);
+  const changeTime = lastLog ? new Date(lastLog.changedAt).getTime() : new Date(f.createdAt).getTime();
+  const daysInStep = (Date.now() - changeTime) / (1000 * 60 * 60 * 24);
+  return daysInStep > expectedDays;
+}
 
 export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
   // Archive (NFA) view toggle — OFF (default) shows active files only,
@@ -159,6 +202,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const [updateFile, setUpdateFile] = useState<ProjectFile | null>(null);
   const [logFile, setLogFile] = useState<ProjectFile | null>(null);
   const [allocOpen, setAllocOpen] = useState(false);
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [activeEstimateId, setActiveEstimateId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<"createdAt" | "fileCost" | "prNumber">("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -253,12 +297,14 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
     [estimates]
   );
 
-  // File-number counts for the filter toggle
-  const fileNumberCounts = useMemo(() => {
+  // PP sub-tab counts (All, Processing, Pending/Overtime, Just Initiated)
+  const ppTabCounts = useMemo(() => {
     const all = files?.length || 0;
-    const withFn = files?.filter((f) => f.fileNumber && f.fileNumber.trim()).length || 0;
-    return { all, with: withFn, without: all - withFn };
-  }, [files]);
+    const processing = files?.filter((f) => f.fileNumber && f.fileNumber.trim() && !isActualPosition(f.presentPosition)).length || 0;
+    const pending = files?.filter((f) => checkIsOvertime(f, processFlows)).length || 0;
+    const initiated = files?.filter((f) => !f.fileNumber || !f.fileNumber.trim()).length || 0;
+    return { all, processing, pending, initiated };
+  }, [files, processFlows]);
 
   const filteredFiles = useMemo(() => {
     let list = files || [];
@@ -276,9 +322,11 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
     if (positionFilter !== "all") {
       list = list.filter((f) => f.presentPosition === positionFilter);
     }
-    if (fileNumberFilter === "with") {
-      list = list.filter((f) => f.fileNumber && f.fileNumber.trim());
-    } else if (fileNumberFilter === "without") {
+    if (fileNumberFilter === "processing") {
+      list = list.filter((f) => f.fileNumber && f.fileNumber.trim() && !isActualPosition(f.presentPosition));
+    } else if (fileNumberFilter === "pending") {
+      list = list.filter((f) => checkIsOvertime(f, processFlows));
+    } else if (fileNumberFilter === "initiated") {
       list = list.filter((f) => !f.fileNumber || !f.fileNumber.trim());
     }
     list = [...list].sort((a, b) => {
@@ -289,7 +337,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
-  }, [files, search, positionFilter, fileNumberFilter, sortKey, sortDir]);
+  }, [files, search, positionFilter, fileNumberFilter, sortKey, sortDir, processFlows]);
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -522,7 +570,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
         <TableCell className="font-mono text-xs text-foreground">
           <div className="flex items-center gap-1.5">
             {isArchived && <Archive className="h-3 w-3 text-muted-foreground shrink-0" />}
-            {f.prNumber}
+            {hasFileNumber ? <span className="text-muted-foreground">—</span> : f.prNumber}
           </div>
         </TableCell>
         <TableCell>
@@ -609,44 +657,41 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
             </button>
             <div className="min-w-0">
               <h2 className="font-semibold text-foreground text-sm sm:text-base truncate flex items-center gap-2 flex-wrap">
-                <span title="Project data is locked — edit from the Projects list" className="shrink-0 cursor-help">
-                  <Lock className="h-3.5 w-3.5 text-muted-foreground" />
-                </span>
                 <span className="truncate">{project.name}</span>
                 {project.nameAbbreviation && (
-                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0" title="Project abbreviation (locked)">
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
                     {project.nameAbbreviation}
                   </span>
                 )}
                 {project.financialMean && (
-                  <CustomBadge
-                    className={cn("border", financialMeanColor(project.financialMean))}
-                    title="Funding source (locked — edit from the Projects list)"
-                  >
+                  <CustomBadge className={cn("border", financialMeanColor(project.financialMean))}>
                     {project.financialMean}
                   </CustomBadge>
                 )}
                 {project.projectType && (
-                  <span className="text-[10px] text-muted-foreground shrink-0" title="Project type (locked)">
+                  <span className="text-[10px] text-muted-foreground shrink-0">
                     · {project.projectType}
                   </span>
                 )}
               </h2>
               <p className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1" title="Vote number (locked)">
-                  <Lock className="h-3 w-3 text-muted-foreground/70" />
+                <span className="inline-flex items-center gap-1">
                   <span className="font-mono">{project.voteNumber || "—"}</span>
                 </span>
                 {project.benefactor && ` · Benefactor: ${project.benefactor}`}
                 {project.reference && ` · Ref: ${project.reference}`}
                 {project.endDate && ` · EDC: ${new Date(project.endDate).toLocaleDateString("en-GB")}`}
-                <span className="text-[10px] text-muted-foreground/70 italic ml-1">· fields locked</span>
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setAllocOpen(true)} className="gap-1.5 shrink-0">
-            <History className="h-4 w-4" /> Allocations
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setEditProjectOpen(true)} className="gap-1.5">
+              <Pencil className="h-4 w-4" /> Edit Project
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAllocOpen(true)} className="gap-1.5">
+              <History className="h-4 w-4" /> Allocations
+            </Button>
+          </div>
         </div>
         {/* Financial summary bar */}
         <div className="px-4 sm:px-6 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -722,19 +767,24 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                 {/* File Number filter toggle */}
                 <div className="inline-flex rounded-md border border-border overflow-hidden bg-background">
                   <FilterPill
-                    label={`All (${fileNumberCounts.all})`}
+                    label={`All (${ppTabCounts.all})`}
                     active={fileNumberFilter === "all"}
                     onClick={() => setFileNumberFilter("all")}
                   />
                   <FilterPill
-                    label={`With File No (${fileNumberCounts.with})`}
-                    active={fileNumberFilter === "with"}
-                    onClick={() => setFileNumberFilter("with")}
+                    label={`Processing Files (${ppTabCounts.processing})`}
+                    active={fileNumberFilter === "processing"}
+                    onClick={() => setFileNumberFilter("processing")}
                   />
                   <FilterPill
-                    label={`Pending (${fileNumberCounts.without})`}
-                    active={fileNumberFilter === "without"}
-                    onClick={() => setFileNumberFilter("without")}
+                    label={`Pending (Overtime) (${ppTabCounts.pending})`}
+                    active={fileNumberFilter === "pending"}
+                    onClick={() => setFileNumberFilter("pending")}
+                  />
+                  <FilterPill
+                    label={`Just Initiated (${ppTabCounts.initiated})`}
+                    active={fileNumberFilter === "initiated"}
+                    onClick={() => setFileNumberFilter("initiated")}
                   />
                 </div>
                 {/* Archived (NFA) toggle — ON shows archived files only (with muted styling + NFA badge) */}
@@ -1009,7 +1059,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                     <TableCell className="pl-8 font-mono text-xs text-muted-foreground">
                                       <span className="inline-flex items-center gap-1.5">
                                         <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
-                                        {f.prNumber}
+                                        {f.fileNumber && f.fileNumber.trim() ? "—" : f.prNumber}
                                       </span>
                                     </TableCell>
                                     <TableCell>
@@ -1212,6 +1262,16 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
           onChanged();
         }}
       />
+      {/* Edit Project Data dialog */}
+      <EditProjectDataDialog
+        project={project}
+        open={editProjectOpen}
+        onOpenChange={setEditProjectOpen}
+        onSaved={() => {
+          refresh();
+          onChanged();
+        }}
+      />
     </div>
   );
 }
@@ -1283,6 +1343,148 @@ function SortTh({ label, onClick, active, dir, align = "left" }: { label: string
         {active && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
       </button>
     </TableHead>
+  );
+}
+
+// ─── Edit Project Data Dialog (allows editing all project fields) ───
+function EditProjectDataDialog({
+  project,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  project: Project;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: project.name || "",
+    nameAbbreviation: project.nameAbbreviation || "",
+    voteNumber: project.voteNumber || "",
+    voteAllocation: String(project.voteAllocation || 0),
+    department: project.department || "",
+    benefactor: project.benefactor || "",
+    reference: project.reference || "",
+    projectType: project.projectType || "New Construction",
+    financialMean: project.financialMean || "Vote/Funds",
+    projectOfficer: project.projectOfficer || "",
+    status: project.status || "Active",
+    startDate: project.startDate ? project.startDate.slice(0, 10) : "",
+    endDate: project.endDate ? project.endDate.slice(0, 10) : "",
+    description: project.description || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.voteNumber.trim()) {
+      toast({ title: "Project Name and Vote Number are required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    const res = await apiRequest(`/api/projects/${project.id}`, "PUT", {
+      name: form.name.trim(),
+      nameAbbreviation: form.nameAbbreviation.trim() || null,
+      voteNumber: form.voteNumber.trim(),
+      voteAllocation: Number(form.voteAllocation) || 0,
+      department: form.department.trim() || null,
+      benefactor: form.benefactor.trim() || null,
+      reference: form.reference.trim() || null,
+      projectType: form.projectType,
+      financialMean: form.financialMean,
+      projectOfficer: form.projectOfficer.trim() || null,
+      status: form.status,
+      startDate: form.startDate || null,
+      endDate: form.endDate || null,
+      description: form.description.trim() || null,
+    });
+    setSaving(false);
+    if (res.ok) {
+      toast({ title: "Project updated successfully" });
+      onSaved();
+      onOpenChange(false);
+    } else {
+      toast({ title: "Failed to update project", description: res.error, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-5 w-5 text-primary" /> Edit Project Data
+          </DialogTitle>
+          <DialogDescription>
+            Modify core project details, financial delegation, and schedule.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+          <div className="sm:col-span-2">
+            <Field label="Project Name *">
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="bg-background border-border" />
+            </Field>
+          </div>
+          <Field label="Abbreviation (Key Prefix)">
+            <Input value={form.nameAbbreviation} onChange={(e) => setForm({ ...form, nameAbbreviation: e.target.value })} placeholder="e.g. NSH" className="bg-background border-border font-mono" />
+          </Field>
+          <Field label="Vote Number *">
+            <Input value={form.voteNumber} onChange={(e) => setForm({ ...form, voteNumber: e.target.value })} placeholder="e.g. 223-1-01-2104" className="bg-background border-border font-mono" />
+          </Field>
+          <Field label="Vote Allocation (LKR)">
+            <Input type="number" value={form.voteAllocation} onChange={(e) => setForm({ ...form, voteAllocation: e.target.value })} className="bg-background border-border font-mono" />
+          </Field>
+          <Field label="Financial Mean / Source">
+            <Select value={form.financialMean} onValueChange={(v) => setForm({ ...form, financialMean: v })}>
+              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+              <SelectContent>{FINANCIAL_MEANS.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          <Field label="Project Type">
+            <Select value={form.projectType} onValueChange={(v) => setForm({ ...form, projectType: v })}>
+              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+              <SelectContent>{PROJECT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          <Field label="Status">
+            <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+              <SelectTrigger className="bg-background border-border"><SelectValue /></SelectTrigger>
+              <SelectContent>{PROJECT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          <Field label="Department">
+            <Input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="Department" className="bg-background border-border" />
+          </Field>
+          <Field label="Benefactor / Customer">
+            <Input value={form.benefactor} onChange={(e) => setForm({ ...form, benefactor: e.target.value })} placeholder="Benefactor" className="bg-background border-border" />
+          </Field>
+          <Field label="Reference Number">
+            <Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="Reference" className="bg-background border-border" />
+          </Field>
+          <Field label="Project Officer">
+            <Input value={form.projectOfficer} onChange={(e) => setForm({ ...form, projectOfficer: e.target.value })} placeholder="Officer in charge" className="bg-background border-border" />
+          </Field>
+          <Field label="Start Date">
+            <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="bg-background border-border" />
+          </Field>
+          <Field label="EDC / End Date">
+            <Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="bg-background border-border" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Description">
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} className="bg-background border-border resize-none" />
+            </Field>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={saving} className="gap-1.5">{saving && <Loader2 className="h-4 w-4 animate-spin" />} Save Project Data</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
