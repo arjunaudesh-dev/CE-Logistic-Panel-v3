@@ -70,6 +70,8 @@ export interface ProjectFile {
   fileCost: number;
   supplier: string | null;
   presentPosition: string;
+  progressPercentage?: number;
+  processFlowId?: string | null;
   fileCategory: string;
   fileNumber?: string | null;
   fileGroupKey?: string | null;

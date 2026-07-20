@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { resolveProcessFlowAndProgress } from "@/lib/process-logic";
 
 export async function PUT(
   req: NextRequest,
@@ -18,6 +19,20 @@ export async function PUT(
     const fileCost = body.fileCost != null ? Number(body.fileCost) : qty * unitPrice;
     const newPosition = body.presentPosition || existing.presentPosition;
     const oldPosition = existing.presentPosition;
+
+    let progressPercentage = body.progressPercentage != null ? Number(body.progressPercentage) : existing.progressPercentage;
+    let processFlowId = body.processFlowId !== undefined ? body.processFlowId : existing.processFlowId;
+
+    if (body.progressPercentage == null || newPosition !== oldPosition) {
+      const resProgress = await resolveProcessFlowAndProgress(
+        body.fileCategory ?? existing.fileCategory,
+        fileCost,
+        newPosition,
+        processFlowId
+      );
+      if (body.progressPercentage == null) progressPercentage = resProgress.currentProgress;
+      if (!processFlowId) processFlowId = resProgress.processFlowId;
+    }
 
     // Support restore-from-archive: when body.isArchived === false explicitly,
     // clear the archive fields and bring the file back into active view.
@@ -45,6 +60,8 @@ export async function PUT(
         fileCost,
         supplier: body.supplier ?? existing.supplier,
         presentPosition: newPosition,
+        progressPercentage,
+        processFlowId,
         fileCategory: body.fileCategory ?? existing.fileCategory,
         fileNumber: body.fileNumber ?? existing.fileNumber,
         authorizedBy: body.authorizedBy ?? existing.authorizedBy,

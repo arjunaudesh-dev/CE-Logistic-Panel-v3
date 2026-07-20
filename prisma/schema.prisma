@@ -58,6 +58,8 @@ model ProjectFile {
   createdBy       String?  // sailor name who created
   authorizedBy    String?  // officer name who authorized
   responsiblePerson String? // default responsible person for current position
+  progressPercentage Float   @default(0) // progress percentage 0-100%
+  processFlowId      String? // auto-matched process flow ID
   isArchived      Boolean  @default(false) // NFA (Not For Action) archive instead of hard delete
   archivedReason  String?  // reason for archiving
   archivedAt      DateTime?
@@ -134,6 +136,8 @@ model ProcurementFile {
   fileCost        Float    @default(0)
   supplier        String?
   presentPosition String   @default("PR Raised")
+  progressPercentage Float @default(0)
+  processFlowId      String?
   fileCategory    String   @default("General")
   createdBy       String?
   authorizedBy    String?
@@ -226,15 +230,19 @@ model EarmarkedItem {
 // ───────────────────────── QC INSPECTION (Collection) ─────────────────────────
 model QCInspection {
   id              String   @id @default(cuid())
-  refType         String   // daily | partsupply | collection
+  qciNumber       String?  // QCI reference number e.g. QCI/2025/001
+  refType         String   // daily | partsupply | splitorder | collection
   refId           String
   itemName        String
   supplier        String?
   qty             Float    @default(0)
-  qcLevel         String   // Fail | Below Average | Satisfactory | Good | Excellent
+  qcLevel         String   @default("Satisfactory") // Fail | Below Average | Satisfactory | Good | Excellent
   qcOfficer       String?
   qcOfficerDetails String?
   remarks         String?  // mandatory if Fail
+  fileNumber      String?
+  poNumber        String?
+  sentToAreaStore Boolean  @default(false)
   inspectedAt     DateTime @default(now())
 
   @@index([refType, refId])
@@ -248,7 +256,7 @@ model Stakeholder {
   svcNumber     String?  // SVC number
   appointment   String?  // CSLOG, CLOGD, ASO(E), APO(E), AAPO(PT), CCED(E), CCEO(E), SCE(M), SCE(P&P)
   department    String   @default("CSLOG") // CSLOG | CE
-  category      String   @default("Officer") // Officer | Sailor | Officer-in-Area
+  category      String   @default("Officer") // Officer | Sailor | Officer-in-Area | Provost Sailor | ADF & Staff | Other Sailor
   seniority     Int?     // seniority order from Navy List (lower = more senior)
   areaStoreLocation String? // for sailors: BMS, Metal, General, Paint, Oil & Lubricant, Stationary
   subjectClerk  String?  // subject clerk assignment
@@ -467,6 +475,8 @@ model PartSupplyEntry {
   driverLicense      String?
   driverPhone        String?
   cumulativeBalance  Float   @default(0)
+  sentToQCI          Boolean @default(false)
+  sentToQCIAt        DateTime?
   createdAt          DateTime @default(now())
 
   order PartSupplyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -483,30 +493,96 @@ model DailyCollection {
   recordedBy   String?
   recordedAt   DateTime @default(now())
 
+  vehicleType          String?  @default("SLN") // SLN | Civil
+  vehicleNumber        String?
+  gatePassNumber       String?
+  driverName           String?
+  driverLicense        String?
+  driverPhone          String?
+  provostCheckedBy     String?
+  ceSailorInvolved      String?
+  cslogSailorInvolved   String?
+  sentToQCI            Boolean  @default(false)
+  sentToQCIAt          DateTime?
+  isOld                Boolean  @default(false)
+
   @@index([date])
+}
+
+// ───────────────────────── SPLIT ORDERS (Collection) ─────────────────────────
+model SplitOrderHeader {
+  id          String   @id @default(cuid())
+  fileNumber  String
+  itemName    String
+  totalQty    Float    @default(0)
+  supplier    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  splits      SplitOrderSub[]
+}
+
+model SplitOrderSub {
+  id          String   @id @default(cuid())
+  headerId    String
+  poNumber    String
+  allocatedQty Float   @default(0)
+  receivedQty  Float   @default(0)
+  createdAt   DateTime @default(now())
+
+  header      SplitOrderHeader  @relation(fields: [headerId], references: [id], onDelete: Cascade)
+  entries     SplitOrderEntry[]
+
+  @@index([headerId])
+  @@index([poNumber])
+}
+
+model SplitOrderEntry {
+  id                  String   @id @default(cuid())
+  subId               String
+  date                String
+  receivedQty         Float    @default(0)
+  vehicleType         String?  @default("SLN")
+  vehicleNumber       String?
+  gatePassNumber      String?
+  driverName          String?
+  driverLicense       String?
+  driverPhone         String?
+  provostCheckedBy    String?
+  ceSailorInvolved     String?
+  cslogSailorInvolved  String?
+  sentToQCI           Boolean  @default(false)
+  sentToQCIAt         DateTime?
+  createdAt           DateTime @default(now())
+
+  sub                 SplitOrderSub @relation(fields: [subId], references: [id], onDelete: Cascade)
+
+  @@index([subId])
 }
 
 // ───────────────────────── AREA STORES (CSLOG — oncharge/off-charge) ─────────────────────────
 // Area stores belong to CSLOG but records kept here for easy management.
 // Oncharge = received via QCI (NAV 251 reference); Off-charge = transferred to Stores locations (NAV 255)
 model AreaStoreRecord {
-  id            String   @id @default(cuid())
-  storeName     String   // BMS | Metal | General | Paint | Oil & Lubricant | Stationary
-  itemCode      String?
-  itemName      String
-  category      String   @default("General")
-  unit          String   @default("NOS")
-  qty           Float    @default(0)
-  unitCost      Float    @default(0)
-  totalCost     Float    @default(0)
-  recordType    String   // Oncharge | OffCharge
-  navReference  String?  // NAV 251 (oncharge) or NAV 255 (off-charge)
-  qcInspectionId String? // link to QC inspection if oncharge via QCI
-  fileNumber    String?  // file number referred to store
-  location      String?  // store location
-  date          String?
-  remarks       String?
-  createdAt     DateTime @default(now())
+  id               String   @id @default(cuid())
+  storeName        String   // BMS | Metal | General | Paint | Oil & Lubricant | Stationary
+  itemCode         String?
+  itemName         String
+  category         String   @default("General")
+  unit             String   @default("NOS")
+  qty              Float    @default(0)
+  unitCost         Float    @default(0)
+  totalCost        Float    @default(0)
+  recordType       String   // Oncharge | OffCharge | IntermediateOffCharge | FinalOffCharge
+  navReference     String?  // NAV 251 (oncharge/stage1) or NAV 255 (off-charge/stage2)
+  qcInspectionId    String?  // link to QC inspection if oncharge via QCI
+  fileNumber       String?  // file number referred to store
+  location         String?  // store location
+  destinationStore String?  // destination store (CCED Stores / Zone / Project / RU)
+  offChargeStage   String?  // Stage1 | Stage2
+  date             String?
+  remarks          String?
+  createdAt        DateTime @default(now())
 
   @@index([storeName])
   @@index([recordType])
@@ -521,6 +597,9 @@ model ProcessFlow {
   name        String   // RC | Non-Rate | ARO (Contractual)
   description String?
   financialDelegationId String? // optional default delegation linked at the flow level
+  conditionMethod   String? // RC | Non-Rate | Contract
+  conditionMinValue Float?
+  conditionMaxValue Float?
   createdAt   DateTime @default(now())
 
   steps ProcessStep[]
@@ -541,6 +620,8 @@ model ProcessStep {
   isTenderStage    Boolean  @default(false)
   isEvaluationStage Boolean @default(false)
   prefixedNumber   String?  // auto-show prefixed number if relevant
+  expectedDays     Int      @default(2)
+  expectedPercentage Float  @default(0)
   createdAt        DateTime @default(now())
 
   flow ProcessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)

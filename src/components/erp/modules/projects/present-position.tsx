@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { PositionBadge, CategoryBadge, CustomBadge } from "@/components/erp/badges";
+import { PositionBadge, CategoryBadge, CustomBadge, ProgressBadge } from "@/components/erp/badges";
 import { EmptyState, LoadingState } from "@/components/erp/states";
 import { FileLogDialog, ProjectFile } from "./file-log";
 import { EstimateItemsTable } from "./estimate-items";
@@ -554,7 +554,10 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
         <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
         <TableCell>
           <div className="flex flex-col gap-0.5">
-            <PositionBadge position={f.presentPosition} />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <ProgressBadge progress={f.progressPercentage || 0} />
+              <PositionBadge position={f.presentPosition} />
+            </div>
             {f.responsiblePerson && (
               <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                 <User className="h-2.5 w-2.5" />
@@ -939,7 +942,10 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                   <TableCell>
                                     <div className="flex flex-col gap-0.5">
                                       {g.commonPosition ? (
-                                        <PositionBadge position={g.commonPosition} />
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <ProgressBadge progress={g.items[0]?.progressPercentage || 0} />
+                                          <PositionBadge position={g.commonPosition} />
+                                        </div>
                                       ) : (
                                         <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">mixed</CustomBadge>
                                       )}
@@ -1035,7 +1041,10 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                     <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
                                     <TableCell>
                                       <div className="flex flex-col gap-0.5">
-                                        <PositionBadge position={f.presentPosition} />
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <ProgressBadge progress={f.progressPercentage || 0} />
+                                          <PositionBadge position={f.presentPosition} />
+                                        </div>
                                         {f.responsiblePerson && (
                                           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                                             <User className="h-2.5 w-2.5" />
@@ -1384,23 +1393,50 @@ function UpdatePositionDialog({
   const [responsiblePerson, setResponsiblePerson] = useState(file.responsiblePerson || "");
   const [fileNumber, setFileNumber] = useState(file.fileNumber || "");
   const [supplier, setSupplier] = useState(file.supplier || "");
+  const [progressPercentage, setProgressPercentage] = useState<number>(file.progressPercentage || 0);
+  const [suggesting, setSuggesting] = useState(false);
   const [changedBy, setChangedBy] = useState("");
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+
+  const handleAiSuggestProgress = async () => {
+    setSuggesting(true);
+    try {
+      const res = await fetch(`/api/process-flows/suggest?fileCategory=${encodeURIComponent(file.fileCategory || "General")}&fileCost=${file.fileCost || 0}&currentPosition=${encodeURIComponent(nextPosition)}`);
+      const data = await res.json();
+      if (data.currentProgress !== undefined) {
+        setProgressPercentage(data.currentProgress);
+        toast({ title: "AI Insight Applied", description: `Progress set to ${data.currentProgress}% based on process flow rules.` });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   // When the user picks a different next position, prefill the responsible person
   // from the process-flow defaults — but only if the user hasn't manually overridden.
   const defaultForCurrent = positionToResponsible.get(currentPosition) || "";
   const defaultForNext = positionToResponsible.get(nextPosition) || "";
 
-  const handleNextPositionChange = (v: string) => {
+  const handleNextPositionChange = async (v: string) => {
     setNextPosition(v);
-    // Auto-fill responsible person from the new position's default — only if user hasn't overridden
     const isUsingDefault = responsiblePerson === defaultForCurrent || responsiblePerson === "";
     if (isUsingDefault) {
       const newDefault = positionToResponsible.get(v) || "";
       setResponsiblePerson(newDefault);
+    }
+    // Auto-recalculate progress for the new position
+    try {
+      const res = await fetch(`/api/process-flows/suggest?fileCategory=${encodeURIComponent(file.fileCategory || "General")}&fileCost=${file.fileCost || 0}&currentPosition=${encodeURIComponent(v)}`);
+      const data = await res.json();
+      if (data.currentProgress !== undefined) {
+        setProgressPercentage(data.currentProgress);
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -1413,11 +1449,10 @@ function UpdatePositionDialog({
     }
     setSaving(true);
     const body: Record<string, unknown> = {
-      // Always allow file number + supplier updates
       fileNumber: fileNumber.trim() || null,
       supplier: supplier.trim() || null,
-      // Position update
       presentPosition: nextPosition,
+      progressPercentage: Number(progressPercentage) || 0,
       responsiblePerson: responsiblePerson.trim() || null,
       changedBy: changedBy.trim() || "Officer",
       comment: comment.trim() || (positionChanged ? `Position changed: ${currentPosition} → ${nextPosition}` : "File metadata updated"),
@@ -1496,19 +1531,45 @@ function UpdatePositionDialog({
           {/* Responsible Person (auto-filled, editable) */}
           <div className="bg-secondary/40 rounded-lg p-4 space-y-3">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-              <UserCheck className="h-3.5 w-3.5" /> Responsible Person
+              <UserCheck className="h-3.5 w-3.5" /> Responsible Person & Progress
             </h4>
-            <Field label="Responsible Person (editable — defaults from Process Flow)">
-              <Input
-                value={responsiblePerson}
-                onChange={(e) => setResponsiblePerson(e.target.value)}
-                placeholder={defaultForNext || "e.g. Cdr. R. Perera"}
-                className="bg-background border-border"
-              />
-            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Responsible Person (defaults from Process Flow)">
+                <Input
+                  value={responsiblePerson}
+                  onChange={(e) => setResponsiblePerson(e.target.value)}
+                  placeholder={defaultForNext || "e.g. Cdr. R. Perera"}
+                  className="bg-background border-border"
+                />
+              </Field>
+              <Field label="Progress Percentage (%)">
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={progressPercentage}
+                    onChange={(e) => setProgressPercentage(Number(e.target.value))}
+                    className="bg-background border-border font-mono w-28"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAiSuggestProgress}
+                    disabled={suggesting}
+                    className="gap-1 text-xs border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 shrink-0"
+                    title="Auto-calculate progress from matching Process Flow"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI Insight
+                  </Button>
+                </div>
+              </Field>
+            </div>
             <p className="text-[11px] text-muted-foreground flex items-start gap-1">
               <User className="h-3 w-3 mt-0.5 shrink-0" />
-              Auto-filled from the Process Flow defaults for the selected next position. Override if a different person is responsible.
+              Auto-filled from Process Flow rules for the selected position. Adjust percentage manually or click AI Insight to recalculate.
             </p>
           </div>
 

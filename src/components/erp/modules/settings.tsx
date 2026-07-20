@@ -118,6 +118,8 @@ import {
   Sparkles,
   Star,
   RefreshCw,
+  Clock,
+  Percent,
   PlusCircle,
   DollarSign,
   ChevronDown,
@@ -1955,6 +1957,7 @@ interface ModuleFormProps {
     officer: string;
     clerk: string;
     viewer: string;
+    custom: boolean;
   }) => void;
 }
 
@@ -4589,6 +4592,8 @@ interface StepTimelineItemProps {
   accent: ReturnType<typeof flowAccent>;
   onEdit: () => void;
   onDelete: () => void;
+  onUpdateStepDays?: (stepId: string, days: number) => void;
+  onUpdateStepPercentage?: (stepId: string, pct: number) => void;
 }
 
 function StepTimelineItem({
@@ -4596,6 +4601,8 @@ function StepTimelineItem({
   accent,
   onEdit,
   onDelete,
+  onUpdateStepDays,
+  onUpdateStepPercentage,
 }: StepTimelineItemProps) {
   const name = stepDisplayName(step);
   const officers = parseJsonArray(step.responsibleOfficers);
@@ -4668,23 +4675,46 @@ function StepTimelineItem({
           </div>
         </div>
 
-        {/* Branch tags */}
-        {(step.isTenderStage || step.isEvaluationStage) && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {step.isTenderStage && (
-              <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px]">
-                <Gavel className="h-2 w-2 mr-0.5" />
-                TENDER
-              </CustomBadge>
-            )}
-            {step.isEvaluationStage && (
-              <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[9px]">
-                <ClipboardCheck className="h-2 w-2 mr-0.5" />
-                EVAL
-              </CustomBadge>
-            )}
+        {/* Expected Time (Days) & Expected Cover (%) editable boxes */}
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-1 text-[11px] bg-background/70 border border-border rounded px-1.5 py-0.5" title="Expected Time Taken (Days)">
+            <Clock className="h-3 w-3 text-sky-400 shrink-0" />
+            <span className="text-muted-foreground text-[10px]">Time:</span>
+            <input
+              type="number"
+              min="0"
+              value={step.expectedDays ?? 2}
+              onChange={(e) => onUpdateStepDays?.(step.id, Number(e.target.value))}
+              className="w-8 bg-transparent text-foreground text-[11px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary rounded"
+            />
+            <span className="text-[10px] text-muted-foreground">d</span>
           </div>
-        )}
+          <div className="flex items-center gap-1 text-[11px] bg-background/70 border border-border rounded px-1.5 py-0.5" title="Expected Percentage Cover (%)">
+            <Percent className="h-3 w-3 text-emerald-400 shrink-0" />
+            <span className="text-muted-foreground text-[10px]">Cover:</span>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={step.expectedPercentage ?? 0}
+              onChange={(e) => onUpdateStepPercentage?.(step.id, Number(e.target.value))}
+              className="w-10 bg-transparent text-foreground text-[11px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary rounded"
+            />
+            <span className="text-[10px] text-muted-foreground">%</span>
+          </div>
+          {step.isTenderStage && (
+            <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px]">
+              <Gavel className="h-2 w-2 mr-0.5" />
+              TENDER
+            </CustomBadge>
+          )}
+          {step.isEvaluationStage && (
+            <CustomBadge className="bg-violet-500/15 text-violet-400 border-violet-500/30 text-[9px]">
+              <ClipboardCheck className="h-2 w-2 mr-0.5" />
+              EVAL
+            </CustomBadge>
+          )}
+        </div>
 
         {/* Description */}
         {step.description && (

@@ -324,6 +324,9 @@ export const STAKEHOLDER_CATEGORIES = [
   "CSLOG Officer",
   "CSLOG Sailor",
   "Officer-in-Area",
+  "Provost Sailor",
+  "ADF & Staff",
+  "Other Sailor",
 ] as const;
 
 export function stakeholderCategoryColor(cat: string): string {
@@ -338,6 +341,12 @@ export function stakeholderCategoryColor(cat: string): string {
       return "bg-blue-500/10 text-blue-300 border-blue-500/20";
     case "Officer-in-Area":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Provost Sailor":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "ADF & Staff":
+      return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
+    case "Other Sailor":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   }

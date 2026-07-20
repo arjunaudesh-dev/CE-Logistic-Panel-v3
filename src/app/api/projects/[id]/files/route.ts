@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { resolveProcessFlowAndProgress } from "@/lib/process-logic";
 
 export async function GET(
   req: NextRequest,
@@ -45,6 +46,15 @@ export async function POST(
     const fileCost = Number(body.fileCost) || qty * unitPrice;
     const position = body.presentPosition || "PR Raised";
 
+    const { processFlowId, currentProgress } = await resolveProcessFlowAndProgress(
+      body.fileCategory || "General",
+      fileCost,
+      position,
+      body.processFlowId || null
+    );
+
+    const progressPercentage = body.progressPercentage != null ? Number(body.progressPercentage) : currentProgress;
+
     const file = await db.projectFile.create({
       data: {
         projectId: id,
@@ -57,6 +67,8 @@ export async function POST(
         fileCost,
         supplier: body.supplier || null,
         presentPosition: position,
+        progressPercentage,
+        processFlowId,
         fileCategory: body.fileCategory || "General",
         fileNumber: body.fileNumber || null,
         createdBy: body.createdBy || "Officer",

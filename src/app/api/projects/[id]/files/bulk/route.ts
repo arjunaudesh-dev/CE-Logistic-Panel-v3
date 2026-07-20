@@ -31,7 +31,7 @@ export async function POST(
     //    share the same key — they collapse into a single grouped file).
     //  - If not, auto-generate {ABBREV}-{SEQ} (incrementing per ungrouped row).
     let autoSeq = existingCount;
-    const created = [];
+    const created: any[] = [];
     for (let i = 0; i < body.files.length; i++) {
       const f = body.files[i];
       const qty = Number(f.qty) || 0;

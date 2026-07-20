@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { positionColor } from "@/lib/constants";
 
 export function PositionBadge({ position, progress }: { position: string; progress?: number }) {
-  let indicator = null;
+  let indicator: React.ReactNode = null;
   if (progress !== undefined) {
     let colorClass = "bg-orange-500";
     if (progress >= 100) colorClass = "bg-emerald-500";
@@ -62,6 +62,34 @@ export function CustomBadge({
       )}
     >
       {children}
+    </span>
+  );
+}
+
+export function ProgressBadge({ progress }: { progress: number }) {
+  const p = Math.max(0, Math.min(100, Math.round(progress * 10) / 10));
+  let colorClass = "bg-orange-500/15 text-orange-400 border-orange-500/30"; // 0%
+  if (p >= 100) {
+    colorClass = "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-semibold"; // 100%
+  } else if (p > 0) {
+    colorClass = "bg-amber-500/15 text-amber-400 border-amber-500/30 font-medium"; // >0% & <100%
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-mono whitespace-nowrap shrink-0",
+        colorClass
+      )}
+      title={`Progress: ${p}%`}
+    >
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full shrink-0",
+          p >= 100 ? "bg-emerald-400" : p > 0 ? "bg-amber-400" : "bg-orange-400"
+        )}
+      />
+      {p}%
     </span>
   );
 }
