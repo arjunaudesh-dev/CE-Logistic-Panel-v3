@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client'
 import path from 'path'
 import fs from 'fs'
 
@@ -7,7 +6,10 @@ const candidate1 = path.join(process.cwd(), 'db', 'custom.db')
 const candidate2 = path.join(process.cwd(), '.next', 'standalone', 'db', 'custom.db')
 const customDbPath = fs.existsSync(candidate1) ? candidate1 : (fs.existsSync(candidate2) ? candidate2 : candidate1)
 const dbUrl = `file:${customDbPath}`
-process.env.DATABASE_URL = dbUrl;
+process.env.DATABASE_URL = dbUrl
+
+// Require PrismaClient AFTER process.env.DATABASE_URL is set
+const { PrismaClient } = require('@prisma/client');
 
 // 1. Raw client used for seeds, migrations, and applying sync data without loop feedbacks
 export const rawDb =
