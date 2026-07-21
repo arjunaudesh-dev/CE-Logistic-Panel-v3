@@ -34,6 +34,31 @@ export async function POST(req: NextRequest) {
     const items = Object.entries(inventoryMap);
     console.log(`[CMSys Sync] Received ${items.length} raw inventory records from Firebase.`);
 
+    // Map zone_id and raw locations to clean display Store Zone names
+    const ZONE_DISPLAY_MAP: Record<string, string> = {
+      "OTW": "OTW Site",
+      "A-Zone": "Zone A",
+      "A Zone": "Zone A",
+      "A-ZONE": "Zone A",
+      "B-Zone": "Zone B",
+      "C-Zone": "Zone C",
+      "C Zone": "Zone C",
+      "C zone": "Zone C",
+      "D-Zone": "Zone D",
+      "D Zone": "Zone D",
+      "D-zone": "Zone D",
+      "E-Zone": "Zone E",
+      "E Zone": "Zone E",
+      "E zone": "Zone E",
+      "Supply-School": "Supply School",
+      "s/school": "Supply School",
+      "Balance-Stores": "Balance Stores",
+      "Genaral-Zone": "Zone G",
+      "General Zone": "Zone G",
+      "G Zone": "Zone G",
+      "G - ZONE": "Zone G",
+    };
+
     let syncedItems = 0;
     let createdZones = 0;
     const zonesMap = new Map<string, { totalValue: number; itemCount: number; lowStockCount: number; nonMovingCount: number }>();
@@ -42,7 +67,25 @@ export async function POST(req: NextRequest) {
       if (!fbItem.description) continue;
 
       const description = fbItem.description.replace(/^"|"$/g, '').trim();
-      const zoneName = fbItem.location || fbItem.zone_id || "Zone Store";
+      
+      // Correctly prioritize zone_id for the Store Zone name (not Stock Book location!)
+      const rawZoneId = fbItem.zone_id?.trim() || "";
+      const zoneName = ZONE_DISPLAY_MAP[rawZoneId] || rawZoneId || "General Zone";
+
+      const rawLocation = fbItem.location?.trim() || "";
+      const isStockBook = /^Stock\s*book/i.test(rawLocation);
+
+      // Book No is populated when location contains Stock Book reference
+      const bookNo = isStockBook ? rawLocation : null;
+
+      // Location field logic
+      let location = zoneName;
+      if (!isStockBook && rawLocation) {
+        location = rawLocation;
+      } else if (fbItem.requirement && !fbItem.requirement.includes('"')) {
+        location = fbItem.requirement.trim();
+      }
+
       const category = fbItem.category || "General";
       const unit = fbItem.deno || "NOS";
       const qty = Number(fbItem.quantity) || 0;
@@ -70,7 +113,8 @@ export async function POST(req: NextRequest) {
           qty,
           unitCost,
           totalCost,
-          location: zoneName,
+          location,
+          bookNo,
           itemCode,
           lastMovement,
           minStock: 5,
@@ -83,7 +127,8 @@ export async function POST(req: NextRequest) {
           qty,
           unitCost,
           totalCost,
-          location: zoneName,
+          location,
+          bookNo,
           itemCode,
           lastMovement,
           updatedAt: new Date(),
@@ -107,7 +152,7 @@ export async function POST(req: NextRequest) {
         where: { name: zName },
         create: {
           name: zName,
-          type: zName.includes("Ready") ? "Ready-Use" : zName.includes("Balance") ? "Balance" : "Zone",
+          type: zName.includes("Ready") ? "Ready-Use" : zName.includes("Balance") ? "Balance" : zName.includes("Project") ? "Project" : "Zone",
           totalValue: zStats.totalValue,
           itemCount: zStats.itemCount,
           lowStockCount: zStats.lowStockCount,
@@ -121,6 +166,15 @@ export async function POST(req: NextRequest) {
         },
       });
       createdZones++;
+    }
+
+    // Delete any StoreZone that has 0 items in StoreItem table
+    const allStoreZones = await db.storeZone.findMany();
+    for (const z of allStoreZones) {
+      const actualCount = await db.storeItem.count({ where: { zoneName: z.name } });
+      if (actualCount === 0) {
+        await db.storeZone.delete({ where: { id: z.id } });
+      }
     }
 
     return NextResponse.json({

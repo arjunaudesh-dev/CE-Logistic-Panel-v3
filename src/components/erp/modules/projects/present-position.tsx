@@ -2898,8 +2898,8 @@ function BulkFilesUploadDialog({
                       </TableCell>
                       <TableCell className="text-xs">{r.Deno || "NOS"}</TableCell>
                       <TableCell className="text-right font-mono text-xs">{r.Qty || "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{r.UnitCost ? Number(r.UnitCost).toLocaleString("en-IN") : "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-xs text-foreground/90">{fileCost.toLocaleString("en-IN")}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{r.UnitCost ? Number(r.UnitCost).toLocaleString("en-US") : "—"}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-foreground/90">{fileCost.toLocaleString("en-US")}</TableCell>
                       <TableCell className="text-xs">
                         {r.PresentPosition || <span className="text-muted-foreground italic">PR Raised</span>}
                         {m && posChanged && (

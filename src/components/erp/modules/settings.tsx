@@ -4905,7 +4905,7 @@ function FlowFormDialog({ open, onOpenChange, initial, onSaved }: FlowFormProps)
                   .map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.label ||
-                        `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
+                        `Up to Rs. ${d.value.toLocaleString("en-US")} — ${d.authority}`}
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -7263,7 +7263,7 @@ function FinancialDelegationSection() {
                       </CustomBadge>
                     </TableCell>
                     <TableCell className="text-sm text-foreground">
-                      {d.label || `Up to Rs. ${d.value.toLocaleString("en-IN")} — ${d.authority}`}
+                      {d.label || `Up to Rs. ${d.value.toLocaleString("en-US")} — ${d.authority}`}
                     </TableCell>
                     <TableCell>
                       <CustomBadge className={activeBadgeClass(d.active)}>
@@ -7401,7 +7401,7 @@ function FinancialDelegationFormDialog({
   const [active, setActive] = useState<boolean>(initial?.active ?? true);
 
   const valueNum = Number(value) || 0;
-  const computedLabel = `Up to Rs. ${valueNum.toLocaleString("en-IN")} — ${authority}`;
+  const computedLabel = `Up to Rs. ${valueNum.toLocaleString("en-US")} — ${authority}`;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

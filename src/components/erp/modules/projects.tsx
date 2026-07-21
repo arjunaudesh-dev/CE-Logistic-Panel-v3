@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
@@ -23,6 +23,7 @@ import {
   FileSpreadsheet,
   Loader2,
   Check,
+  RefreshCw,
 } from "lucide-react";
 import {
   PieChart,
@@ -191,8 +192,6 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const { toast } = useToast();
-
   if (loading) return <LoadingState label="Loading projects..." />;
   if (error) return <ErrorState message={error} />;
 
@@ -885,7 +884,7 @@ function BulkUploadDialog({
                     <TableCell className="font-mono text-xs">{r.VoteNumber || "—"}</TableCell>
                     <TableCell className="text-xs">{r.ProjectType || "—"}</TableCell>
                     <TableCell className="text-xs">{r.FinancialMean || "—"}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{r.VoteAllocation ? Number(r.VoteAllocation).toLocaleString("en-IN") : "—"}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{r.VoteAllocation ? Number(r.VoteAllocation).toLocaleString("en-US") : "—"}</TableCell>
                     <TableCell className="text-xs">{r.Benefactor || "—"}</TableCell>
                     <TableCell className="text-xs">{r.ProjectOfficer || "—"}</TableCell>
                     <TableCell className="text-xs">{r.StartDate || "—"}</TableCell>

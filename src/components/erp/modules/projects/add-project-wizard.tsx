@@ -836,7 +836,7 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                         (sum, r) => sum + (Number(r.totalCost) || 0),
                         0
                       )
-                      .toLocaleString("en-IN")}
+                      .toLocaleString("en-US")}
                   </span>
                 </div>
               )}
@@ -923,9 +923,9 @@ export function AddProjectWizard({ open, onClose, onCreated }: Props) {
                       <span className="text-foreground truncate">{r.itemName || <span className="text-muted-foreground italic">—</span>}</span>
                       <span className="text-right">{r.qty || "—"}</span>
                       <span className="text-xs">{r.unit || "NOS"}</span>
-                      <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-IN") : "—"}</span>
+                      <span className="text-right">{r.estimateCost ? Number(r.estimateCost).toLocaleString("en-US") : "—"}</span>
                       <span className="text-right font-medium text-emerald-500 dark:text-emerald-400">
-                        {r.totalCost ? Number(r.totalCost).toLocaleString("en-IN") : "—"}
+                        {r.totalCost ? Number(r.totalCost).toLocaleString("en-US") : "—"}
                       </span>
                     </div>
                   ))}

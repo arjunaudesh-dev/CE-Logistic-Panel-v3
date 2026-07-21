@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { StatCard } from "@/components/erp/stat-card";
 import { PageHeader } from "@/components/erp/page-header";
@@ -132,6 +132,15 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
   const { data: procurement } = useFetch<{ presentPosition: string }[]>("/api/procurement");
   const { data: allProjects, refresh: refreshProjects } = useFetch<Project[]>("/api/projects");
   const { toast } = useToast();
+
+  // 5-minute auto-refresh interval for dashboard projects & stats
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshProjects();
+      refreshStats();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [refreshProjects, refreshStats]);
 
   // toggle for infographics: "value" shows currency, "percent" shows utilization %
   const [viewMode, setViewMode] = useState<"value" | "percent">("value");

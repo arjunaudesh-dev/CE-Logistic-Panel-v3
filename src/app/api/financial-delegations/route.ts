@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const value = Number(body.value) || 0;
     const authority = body.authority || "";
-    const label = `Up to Rs. ${value.toLocaleString("en-IN")} — ${authority}`;
+    const label = `Up to Rs. ${value.toLocaleString("en-US")} — ${authority}`;
     const item = await db.financialDelegation.create({
       data: { value, authority, label, active: body.active !== false },
     });

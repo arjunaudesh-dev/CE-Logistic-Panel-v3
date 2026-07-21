@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
@@ -304,23 +304,27 @@ export function StoresModule() {
 
   const [syncingCmsys, setSyncingCmsys] = useState(false);
 
-  const handleSyncCmsys = async () => {
-    setSyncingCmsys(true);
-    toast({
-      title: "Connecting to CMSys v2.2 Firebase...",
-      description: "Synchronizing live inventory & zone stores from ncw-ps-operations...",
-    });
+  const handleSyncCmsys = useCallback(async (isSilent = false) => {
+    if (!isSilent) {
+      setSyncingCmsys(true);
+      toast({
+        title: "Connecting to CMSys v2.2 Firebase...",
+        description: "Synchronizing live inventory & zone stores from ncw-ps-operations...",
+      });
+    }
     try {
       const res = await apiRequest("/api/sync/firebase-stores", "POST");
-      setSyncingCmsys(false);
+      if (!isSilent) setSyncingCmsys(false);
       if (res.ok) {
-        toast({
-          title: "CMSys Sync Complete! 🎉",
-          description: (res.data as any)?.message || "Successfully synchronized live inventory from CMSys v2.2 Firebase.",
-        });
+        if (!isSilent) {
+          toast({
+            title: "CMSys Sync Complete! 🎉",
+            description: (res.data as any)?.message || "Successfully synchronized live inventory from CMSys v2.2 Firebase.",
+          });
+        }
         refreshItems();
         refreshZones();
-      } else {
+      } else if (!isSilent) {
         toast({
           title: "CMSys Sync Failed",
           description: res.error || "Could not fetch inventory from Firebase.",
@@ -328,14 +332,24 @@ export function StoresModule() {
         });
       }
     } catch (e: any) {
-      setSyncingCmsys(false);
-      toast({
-        title: "CMSys Sync Error",
-        description: e.message,
-        variant: "destructive",
-      });
+      if (!isSilent) {
+        setSyncingCmsys(false);
+        toast({
+          title: "CMSys Sync Error",
+          description: e.message,
+          variant: "destructive",
+        });
+      }
     }
-  };
+  }, [refreshItems, refreshZones, toast]);
+
+  // Automatic 5-minute background sync for Stock Inventory & Locations
+  useEffect(() => {
+    const interval = setInterval(() => {
+      handleSyncCmsys(true);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [handleSyncCmsys]);
 
   // Derived: filtered + sorted list
   const filtered = useMemo(() => {

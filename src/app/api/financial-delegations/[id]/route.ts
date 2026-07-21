@@ -10,7 +10,7 @@ export async function PUT(
     const body = await req.json();
     const value = Number(body.value) || 0;
     const authority = body.authorory || body.authority || "";
-    const label = `Up to Rs. ${value.toLocaleString("en-IN")} — ${authority}`;
+    const label = `Up to Rs. ${value.toLocaleString("en-US")} — ${authority}`;
     const updated = await db.financialDelegation.update({
       where: { id },
       data: { value, authority, label, active: body.active !== false },

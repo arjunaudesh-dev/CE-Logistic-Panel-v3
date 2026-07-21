@@ -1230,7 +1230,7 @@ function CompareDialog({ items, onClose }: CompareDialogProps) {
                   tick={{ fill: "#94a3b8", fontSize: 11 }}
                   axisLine={{ stroke: "#2d3548" }}
                   tickLine={{ stroke: "#2d3548" }}
-                  tickFormatter={(v: number) => "Rs. " + v.toLocaleString("en-IN")}
+                  tickFormatter={(v: number) => "Rs. " + v.toLocaleString("en-US")}
                   width={95}
                 />
                 <Tooltip

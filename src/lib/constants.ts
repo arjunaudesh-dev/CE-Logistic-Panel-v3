@@ -622,10 +622,10 @@ export function utilizationColor(pct: number): string {
 
 export function formatCurrency(n: number): string {
   if (n == null || isNaN(n)) n = 0;
-  return "Rs. " + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  return "Rs. " + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 export function formatNumber(n: number): string {
   if (n == null || isNaN(n)) n = 0;
-  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
