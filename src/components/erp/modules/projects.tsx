@@ -188,6 +188,7 @@ const BULK_CSV_COLUMNS: (keyof BulkProjectRow)[] = [
 ];
 
 export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => void }) {
+  const { toast } = useToast();
   const { data: projects, loading, error, refresh } = useFetch<Project[]>("/api/projects");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [addOpen, setAddOpen] = useState(false);

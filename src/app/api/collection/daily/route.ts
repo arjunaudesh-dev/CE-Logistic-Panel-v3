@@ -33,7 +33,11 @@ export async function POST(req: NextRequest) {
           itemName: b.itemName,
           qty: Number(b.qty) || 0,
           receivedFrom: b.receivedFrom || null,
-          recordedBy: b.recordedBy || "Clerk",
+          recordedBy: b.ceSailorInvolved || b.recordedBy || "Clerk",
+          vehicleNumber: b.vehicleNumber || null,
+          provostCheckedBy: b.provostCheckedBy || b.driverName || null,
+          ceSailorInvolved: b.ceSailorInvolved || b.recordedBy || null,
+          driverName: b.provostCheckedBy || b.driverName || null,
         })),
       });
       return NextResponse.json(created, { status: 201 });
@@ -44,7 +48,11 @@ export async function POST(req: NextRequest) {
         itemName: body.itemName,
         qty: Number(body.qty) || 0,
         receivedFrom: body.receivedFrom || null,
-        recordedBy: body.recordedBy || "Clerk",
+        recordedBy: body.ceSailorInvolved || body.recordedBy || "Clerk",
+        vehicleNumber: body.vehicleNumber || null,
+        provostCheckedBy: body.provostCheckedBy || body.driverName || null,
+        ceSailorInvolved: body.ceSailorInvolved || body.recordedBy || null,
+        driverName: body.provostCheckedBy || body.driverName || null,
       },
     });
     return NextResponse.json(item, { status: 201 });

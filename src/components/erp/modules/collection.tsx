@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useFetch, apiRequest } from "@/lib/use-fetch";
 import { PageHeader } from "@/components/erp/page-header";
 import { StatCard } from "@/components/erp/stat-card";
@@ -159,6 +159,10 @@ interface DailyCollection {
   receivedFrom: string | null;
   recordedBy: string | null;
   recordedAt: string;
+  vehicleNumber?: string | null;
+  provostCheckedBy?: string | null;
+  ceSailorInvolved?: string | null;
+  driverName?: string | null;
 }
 
 interface Project {
@@ -513,17 +517,167 @@ function valueFor(
 }
 
 // ─────────────────────────────────────────────────────────
+// Files Ready for Collection Pipeline Component
+// ─────────────────────────────────────────────────────────
+function FilesReadyPipeline({
+  onStartPartSupply,
+  onStartSplitOrder,
+  onRecordDaily,
+}: {
+  onStartPartSupply: (file: ProcurementFile) => void;
+  onStartSplitOrder: (file: ProcurementFile) => void;
+  onRecordDaily: (file: ProcurementFile) => void;
+}) {
+  const { data: procurementFiles, loading } =
+    useFetch<ProcurementFile[]>("/api/procurement");
+
+  const readyFiles = useMemo(() => {
+    return (procurementFiles ?? []).filter((f) => {
+      const pos = (f.presentPosition || "").toLowerCase();
+      return (
+        pos.includes("order") ||
+        pos.includes("dispatch") ||
+        pos.includes("part supply") ||
+        pos.includes("po") ||
+        pos.includes("tender") ||
+        pos.includes("collect") ||
+        pos.includes("received") ||
+        pos.includes("qc")
+      );
+    });
+  }, [procurementFiles]);
+
+  if (loading || !readyFiles || readyFiles.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-primary/25 bg-gradient-to-r from-primary/5 via-secondary/20 to-primary/5 p-4 space-y-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">
+            Procurement Files Pipeline (Ready for Collection)
+          </h3>
+          <CustomBadge className="bg-primary/10 text-primary border-primary/30">
+            {readyFiles.length} files ready
+          </CustomBadge>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Select a file to initiate Part Supply, Split Order, or Daily Collection
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {readyFiles.map((file) => (
+          <div
+            key={file.id}
+            className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-primary/40 transition-all shadow-sm flex flex-col justify-between"
+          >
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                  {file.prNumber}
+                </span>
+                <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">
+                  {file.presentPosition}
+                </CustomBadge>
+              </div>
+              <h4
+                className="text-sm font-semibold text-foreground truncate"
+                title={file.itemName}
+              >
+                {file.itemName}
+              </h4>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  Qty:{" "}
+                  <span className="font-mono font-medium text-foreground">
+                    {formatNumber(file.qty)} {file.unit}
+                  </span>
+                </span>
+                <span className="truncate max-w-[120px]">
+                  {file.supplier || "No supplier"}
+                </span>
+              </div>
+              {file.projectName && (
+                <p className="text-[11px] text-muted-foreground truncate">
+                  Proj: {file.projectName}
+                </p>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-border flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 flex-1"
+                onClick={() => onStartPartSupply(file)}
+              >
+                <Layers className="h-3 w-3" /> Part Supply
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px] gap-1 text-amber-400 border-amber-500/30 hover:bg-amber-500/10 flex-1"
+                onClick={() => onStartSplitOrder(file)}
+              >
+                <Boxes className="h-3 w-3" /> Split Order
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px] gap-1 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 flex-1"
+                onClick={() => onRecordDaily(file)}
+              >
+                <CalendarDays className="h-3 w-3" /> Daily Coll.
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────
 export function CollectionModule() {
+  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [pipelinePartFile, setPipelinePartFile] = useState<ProcurementFile | null>(null);
+  const [pipelineSplitFile, setPipelineSplitFile] = useState<ProcurementFile | null>(null);
+  const [pipelineDailyFile, setPipelineDailyFile] = useState<ProcurementFile | null>(null);
+
+  const handleStartPartSupply = (file: ProcurementFile) => {
+    setPipelinePartFile(file);
+    setActiveTab("part-supply");
+  };
+
+  const handleStartSplitOrder = (file: ProcurementFile) => {
+    setPipelineSplitFile(file);
+    setActiveTab("split-orders");
+  };
+
+  const handleRecordDaily = (file: ProcurementFile) => {
+    setPipelineDailyFile(file);
+    setActiveTab("daily");
+  };
+
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Collection"
         description="Track part-supply orders, daily collections & delivery receipts"
         icon={PackageCheck}
       />
-      <Tabs defaultValue="dashboard" className="space-y-4">
+
+      {/* Files Ready for Collection Pipeline */}
+      <FilesReadyPipeline
+        onStartPartSupply={handleStartPartSupply}
+        onStartSplitOrder={handleStartSplitOrder}
+        onRecordDaily={handleRecordDaily}
+      />
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">
           <TabsTrigger value="dashboard" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Dashboard
@@ -545,13 +699,13 @@ export function CollectionModule() {
           <DashboardTab />
         </TabsContent>
         <TabsContent value="part-supply">
-          <PartSupplyTab />
+          <PartSupplyTab initialFile={pipelinePartFile} onConsumedInitial={() => setPipelinePartFile(null)} />
         </TabsContent>
         <TabsContent value="split-orders">
-          <SplitOrdersTab />
+          <SplitOrdersTab initialFile={pipelineSplitFile} onConsumedInitial={() => setPipelineSplitFile(null)} />
         </TabsContent>
         <TabsContent value="daily">
-          <DailyCollectionTab />
+          <DailyCollectionTab initialFile={pipelineDailyFile} onConsumedInitial={() => setPipelineDailyFile(null)} />
         </TabsContent>
         <TabsContent value="qc">
           <QCInspectionTab />
@@ -1121,7 +1275,13 @@ function DashboardTab() {
 // ─────────────────────────────────────────────────────────
 // Part Supply Tab
 // ─────────────────────────────────────────────────────────
-function PartSupplyTab() {
+function PartSupplyTab({
+  initialFile,
+  onConsumedInitial,
+}: {
+  initialFile?: ProcurementFile | null;
+  onConsumedInitial?: () => void;
+}) {
   const { data: orders, loading, error, refresh } = useFetch<
     PartSupplyOrder[]
   >("/api/collection/part-supply");
@@ -1131,6 +1291,12 @@ function PartSupplyTab() {
     useState<PartSupplyOrder | null>(null);
   const [printOrder, setPrintOrder] = useState<PartSupplyOrder | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (initialFile) {
+      setAddOpen(true);
+    }
+  }, [initialFile]);
 
   function toggle(id: string) {
     setExpandedId((cur) => (cur === id ? null : id));
@@ -1269,127 +1435,97 @@ function PartSupplyTab() {
                         value={order.itemName}
                       />
                       <SummaryCell
-                        label="Ordered Qty"
-                        value={formatNumber(order.orderedQty)}
+                        label="Supplier"
+                        value={order.supplier || "—"}
                       />
                       <SummaryCell
-                        label="Received Qty"
-                        value={formatNumber(order.receivedQty)}
-                        accent="text-emerald-400"
+                        label="Start Date"
+                        value={formatFullDate(order.startDate)}
                       />
                       <SummaryCell
-                        label="Balance"
-                        value={formatNumber(order.balance)}
-                        accent="text-amber-400"
+                        label="Expected End"
+                        value={formatFullDate(order.expectedEndDate)}
                       />
-                      <div className="col-span-2 sm:col-span-4 lg:col-span-1">
-                        <p className="text-[10px] uppercase text-muted-foreground mb-1">
-                          Complete ({pct.toFixed(0)}%)
-                        </p>
-                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-full rounded-full transition-all",
-                              progressColor(pct)
-                            )}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
+                      <SummaryCell
+                        label="Created At"
+                        value={formatDateTime(order.createdAt)}
+                      />
                     </div>
 
                     {/* Delivery entries table */}
-                    <div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                        <h4 className="text-sm font-semibold text-foreground">
-                          Delivery Entries ({order.entries.length})
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1.5">
+                          <Truck className="h-3.5 w-3.5 text-primary" /> Delivery Entries ({order.entries.length})
                         </h4>
                         <div className="flex items-center gap-2">
                           <Button
-                            variant="outline"
                             size="sm"
-                            className="gap-1.5"
+                            variant="outline"
                             onClick={() => setPrintOrder(order)}
+                            className="h-7 text-xs gap-1"
                           >
-                            <Printer className="h-4 w-4" /> Print Receipt
+                            <Printer className="h-3.5 w-3.5" /> Print Receipt
                           </Button>
-                          {!isCompleted && (
-                            <Button
-                              size="sm"
-                              className="gap-1.5"
-                              onClick={() => setEntryDialogOrder(order)}
-                            >
-                              <Plus className="h-4 w-4" /> Add Entry
-                            </Button>
-                          )}
+                          <Button
+                            size="sm"
+                            onClick={() => setEntryDialogOrder(order)}
+                            disabled={isCompleted}
+                            className="h-7 text-xs gap-1"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Add Delivery Entry
+                          </Button>
                         </div>
                       </div>
-                      {order.entries.length === 0 ? (
-                        <div className="py-6 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
-                          No deliveries recorded yet. Click “Add Entry” to
-                          record the first delivery.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto rounded-lg border border-border [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="border-border hover:bg-transparent">
-                                <TableHead className="text-muted-foreground">
-                                  Sr.
-                                </TableHead>
-                                <TableHead className="text-muted-foreground">
-                                  Date
-                                </TableHead>
-                                <TableHead className="text-muted-foreground">
-                                  Vehicle
-                                </TableHead>
-                                <TableHead className="text-muted-foreground text-right">
-                                  Qty
-                                </TableHead>
-                                <TableHead className="text-muted-foreground">
-                                  QC By
-                                </TableHead>
-                                <TableHead className="text-muted-foreground">
-                                  Provost Sailor
-                                </TableHead>
-                                <TableHead className="text-muted-foreground text-right">
-                                  Cum. Bal.
-                                </TableHead>
+
+                      <div className="rounded-lg border border-border overflow-hidden bg-card">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-border">
+                              <TableHead className="w-12 text-muted-foreground">Sr.</TableHead>
+                              <TableHead className="text-muted-foreground">Date</TableHead>
+                              <TableHead className="text-muted-foreground">Vehicle</TableHead>
+                              <TableHead className="text-muted-foreground text-right">Delivery Qty</TableHead>
+                              <TableHead className="text-muted-foreground">Provost Sailor</TableHead>
+                              <TableHead className="text-muted-foreground">Checked CE Sailor</TableHead>
+                              <TableHead className="text-muted-foreground text-right">Cum. Bal.</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {order.entries.length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
+                                  No delivery entries recorded yet.
+                                </TableCell>
                               </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {order.entries.map((e) => (
-                                <TableRow
-                                  key={e.id}
-                                  className="border-border"
-                                >
-                                  <TableCell className="font-medium text-foreground">
-                                    {e.srNo}
+                            ) : (
+                              order.entries.map((entry) => (
+                                <TableRow key={entry.id} className="border-border">
+                                  <TableCell className="font-mono text-xs">{entry.srNo}</TableCell>
+                                  <TableCell className="whitespace-nowrap text-xs">
+                                    {formatFullDate(entry.date)}
                                   </TableCell>
-                                  <TableCell className="text-foreground whitespace-nowrap">
-                                    {formatFullDate(e.date)}
+                                  <TableCell className="font-mono text-xs">
+                                    {entry.vehicleNumber || "—"}
                                   </TableCell>
-                                  <TableCell className="text-foreground">
-                                    {e.vehicleNumber || "—"}
+                                  <TableCell className="text-right font-medium text-emerald-400">
+                                    {formatNumber(entry.qty)}
                                   </TableCell>
-                                  <TableCell className="text-foreground text-right whitespace-nowrap">
-                                    {formatNumber(e.qty)}
+                                  <TableCell className="text-xs">
+                                    {entry.driverName || "—"}
                                   </TableCell>
-                                  <TableCell className="text-foreground">
-                                    {e.qcCheckedBy || "—"}
+                                  <TableCell className="text-xs font-medium text-blue-400">
+                                    {entry.qcCheckedBy || "—"}
                                   </TableCell>
-                                  <TableCell className="text-foreground">
-                                    {e.driverName || "—"}
-                                  </TableCell>
-                                  <TableCell className="text-foreground text-right font-medium whitespace-nowrap">
-                                    {formatNumber(e.cumulativeBalance)}
+                                  <TableCell className="text-right font-mono text-xs text-amber-400">
+                                    {formatNumber(entry.cumulativeBalance)}
                                   </TableCell>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      )}
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1402,9 +1538,14 @@ function PartSupplyTab() {
       {/* Add Order Dialog */}
       <AddPartSupplyDialog
         open={addOpen}
-        onOpenChange={setAddOpen}
+        initialFile={initialFile}
+        onOpenChange={(o) => {
+          setAddOpen(o);
+          if (!o && onConsumedInitial) onConsumedInitial();
+        }}
         onCreated={() => {
           setAddOpen(false);
+          if (onConsumedInitial) onConsumedInitial();
           toast({ title: "Part supply order created" });
           refresh();
         }}
@@ -1491,10 +1632,12 @@ function AddPartSupplyDialog({
   open,
   onOpenChange,
   onCreated,
+  initialFile,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: () => void;
+  initialFile?: ProcurementFile | null;
 }) {
   const [itemName, setItemName] = useState("");
   const [orderedQty, setOrderedQty] = useState("");
@@ -1505,10 +1648,16 @@ function AddPartSupplyDialog({
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
-  // Fetch PO-processed procurement files (only when the dialog is open) so
-  // the user can pick an item and auto-fill its details.
   const { data: procurementFiles, loading: poLoading } =
     useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+
+  useEffect(() => {
+    if (initialFile && open) {
+      setItemName(initialFile.itemName || "");
+      setOrderedQty(initialFile.qty ? String(initialFile.qty) : "");
+      setSupplier(initialFile.supplier || "");
+    }
+  }, [initialFile, open]);
 
   const poOptions = useMemo(() => {
     return (procurementFiles ?? []).filter((f) =>
@@ -1565,7 +1714,6 @@ function AddPartSupplyDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-1">
-          {/* Select PO Item — auto-fills item name, qty & supplier */}
           <div className="space-y-1.5">
             <Label className="flex items-center gap-1.5">
               <ShoppingCart className="h-3.5 w-3.5 text-amber-400" />
@@ -1596,10 +1744,6 @@ function AddPartSupplyDialog({
                 )}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground">
-              Pick a procurement file with PO Placed/Dispatched/In Transit
-              status — its item, qty &amp; supplier will be auto-filled below.
-            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -1607,12 +1751,12 @@ function AddPartSupplyDialog({
             <Input
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
-              placeholder="e.g. Ready-mix concrete M25"
+              placeholder="e.g. TMT Bars 16mm"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Ordered Qty</Label>
+              <Label>Ordered Quantity</Label>
               <Input
                 type="number"
                 value={orderedQty}
@@ -1625,7 +1769,7 @@ function AddPartSupplyDialog({
               <Input
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Supplier name"
+                placeholder="Supplier"
               />
             </div>
           </div>
@@ -1662,7 +1806,7 @@ function AddPartSupplyDialog({
 }
 
 // ─────────────────────────────────────────────────────────
-// Add Entry Dialog
+// Add Entry Dialog (Part Supply)
 // ─────────────────────────────────────────────────────────
 function AddEntryDialog({
   order,
@@ -1678,11 +1822,8 @@ function AddEntryDialog({
   const [date, setDate] = useState(todayISO());
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [qty, setQty] = useState("");
-  // driverName repurposed to hold the "Provost Sailor Checked" name (saved
-  // into the PartSupplyEntry.driverName column on the server).
   const [driverName, setDriverName] = useState("");
   const [qcCheckedBy, setQcCheckedBy] = useState("");
-  // Dimension inputs — quantity is auto-calculated from H × W × D.
   const [dimH, setDimH] = useState("");
   const [dimW, setDimW] = useState("");
   const [dimD, setDimD] = useState("");
@@ -1690,14 +1831,10 @@ function AddEntryDialog({
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
-  // Fetch stakeholders (only when dialog open) for the Provost Sailor and
-  // QC Checked-By dropdowns.
   const { data: stakeholders } = useFetch<Stakeholder[]>(
     open ? "/api/stakeholders" : null
   );
 
-  // Provost Sailors — category contains "Sailor" OR department contains
-  // "Provost" (covers "CSLOG Sailor" and any future "Provost" dept).
   const provostSailors = useMemo(() => {
     return (stakeholders ?? []).filter((s) => {
       const cat = (s.category || "").toLowerCase();
@@ -1706,23 +1843,37 @@ function AddEntryDialog({
     });
   }, [stakeholders]);
 
-  // CCED Sailors for QC — category === "CCED Sailor" (preferred) but fall
-  // back to anyone with category/appointment containing "CCED" so the
-  // dropdown isn't empty when the category hasn't been seeded yet.
   const ccedSailors = useMemo(() => {
     return (stakeholders ?? []).filter((s) => {
       const cat = (s.category || "").toLowerCase();
       const appt = (s.appointment || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
       return (
-        cat === "cced sailor" ||
+        cat.includes("sailor") ||
         cat.includes("cced") ||
-        appt.includes("cced")
+        appt.includes("cced") ||
+        dept.includes("ce")
       );
     });
   }, [stakeholders]);
 
-  // Auto-calculate Quantity from dimensions: H × W × D in the selected
-  // unit (cubic meters or cubic inches).
+  const defaultRLinkSailor = useMemo(() => {
+    if (!stakeholders || stakeholders.length === 0) return "";
+    const found = stakeholders.find((s) => {
+      const appt = (s.appointment || "").toLowerCase();
+      const name = (s.name || "").toLowerCase();
+      const cat = (s.category || "").toLowerCase();
+      return appt.includes("r-link") || name.includes("r-link") || cat.includes("r-link") || appt.includes("duty");
+    });
+    return found ? found.name : "";
+  }, [stakeholders]);
+
+  useEffect(() => {
+    if (defaultRLinkSailor && !qcCheckedBy) {
+      setQcCheckedBy(defaultRLinkSailor);
+    }
+  }, [defaultRLinkSailor, qcCheckedBy]);
+
   const computedQty = useMemo(() => {
     const h = Number(dimH);
     const w = Number(dimW);
@@ -1730,11 +1881,9 @@ function AddEntryDialog({
     if (!isFinite(h) || !isFinite(w) || !isFinite(d)) return null;
     if (h <= 0 || w <= 0 || d <= 0) return null;
     const product = h * w * d;
-    // Round to 4 decimal places to keep storage clean.
     return Math.round(product * 10000) / 10000;
   }, [dimH, dimW, dimD]);
 
-  // Sync the computed quantity into the qty state whenever it changes.
   // Using a useEffect here would be flagged by react-hooks rules; instead
   // we derive the displayed qty directly from computedQty when dimensions
   // are present, and fall back to the manual `qty` string otherwise.
@@ -2113,7 +2262,7 @@ function PrintReceiptDialog({
                   <TableHead className="text-muted-foreground">
                     Provost Sailor
                   </TableHead>
-                  <TableHead className="text-muted-foreground text-right">
+              <TableHead className="text-muted-foreground text-right">
                     Cum. Bal.
                   </TableHead>
                 </TableRow>
@@ -2174,7 +2323,13 @@ function PrintReceiptDialog({
 type FilterMode = "all" | "today" | "yesterday" | "custom" | "range";
 type ViewMode = "date" | "period" | "supplier";
 
-function DailyCollectionTab() {
+function DailyCollectionTab({
+  initialFile,
+  onConsumedInitial,
+}: {
+  initialFile?: ProcurementFile | null;
+  onConsumedInitial?: () => void;
+}) {
   const today = todayISO();
   const yesterday = yesterdayISO();
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
@@ -2186,6 +2341,12 @@ function DailyCollectionTab() {
   const [recordOpen, setRecordOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (initialFile) {
+      setRecordOpen(true);
+    }
+  }, [initialFile]);
 
   const dailyUrl = useMemo(() => {
     const base = "/api/collection/daily";
@@ -2219,7 +2380,9 @@ function DailyCollectionTab() {
       "Item Name",
       "Qty",
       "Received From",
-      "Recorded By",
+      "Vehicle",
+      "Provost Sailor",
+      "Checked CE Sailor",
       "Recorded At",
     ];
     const csv = [
@@ -2230,7 +2393,9 @@ function DailyCollectionTab() {
           `"${(r.itemName || "").replace(/"/g, '""')}"`,
           r.qty,
           `"${(r.receivedFrom || "").replace(/"/g, '""')}"`,
-          `"${(r.recordedBy || "").replace(/"/g, '""')}"`,
+          `"${(r.vehicleNumber || "").replace(/"/g, '""')}"`,
+          `"${(r.provostCheckedBy || r.driverName || "").replace(/"/g, '""')}"`,
+          `"${(r.ceSailorInvolved || r.recordedBy || "").replace(/"/g, '""')}"`,
           `"${formatDateTime(r.recordedAt)}"`,
         ].join(",")
       ),
@@ -2239,7 +2404,7 @@ function DailyCollectionTab() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `daily-collection-${today}.csv`;
+    a.download = `daily-collection-${todayISO()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2254,80 +2419,20 @@ function DailyCollectionTab() {
 
   return (
     <div className="space-y-4">
-      {/* Filter controls */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground mr-1">Filter:</span>
-          <Button
-            size="sm"
-            variant={filterMode === "all" ? "default" : "outline"}
-            onClick={() => setFilterMode("all")}
-            className="gap-1.5"
-          >
-            <Boxes className="h-3.5 w-3.5" /> All
-          </Button>
-          <Button
-            size="sm"
-            variant={filterMode === "today" ? "default" : "outline"}
-            onClick={() => setFilterMode("today")}
-            className="gap-1.5"
-          >
-            <CalendarDays className="h-3.5 w-3.5" /> Today
-          </Button>
-          <Button
-            size="sm"
-            variant={filterMode === "yesterday" ? "default" : "outline"}
-            onClick={() => setFilterMode("yesterday")}
-            className="gap-1.5"
-          >
-            <Calendar className="h-3.5 w-3.5" /> Yesterday
-          </Button>
-          <Button
-            size="sm"
-            variant={filterMode === "custom" ? "default" : "outline"}
-            onClick={() => setFilterMode("custom")}
-            className="gap-1.5"
-          >
-            <Calendar className="h-3.5 w-3.5" /> Custom
-          </Button>
-          <Button
-            size="sm"
-            variant={filterMode === "range" ? "default" : "outline"}
-            onClick={() => setFilterMode("range")}
-            className="gap-1.5"
-          >
-            <CalendarRange className="h-3.5 w-3.5" /> Range
-          </Button>
-          {filterMode === "custom" && (
-            <Input
-              type="date"
-              value={customDate}
-              onChange={(e) => setCustomDate(e.target.value)}
-              className="h-8 w-auto text-xs"
-            />
-          )}
-          {filterMode === "range" && (
-            <div className="flex items-center gap-1.5">
-              <Input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="h-8 w-auto text-xs"
-              />
-              <span className="text-xs text-muted-foreground">to</span>
-              <Input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="h-8 w-auto text-xs"
-              />
-            </div>
-          )}
+      {/* Header bar */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <CalendarDays className="h-5 w-5 text-primary" /> Daily Collection
+            Log
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            View and record daily collection receipts by date, period, or supplier.
+          </p>
         </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-1">Group:</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Group mode toggle */}
+          <div className="flex items-center rounded-lg border border-border p-0.5 bg-muted/20">
             <Button
               size="sm"
               variant={viewMode === "date" ? "default" : "outline"}
@@ -2350,45 +2455,61 @@ function DailyCollectionTab() {
               By Supplier
             </Button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-2">
             <Button
               variant="outline"
               size="sm"
               onClick={exportCSV}
               className="gap-1.5"
             >
-              <Download className="h-4 w-4" /> Export CSV
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBulkOpen(true)}
-              className="gap-1.5"
-            >
-              <ClipboardList className="h-4 w-4" /> Bulk Record
+              <Download className="h-4 w-4" /> Export
             </Button>
             <Button
               size="sm"
               onClick={() => setRecordOpen(true)}
               className="gap-1.5"
             >
-              <Plus className="h-4 w-4" /> Record Collection
+              <Plus className="h-4 w-4" /> Record
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Summary badges */}
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <CustomBadge className="bg-blue-500/15 text-blue-400 border-blue-500/30">
-          {daily?.length ?? 0} entries
-        </CustomBadge>
-        <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-          {formatNumber(totalQty)} total qty
-        </CustomBadge>
-        <CustomBadge className="bg-secondary text-muted-foreground border-border">
-          {grouped.length} groups
-        </CustomBadge>
+      {/* Filter controls */}
+      <div className="flex flex-wrap items-center gap-2 p-3 bg-secondary/20 rounded-lg border border-border">
+        <span className="text-xs text-muted-foreground mr-1">Filter:</span>
+        <Button
+          size="sm"
+          variant={filterMode === "all" ? "default" : "outline"}
+          onClick={() => setFilterMode("all")}
+          className="h-8"
+        >
+          All
+        </Button>
+        <Button
+          size="sm"
+          variant={filterMode === "today" ? "default" : "outline"}
+          onClick={() => setFilterMode("today")}
+          className="h-8"
+        >
+          Today
+        </Button>
+        <Button
+          size="sm"
+          variant={filterMode === "custom" ? "default" : "outline"}
+          onClick={() => setFilterMode("custom")}
+          className="h-8"
+        >
+          Custom
+        </Button>
+        {filterMode === "custom" && (
+          <Input
+            type="date"
+            value={customDate}
+            onChange={(e) => setCustomDate(e.target.value)}
+            className="h-8 w-auto text-xs"
+          />
+        )}
       </div>
 
       {/* Grouped list */}
@@ -2412,7 +2533,7 @@ function DailyCollectionTab() {
           {grouped.map(([groupKey, rows]) => (
             <div
               key={groupKey}
-              className="bg-card border border-border rounded-xl overflow-hidden"
+              className="bg-card border border-border rounded-xl overflow-hidden shadow-sm"
             >
               <div className="px-4 py-2.5 bg-secondary/40 border-b border-border flex items-center justify-between gap-2">
                 <h4 className="text-sm font-semibold text-foreground truncate">
@@ -2442,19 +2563,28 @@ function DailyCollectionTab() {
                             {formatNumber(r.qty)}
                           </span>
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Truck className="h-3 w-3" />{" "}
                             {r.receivedFrom || "—"}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" /> {r.recordedBy || "—"}
+                          {r.vehicleNumber && (
+                            <span className="font-mono bg-secondary/60 px-1.5 py-0.5 rounded text-[11px] text-foreground">
+                              Veh: {r.vehicleNumber}
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1 text-foreground">
+                            <Anchor className="h-3 w-3 text-blue-400" /> Provost:{" "}
+                            {r.provostCheckedBy || r.driverName || "—"}
+                          </span>
+                          <span className="flex items-center gap-1 text-foreground">
+                            <ShieldCheck className="h-3 w-3 text-emerald-400" /> CE Sailor:{" "}
+                            {r.ceSailorInvolved || r.recordedBy || "—"}
                           </span>
                           <span className="flex items-center gap-1">
                             <CalendarDays className="h-3 w-3" />{" "}
                             {formatFullDate(r.date)}
                           </span>
-                          <span>· {formatDateTime(r.recordedAt)}</span>
                         </div>
                       </div>
                     </li>
@@ -2469,9 +2599,14 @@ function DailyCollectionTab() {
       {/* Record Collection Dialog */}
       <RecordCollectionDialog
         open={recordOpen}
-        onOpenChange={setRecordOpen}
+        initialFile={initialFile}
+        onOpenChange={(o) => {
+          setRecordOpen(o);
+          if (!o && onConsumedInitial) onConsumedInitial();
+        }}
         onCreated={() => {
           setRecordOpen(false);
+          if (onConsumedInitial) onConsumedInitial();
           toast({ title: "Collection recorded" });
           refresh();
         }}
@@ -2506,9 +2641,7 @@ function groupByDate(
 function getISOWeek(dateStr: string): number {
   const d = new Date(dateStr + "T00:00:00");
   d.setHours(0, 0, 0, 0);
-  // Thursday in current week decides the year
   d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  // January 4 is always in week 1
   const week1 = new Date(d.getFullYear(), 0, 4);
   return (
     1 +
@@ -2523,7 +2656,7 @@ function getISOWeek(dateStr: string): number {
 
 function getWeekRange(dateStr: string): { key: string; label: string } {
   const d = new Date(dateStr + "T00:00:00");
-  const dayOfWeek = (d.getDay() + 6) % 7; // 0 = Monday
+  const dayOfWeek = (d.getDay() + 6) % 7;
   const monday = new Date(d);
   monday.setDate(d.getDate() - dayOfWeek);
   const sunday = new Date(monday);
@@ -2577,24 +2710,78 @@ function RecordCollectionDialog({
   open,
   onOpenChange,
   onCreated,
+  initialFile,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: () => void;
+  initialFile?: ProcurementFile | null;
 }) {
   const [date, setDate] = useState(todayISO());
   const [itemName, setItemName] = useState("");
   const [qty, setQty] = useState("");
   const [receivedFrom, setReceivedFrom] = useState("");
-  const [recordedBy, setRecordedBy] = useState("");
+  const [vehicleNumber, setVehicleNumber] = useState("");
+  const [provostCheckedBy, setProvostCheckedBy] = useState("");
+  const [ceSailorInvolved, setCeSailorInvolved] = useState("");
   const [selectedPoId, setSelectedPoId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
-  // Fetch procurement files (only when dialog open) so the user can pick a
-  // PO-processed item to auto-fill the collection details.
   const { data: procurementFiles, loading: poLoading } =
     useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+
+  const { data: stakeholders } = useFetch<Stakeholder[]>(
+    open ? "/api/stakeholders" : null
+  );
+
+  useEffect(() => {
+    if (initialFile && open) {
+      setItemName(initialFile.itemName || "");
+      setQty(initialFile.qty ? String(initialFile.qty) : "");
+      setReceivedFrom(initialFile.supplier || "");
+    }
+  }, [initialFile, open]);
+
+  const provostSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return cat.includes("sailor") || dept.includes("provost");
+    });
+  }, [stakeholders]);
+
+  const ceSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const appt = (s.appointment || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return (
+        cat.includes("sailor") ||
+        cat.includes("cced") ||
+        appt.includes("cced") ||
+        dept.includes("ce")
+      );
+    });
+  }, [stakeholders]);
+
+  // Default sailor on R-Link duty
+  const defaultRLinkSailor = useMemo(() => {
+    if (!stakeholders || stakeholders.length === 0) return "";
+    const found = stakeholders.find((s) => {
+      const appt = (s.appointment || "").toLowerCase();
+      const name = (s.name || "").toLowerCase();
+      const cat = (s.category || "").toLowerCase();
+      return appt.includes("r-link") || name.includes("r-link") || cat.includes("r-link") || appt.includes("duty");
+    });
+    return found ? found.name : "";
+  }, [stakeholders]);
+
+  useEffect(() => {
+    if (defaultRLinkSailor && !ceSailorInvolved) {
+      setCeSailorInvolved(defaultRLinkSailor);
+    }
+  }, [defaultRLinkSailor, ceSailorInvolved]);
 
   const poOptions = useMemo(() => {
     return (procurementFiles ?? []).filter((f) =>
@@ -2626,7 +2813,10 @@ function RecordCollectionDialog({
       itemName: itemName.trim(),
       qty: Number(qty),
       receivedFrom: receivedFrom.trim() || undefined,
-      recordedBy: recordedBy.trim() || "Clerk",
+      recordedBy: ceSailorInvolved.trim() || "Clerk",
+      vehicleNumber: vehicleNumber.trim() || undefined,
+      provostCheckedBy: provostCheckedBy.trim() || undefined,
+      ceSailorInvolved: ceSailorInvolved.trim() || undefined,
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -2636,18 +2826,20 @@ function RecordCollectionDialog({
     setItemName("");
     setQty("");
     setReceivedFrom("");
-    setRecordedBy("");
+    setVehicleNumber("");
+    setProvostCheckedBy("");
+    setCeSailorInvolved("");
     setSelectedPoId("");
     onCreated();
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Record Collection</DialogTitle>
           <DialogDescription>
-            Record a single item collection event for today or any date.
+            Record a single item collection event with vehicle & sailor duty checks.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-1">
@@ -2690,10 +2882,6 @@ function RecordCollectionDialog({
                 )}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground">
-              Pick a procurement file with PO Placed/Dispatched/In Transit
-              status — its item, qty &amp; supplier will be auto-filled below.
-            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Item Name</Label>
@@ -2722,13 +2910,70 @@ function RecordCollectionDialog({
               />
             </div>
           </div>
+
           <div className="space-y-1.5">
-            <Label>Recorded By</Label>
+            <Label>Vehicle Number</Label>
             <Input
-              value={recordedBy}
-              onChange={(e) => setRecordedBy(e.target.value)}
-              placeholder="Your name"
+              value={vehicleNumber}
+              onChange={(e) => setVehicleNumber(e.target.value)}
+              placeholder="e.g. NB-4521"
+              className="font-mono text-xs"
             />
+          </div>
+
+          {/* Provost Sailor Dropdown */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <Anchor className="h-3.5 w-3.5 text-blue-400" />
+              Provost Sailor Checked
+            </Label>
+            <Select value={provostCheckedBy} onValueChange={setProvostCheckedBy}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select provost sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {provostSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No sailors in directory
+                  </SelectItem>
+                ) : (
+                  provostSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Checked CE Sailor (R-Link Duty Default) */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              Checked CE Sailor (R-Link Duty)
+            </Label>
+            <Select value={ceSailorInvolved} onValueChange={setCeSailorInvolved}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select CE duty sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {ceSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No CE sailors in directory
+                  </SelectItem>
+                ) : (
+                  ceSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}{" "}
+                      {defaultRLinkSailor && s.name === defaultRLinkSailor
+                        ? " (R-Link Duty)"
+                        : ""}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <DialogFooter>
@@ -2736,7 +2981,7 @@ function RecordCollectionDialog({
             Cancel
           </Button>
           <Button onClick={submit} disabled={submitting}>
-            {submitting ? "Saving..." : "Record"}
+            {submitting ? "Saving..." : "Record Collection"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -4233,6 +4478,8 @@ interface SplitOrderEntryData {
   vehicleNumber: string | null;
   receivedQty: number;
   driverName: string | null;
+  provostCheckedBy?: string | null;
+  ceSailorInvolved?: string | null;
   sentToQCI: boolean;
   sentToQCIAt: string | null;
 }
@@ -4256,7 +4503,13 @@ interface SplitOrderHeaderData {
   splits: SplitOrderSubData[];
 }
 
-function SplitOrdersTab() {
+function SplitOrdersTab({
+  initialFile,
+  onConsumedInitial,
+}: {
+  initialFile?: ProcurementFile | null;
+  onConsumedInitial?: () => void;
+}) {
   const { data: headers, loading, refresh } = useFetch<SplitOrderHeaderData[]>(
     "/api/collection/split-orders"
   );
@@ -4264,6 +4517,12 @@ function SplitOrdersTab() {
   const [entryOpenSub, setEntryOpenSub] = useState<SplitOrderSubData | null>(null);
   const [sendingEntryId, setSendingEntryId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (initialFile) {
+      setCreateOpen(true);
+    }
+  }, [initialFile]);
 
   const handleSendToQci = async (subId: string, entryId: string) => {
     setSendingEntryId(entryId);
@@ -4368,13 +4627,15 @@ function SplitOrdersTab() {
                                 <TableHead className="py-2 h-7">Date</TableHead>
                                 <TableHead className="py-2 h-7">Vehicle</TableHead>
                                 <TableHead className="py-2 h-7 text-right">Qty</TableHead>
+                                <TableHead className="py-2 h-7">Provost</TableHead>
+                                <TableHead className="py-2 h-7">CE Sailor</TableHead>
                                 <TableHead className="py-2 h-7 text-right">QCI Action</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {s.entries.length === 0 ? (
                                 <TableRow>
-                                  <TableCell colSpan={5} className="text-center text-xs py-3 text-muted-foreground italic">
+                                  <TableCell colSpan={7} className="text-center text-xs py-3 text-muted-foreground italic">
                                     No deliveries recorded yet
                                   </TableCell>
                                 </TableRow>
@@ -4384,7 +4645,9 @@ function SplitOrdersTab() {
                                     <TableCell className="py-1.5 font-mono text-[11px]">#{idx + 1}</TableCell>
                                     <TableCell className="py-1.5 text-muted-foreground text-[11px]">{e.date}</TableCell>
                                     <TableCell className="py-1.5 font-mono text-[11px]">{e.vehicleNumber || "—"}</TableCell>
-                                    <TableCell className="py-1.5 text-right font-medium">{e.receivedQty}</TableCell>
+                                    <TableCell className="py-1.5 text-right font-medium text-emerald-400">{e.receivedQty}</TableCell>
+                                    <TableCell className="py-1.5 text-[11px]">{e.provostCheckedBy || e.driverName || "—"}</TableCell>
+                                    <TableCell className="py-1.5 text-[11px] text-blue-400">{e.ceSailorInvolved || "—"}</TableCell>
                                     <TableCell className="py-1.5 text-right">
                                       {e.sentToQCI ? (
                                         <CustomBadge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]">
@@ -4431,9 +4694,14 @@ function SplitOrdersTab() {
       {/* Create Split Order Dialog */}
       <CreateSplitOrderDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        initialFile={initialFile}
+        onOpenChange={(o) => {
+          setCreateOpen(o);
+          if (!o && onConsumedInitial) onConsumedInitial();
+        }}
         onCreated={() => {
           setCreateOpen(false);
+          if (onConsumedInitial) onConsumedInitial();
           refresh();
         }}
       />
@@ -4458,10 +4726,12 @@ function CreateSplitOrderDialog({
   open,
   onOpenChange,
   onCreated,
+  initialFile,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: () => void;
+  initialFile?: ProcurementFile | null;
 }) {
   const [fileNumber, setFileNumber] = useState("FILE/2025-005");
   const [itemName, setItemName] = useState("");
@@ -4474,6 +4744,23 @@ function CreateSplitOrderDialog({
   ]);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (initialFile && open) {
+      setFileNumber(initialFile.prNumber || "FILE/2025-005");
+      setItemName(initialFile.itemName || "");
+      setTotalQty(initialFile.qty ? String(initialFile.qty) : "");
+      setUnit(initialFile.unit || "NOS");
+      setSubs([
+        {
+          poNumber: `${initialFile.prNumber}-PO1`,
+          supplier: initialFile.supplier || "",
+          poQty: initialFile.qty ? String(initialFile.qty) : "",
+          unitPrice: initialFile.unitPrice ? String(initialFile.unitPrice) : "",
+        },
+      ]);
+    }
+  }, [initialFile, open]);
 
   const addSub = () => {
     setSubs([...subs, { poNumber: `PO/2025/00${subs.length + 10}`, supplier: "", poQty: "", unitPrice: "" }]);
@@ -4609,24 +4896,88 @@ function AddSplitEntryDialog({
   onOpenChange: (o: boolean) => void;
   onAdded: () => void;
 }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayISO());
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [qty, setQty] = useState("");
-  const [driverName, setDriverName] = useState("");
+  const [provostCheckedBy, setProvostCheckedBy] = useState("");
+  const [ceSailorInvolved, setCeSailorInvolved] = useState("");
+  const [dimH, setDimH] = useState("");
+  const [dimW, setDimW] = useState("");
+  const [dimD, setDimD] = useState("");
+  const [dimUnit, setDimUnit] = useState<string>(DIMENSION_UNITS[0]);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
+  const { data: stakeholders } = useFetch<Stakeholder[]>(
+    open ? "/api/stakeholders" : null
+  );
+
+  const provostSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return cat.includes("sailor") || dept.includes("provost");
+    });
+  }, [stakeholders]);
+
+  const ceSailors = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const cat = (s.category || "").toLowerCase();
+      const appt = (s.appointment || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return (
+        cat.includes("sailor") ||
+        cat.includes("cced") ||
+        appt.includes("cced") ||
+        dept.includes("ce")
+      );
+    });
+  }, [stakeholders]);
+
+  // Default sailor on R-Link duty
+  const defaultRLinkSailor = useMemo(() => {
+    if (!stakeholders || stakeholders.length === 0) return "";
+    const found = stakeholders.find((s) => {
+      const appt = (s.appointment || "").toLowerCase();
+      const name = (s.name || "").toLowerCase();
+      const cat = (s.category || "").toLowerCase();
+      return appt.includes("r-link") || name.includes("r-link") || cat.includes("r-link") || appt.includes("duty");
+    });
+    return found ? found.name : "";
+  }, [stakeholders]);
+
+  useEffect(() => {
+    if (defaultRLinkSailor && !ceSailorInvolved) {
+      setCeSailorInvolved(defaultRLinkSailor);
+    }
+  }, [defaultRLinkSailor, ceSailorInvolved]);
+
+  const computedQty = useMemo(() => {
+    const h = Number(dimH);
+    const w = Number(dimW);
+    const d = Number(dimD);
+    if (!isFinite(h) || !isFinite(w) || !isFinite(d)) return null;
+    if (h <= 0 || w <= 0 || d <= 0) return null;
+    const product = h * w * d;
+    return Math.round(product * 10000) / 10000;
+  }, [dimH, dimW, dimD]);
+
+  const effectiveQty = computedQty != null ? String(computedQty) : qty;
+
   const handleSubmit = async () => {
-    if (!qty || Number(qty) <= 0) {
+    const q = Number(effectiveQty);
+    if (!q || q <= 0) {
       toast({ title: "Please enter a valid delivered quantity", variant: "destructive" });
       return;
     }
     setSubmitting(true);
     const res = await apiRequest(`/api/collection/split-orders/${sub.id}/entries`, "POST", {
       date,
-      vehicleNumber,
-      receivedQty: Number(qty),
-      driverName,
+      vehicleNumber: vehicleNumber.trim() || undefined,
+      receivedQty: q,
+      driverName: provostCheckedBy.trim() || undefined,
+      provostCheckedBy: provostCheckedBy.trim() || undefined,
+      ceSailorInvolved: ceSailorInvolved.trim() || undefined,
     });
     setSubmitting(false);
     if (res.ok) {
@@ -4639,41 +4990,186 @@ function AddSplitEntryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" /> Add Delivery Entry — {sub.poNumber}
           </DialogTitle>
           <DialogDescription>
-            Record a partial delivery under this Purchase Order.
+            Record partial delivery entry under Purchase Order {sub.poNumber}.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs">Date *</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-background border-border text-xs" />
-            </div>
-            <div>
-              <Label className="text-xs">Delivered Qty *</Label>
-              <Input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty" className="bg-background border-border text-xs font-mono" />
-            </div>
+        <div className="grid grid-cols-2 gap-3 py-1">
+          <div className="space-y-1.5">
+            <Label>Date</Label>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
           </div>
-          <div>
-            <Label className="text-xs">Vehicle Number</Label>
-            <Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. WP CAB-1042" className="bg-background border-border text-xs font-mono" />
+          <div className="space-y-1.5">
+            <Label>Vehicle Number</Label>
+            <Input
+              value={vehicleNumber}
+              onChange={(e) => setVehicleNumber(e.target.value)}
+              placeholder="e.g. WP CAB-1042"
+              className="font-mono text-xs"
+            />
           </div>
-          <div>
-            <Label className="text-xs">Driver Name</Label>
-            <Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Driver / Representative" className="bg-background border-border text-xs" />
+
+          {/* Dimension fields — auto-fill Quantity */}
+          <div className="col-span-2 rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-1.5 text-foreground">
+                <Ruler className="h-3.5 w-3.5 text-primary" />
+                Dimensions
+              </Label>
+              <CustomBadge className="bg-primary/10 text-primary border-primary/30">
+                <Calculator className="h-3 w-3 mr-1" />
+                Qty = H × W × D
+              </CustomBadge>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Height</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimH}
+                  onChange={(e) => setDimH(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Width</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimW}
+                  onChange={(e) => setDimW(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Depth</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={dimD}
+                  onChange={(e) => setDimD(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Unit</Label>
+                <Select value={dimUnit} onValueChange={setDimUnit}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIMENSION_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Quantity is auto-calculated as Height × Width × Depth in{" "}
+              {dimUnit === "meter" ? "cubic meters (m³)" : "cubic inches (in³)"}.
+              Leave dimensions blank to type the quantity manually.
+            </p>
+          </div>
+
+          <div className="col-span-2 space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              Delivered Quantity
+              {computedQty != null && (
+                <CustomBadge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                  auto
+                </CustomBadge>
+              )}
+            </Label>
+            <Input
+              type="number"
+              value={effectiveQty}
+              onChange={(e) => setQty(e.target.value)}
+              placeholder="0"
+              readOnly={computedQty != null}
+              className={cn(
+                computedQty != null &&
+                  "bg-muted/50 text-muted-foreground cursor-not-allowed"
+              )}
+            />
+          </div>
+
+          {/* Provost Sailor Dropdown */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <Anchor className="h-3.5 w-3.5 text-blue-400" />
+              Provost Sailor Checked
+            </Label>
+            <Select value={provostCheckedBy} onValueChange={setProvostCheckedBy}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select provost sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {provostSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No sailors in directory
+                  </SelectItem>
+                ) : (
+                  provostSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Checked CE Sailor (R-Link Duty Default) */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              Checked CE Sailor (R-Link Duty)
+            </Label>
+            <Select value={ceSailorInvolved} onValueChange={setCeSailorInvolved}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select CE duty sailor" />
+              </SelectTrigger>
+              <SelectContent>
+                {ceSailors.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No CE sailors in directory
+                  </SelectItem>
+                ) : (
+                  ceSailors.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {formatStakeholder(s)}{" "}
+                      {defaultRLinkSailor && s.name === defaultRLinkSailor
+                        ? " (R-Link Duty)"
+                        : ""}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting} className="gap-1.5">
-            {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Save Entry
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Save Delivery Entry
           </Button>
         </DialogFooter>
       </DialogContent>

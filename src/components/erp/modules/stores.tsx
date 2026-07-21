@@ -485,7 +485,7 @@ export function StoresModule() {
               variant="outline"
               size="sm"
               disabled={syncingCmsys}
-              onClick={handleSyncCmsys}
+              onClick={() => handleSyncCmsys()}
               className="gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
               title="Synchronize live inventory from CMSys v2.2 Firebase DB"
             >

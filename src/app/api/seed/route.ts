@@ -770,6 +770,8 @@ export async function POST() {
         { name: "AB Fernando", rankOrRate: "Able Seaman", svcNumber: "SVC/9999", appointment: "APO(E)", department: "CSLOG", officeNumber: "Ext 2107", telephone: "011-2345684", whatsapp: "077-7789012", email: "afernando@navy.lk", availability: "On Leave", role: "Sailor" },
         // Officers-in-Area (assigned to area stores)
         { name: "Lt. S. Wijesinghe", rankOrRate: "Lieutenant", svcNumber: "SVC/5555", appointment: "AOE", department: "CE", officeNumber: "Ext 2205", telephone: "011-3456793", whatsapp: "077-5555555", email: "swijeya@navy.lk", availability: "Available", role: "Officer" },
+        // Duty Sailor on R-Link duty
+        { name: "AB Bandara (R-Link)", rankOrRate: "Able Seaman", svcNumber: "SVC/7777", appointment: "R-Link Duty Sailor", department: "CE", officeNumber: "Ext 2210", telephone: "011-3456799", whatsapp: "077-7777777", email: "rlink@navy.lk", availability: "Available", role: "Sailor", category: "CCED Sailor" },
       ],
     });
 

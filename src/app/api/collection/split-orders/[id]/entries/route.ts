@@ -61,7 +61,9 @@ export async function POST(
         receivedQty: qtyNum,
         vehicleType: vehicleType || "Civil",
         vehicleNumber: vehicleNumber || null,
-        driverName: driverName || null,
+        driverName: body.provostCheckedBy || driverName || null,
+        provostCheckedBy: body.provostCheckedBy || driverName || null,
+        ceSailorInvolved: body.ceSailorInvolved || body.qcCheckedBy || null,
         sentToQCI: false,
       },
     });
