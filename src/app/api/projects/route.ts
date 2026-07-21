@@ -22,7 +22,10 @@ export async function GET() {
         utilization: p.voteAllocation > 0 ? (p.actualSpent / p.voteAllocation) * 100 : 0,
       };
     });
-    return NextResponse.json(result);
+
+    const response = NextResponse.json(result);
+    response.headers.set("x-custom-ver", "v25-projects");
+    return response;
   } catch (e: any) {
     console.error(e);
     return NextResponse.json({ error: e.message || "Failed" }, { status: 500 });
