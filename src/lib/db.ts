@@ -3,8 +3,11 @@ import fs from 'fs'
 
 // Resolve the absolute path to the SQLite database file dynamically
 const candidate1 = path.join(process.cwd(), 'db', 'custom.db')
-const candidate2 = path.join(process.cwd(), '.next', 'standalone', 'db', 'custom.db')
-const customDbPath = fs.existsSync(candidate1) ? candidate1 : (fs.existsSync(candidate2) ? candidate2 : candidate1)
+const candidate2 = path.join(process.cwd(), 'prisma', 'custom.db')
+const candidate3 = path.join(process.cwd(), '.next', 'standalone', 'db', 'custom.db')
+const candidate4 = path.join(process.cwd(), '.next', 'standalone', 'prisma', 'custom.db')
+
+const customDbPath = [candidate1, candidate2, candidate3, candidate4].find(p => fs.existsSync(p)) || candidate1
 const dbUrl = `file:${customDbPath}`
 process.env.DATABASE_URL = dbUrl
 
