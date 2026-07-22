@@ -48,13 +48,19 @@ export function applyProfile(p: ActiveThemeProfile) {
     root.classList.remove("dark");
   }
   root.style.setProperty("--primary", p.primary);
+  root.style.setProperty("--accent", p.accent);
   root.style.setProperty("--sidebar-primary", p.primary);
   root.style.setProperty("--ring", p.primary);
   root.style.setProperty("--chart-1", p.primary);
   root.style.setProperty("--chart-4", p.accent);
   root.style.setProperty("--chart-3", p.accent);
+
   const [r, g, b] = hexToRgb(p.primary);
   const [r2, g2, b2] = hexToRgb(p.accent);
+
+  root.style.setProperty("--glow-primary", `rgba(${r}, ${g}, ${b}, 0.2)`);
+  root.style.setProperty("--glow-accent", `rgba(${r2}, ${g2}, ${b2}, 0.18)`);
+
   root.style.setProperty("--chart-2", `rgb(${Math.min(r + 40, 255)}, ${Math.min(g + 40, 255)}, ${Math.min(b + 40, 255)})`);
   root.style.setProperty("--chart-5", `rgb(${Math.max(r2 - 30, 0)}, ${Math.max(g2 - 30, 0)}, ${Math.max(b2 - 30, 0)})`);
 }

@@ -444,6 +444,7 @@ function isPassingQc(level: string): boolean {
 const QC_REF_TYPES = [
   "Daily Collection",
   "Part Supply Entry",
+  "Split Order",
   "Collection Item",
 ] as const;
 type QCRefType = (typeof QC_REF_TYPES)[number];
@@ -670,13 +671,6 @@ export function CollectionModule() {
         icon={PackageCheck}
       />
 
-      {/* Files Ready for Collection Pipeline */}
-      <FilesReadyPipeline
-        onStartPartSupply={handleStartPartSupply}
-        onStartSplitOrder={handleStartSplitOrder}
-        onRecordDaily={handleRecordDaily}
-      />
-
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">
           <TabsTrigger value="dashboard" className="gap-1.5">
@@ -695,6 +689,13 @@ export function CollectionModule() {
             <ShieldCheck className="h-4 w-4" /> QC Inspection
           </TabsTrigger>
         </TabsList>
+
+        {/* Files Ready for Collection Pipeline placed directly after subpage selection ribbon */}
+        <FilesReadyPipeline
+          onStartPartSupply={handleStartPartSupply}
+          onStartSplitOrder={handleStartSplitOrder}
+          onRecordDaily={handleRecordDaily}
+        />
         <TabsContent value="dashboard">
           <DashboardTab />
         </TabsContent>
@@ -3705,14 +3706,53 @@ function QCInspectionDialog({
     if (!open || isEdit) return null;
     if (refType === "Daily Collection") return "/api/collection/daily";
     if (refType === "Part Supply Entry") return "/api/collection/part-supply";
+    if (refType === "Split Order") return "/api/collection/split-orders";
     if (refType === "Collection Item") return "/api/collection/items";
     return null;
   }, [open, isEdit, refType]);
 
   const { data: refData, loading: refLoading } = useFetch<unknown[]>(refUrl);
+  const { data: stakeholders } = useFetch<Stakeholder[]>(open ? "/api/stakeholders" : null);
+
+  const ceOfficers = useMemo(() => {
+    return (stakeholders ?? []).filter((s) => {
+      const role = (s.role || "").toLowerCase();
+      const cat = (s.category || "").toLowerCase();
+      const appt = (s.appointment || "").toLowerCase();
+      const dept = (s.department || "").toLowerCase();
+      return (
+        dept.includes("ce") ||
+        dept.includes("engineering") ||
+        cat.includes("officer") ||
+        cat.includes("ce") ||
+        appt.includes("officer") ||
+        role.includes("officer") ||
+        role.includes("admin") ||
+        role.includes("manager")
+      );
+    });
+  }, [stakeholders]);
+
+  function handleCeOfficerSelect(val: string) {
+    const officer = (stakeholders ?? []).find((s) => formatStakeholder(s) === val || s.name === val);
+    if (officer) {
+      const name = formatStakeholder(officer);
+      setQcOfficer(name);
+      const details = [
+        officer.rankOrRate,
+        officer.appointment,
+        officer.department,
+        officer.areaStoreLocation ? `Area Store: ${officer.areaStoreLocation}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      setQcOfficerDetails(details || "CE Officer");
+    } else {
+      setQcOfficer(val);
+    }
+  }
 
   // When the user changes refType (create mode), reset the dependent fields.
-  // Done in the change handler (not an effect) to avoid cascading renders.
   function handleRefTypeChange(next: QCRefType) {
     setRefType(next);
     if (isEdit) return;
@@ -3745,6 +3785,17 @@ function QCInspectionDialog({
           itemName: o.itemName,
           supplier: o.supplier || "",
           qty: e.qty,
+        }))
+      );
+    }
+    if (refType === "Split Order") {
+      return (refData as SplitOrderHeaderData[]).flatMap((h) =>
+        (h.splits || []).map((s) => ({
+          value: `${h.id}:${s.id}`,
+          label: `${h.fileNumber} (${s.poNumber}) — ${h.itemName} (${formatNumber(s.allocatedQty)} qty)`,
+          itemName: h.itemName,
+          supplier: h.supplier || "",
+          qty: s.allocatedQty,
         }))
       );
     }
@@ -3950,21 +4001,35 @@ function QCInspectionDialog({
           {/* Officer */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>
+              <Label className="flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5 text-blue-400" />
                 QCI Officer Name <span className="text-red-400">*</span>
               </Label>
-              <Input
-                value={qcOfficer}
-                onChange={(e) => setQcOfficer(e.target.value)}
-                placeholder="e.g. PO Bandara"
-              />
+              <Select value={qcOfficer} onValueChange={handleCeOfficerSelect}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select CE Officer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ceOfficers.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No CE officers found
+                    </SelectItem>
+                  ) : (
+                    ceOfficers.map((s) => (
+                      <SelectItem key={s.id} value={formatStakeholder(s)}>
+                        {formatStakeholder(s)}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>QCI Officer Details</Label>
               <Input
                 value={qcOfficerDetails}
                 onChange={(e) => setQcOfficerDetails(e.target.value)}
-                placeholder="e.g. QC Bay 2"
+                placeholder="Auto-filled officer details"
               />
             </div>
           </div>
@@ -4733,6 +4798,7 @@ function CreateSplitOrderDialog({
   onCreated: () => void;
   initialFile?: ProcurementFile | null;
 }) {
+  const [selectedPoId, setSelectedPoId] = useState<string>("");
   const [fileNumber, setFileNumber] = useState("FILE/2025-005");
   const [itemName, setItemName] = useState("");
   const [totalQty, setTotalQty] = useState("");
@@ -4744,6 +4810,39 @@ function CreateSplitOrderDialog({
   ]);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+
+  const { data: procurementFiles, loading: poLoading } =
+    useFetch<ProcurementFile[]>(open ? "/api/procurement" : null);
+
+  const poOptions = useMemo(() => {
+    return (procurementFiles ?? []).filter((f) =>
+      isPoProcessed(f.presentPosition) || !!f.prNumber
+    );
+  }, [procurementFiles]);
+
+  function handlePoSelect(id: string) {
+    setSelectedPoId(id);
+    const f = poOptions.find((p) => p.id === id);
+    if (!f) return;
+    setFileNumber(f.prNumber || "FILE/2025-005");
+    setItemName(f.itemName || "");
+    setTotalQty(f.qty ? String(f.qty) : "");
+    setUnit(f.unit || "NOS");
+    setSubs([
+      {
+        poNumber: `${f.prNumber}-PO1`,
+        supplier: f.supplier || "",
+        poQty: f.qty ? String(f.qty) : "",
+        unitPrice: f.unitPrice ? String(f.unitPrice) : "",
+      },
+      {
+        poNumber: `${f.prNumber}-PO2`,
+        supplier: f.supplier || "",
+        poQty: "0",
+        unitPrice: f.unitPrice ? String(f.unitPrice) : "",
+      },
+    ]);
+  }
 
   useEffect(() => {
     if (initialFile && open) {
@@ -4807,6 +4906,39 @@ function CreateSplitOrderDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Select PO / File Number from Pipeline */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5 text-xs font-medium">
+              <ShoppingCart className="h-3.5 w-3.5 text-amber-400" />
+              Select PO (by File Number) from Pipeline
+            </Label>
+            <Select value={selectedPoId} onValueChange={handlePoSelect}>
+              <SelectTrigger className="w-full h-9 text-xs">
+                <SelectValue
+                  placeholder={
+                    poLoading
+                      ? "Loading PO files..."
+                      : "Pick a PO/File from pipeline to auto-fill"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {poOptions.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No PO files available
+                  </SelectItem>
+                ) : (
+                  poOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.prNumber} · {p.itemName} ({formatNumber(p.qty)} {p.unit})
+                      {p.supplier ? ` · ${p.supplier}` : ""}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label className="text-xs">File Number *</Label>
@@ -4848,8 +4980,17 @@ function CreateSplitOrderDialog({
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <div>
-                    <Label className="text-[10px]">PO Number</Label>
-                    <Input value={s.poNumber} onChange={(e) => { const next = [...subs]; next[idx].poNumber = e.target.value; setSubs(next); }} className="bg-background border-border font-mono text-xs h-8" />
+                    <Label className="text-[10px] text-muted-foreground font-medium">PO Number (Editable)</Label>
+                    <Input
+                      value={s.poNumber}
+                      onChange={(e) => {
+                        const next = [...subs];
+                        next[idx].poNumber = e.target.value;
+                        setSubs(next);
+                      }}
+                      placeholder="e.g. PO/2025/0010"
+                      className="bg-background border-border font-mono text-xs h-8 focus-visible:ring-primary"
+                    />
                   </div>
                   <div>
                     <Label className="text-[10px]">Supplier</Label>

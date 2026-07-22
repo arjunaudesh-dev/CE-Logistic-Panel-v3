@@ -398,14 +398,32 @@ type SettingsTab =
   | "value-step";
 
 export function SettingsModule() {
+  const { data: currentUser } = useFetch<{
+    role: string;
+    username: string;
+  }>("/api/user/profile");
+
+  const userRole = currentUser?.role || "Master Admin";
+  const isMasterAdmin = userRole === "Master Admin" || currentUser?.username === "admin";
+  const canAccessSettings = isMasterAdmin || userRole === "Admin" || userRole === "Manager";
+
   const [tab, setTab] = useState<SettingsTab>("users");
 
-  const tabs: {
+  useEffect(() => {
+    if (isMasterAdmin) {
+      setTab("users");
+    } else {
+      setTab("votes");
+    }
+  }, [isMasterAdmin]);
+
+  const allTabs: {
     value: SettingsTab;
     label: string;
     short: string;
     icon: LucideIcon;
     iconClass: string;
+    masterOnly?: boolean;
   }[] = [
     {
       value: "users",
@@ -413,6 +431,7 @@ export function SettingsModule() {
       short: "Users",
       icon: Users,
       iconClass: "bg-blue-500/15 text-blue-400",
+      masterOnly: true,
     },
     {
       value: "roles",
@@ -420,6 +439,7 @@ export function SettingsModule() {
       short: "Roles",
       icon: Shield,
       iconClass: "bg-violet-500/15 text-violet-400",
+      masterOnly: true,
     },
     {
       value: "auth",
@@ -472,11 +492,35 @@ export function SettingsModule() {
     },
   ];
 
+  const visibleTabs = useMemo(() => {
+    if (isMasterAdmin) return allTabs;
+    return allTabs.filter((t) => !t.masterOnly);
+  }, [isMasterAdmin, allTabs]);
+
+  if (!canAccessSettings) {
+    return (
+      <div className="p-8 text-center space-y-4 bg-card border border-border rounded-xl max-w-lg mx-auto mt-8 shadow-md">
+        <div className="h-12 w-12 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center mx-auto">
+          <Lock className="h-6 w-6" />
+        </div>
+        <h3 className="text-base font-bold text-foreground">Settings Page Access Restricted</h3>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          The Settings page is only accessible to Admins and Managers. Please contact your system administrator if you require access.
+        </p>
+        <div className="pt-2">
+          <CustomBadge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+            Current Role: {userRole}
+          </CustomBadge>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Manage users, roles, authentication, votes, stores, procurement process flows, financial delegations & steps"
+        description="Manage votes, stores, procurement process flows, financial delegations & steps"
         icon={Settings}
       />
       <Tabs
@@ -485,7 +529,7 @@ export function SettingsModule() {
       >
         <div className="bg-gradient-to-r from-blue-500/5 via-violet-500/5 to-transparent border border-border rounded-xl p-1.5 overflow-x-auto">
           <TabsList className="bg-transparent border-0 p-0 h-auto flex gap-1 w-max min-w-full">
-            {tabs.map((t) => {
+            {visibleTabs.map((t) => {
               const Icon = t.icon;
               return (
                 <TabsTrigger
@@ -509,12 +553,16 @@ export function SettingsModule() {
           </TabsList>
         </div>
 
-        <TabsContent value="users" className="mt-4">
-          <UserProfilesTab />
-        </TabsContent>
-        <TabsContent value="roles" className="mt-4">
-          <RolesAccessTab />
-        </TabsContent>
+        {isMasterAdmin && (
+          <>
+            <TabsContent value="users" className="mt-4">
+              <UserProfilesTab />
+            </TabsContent>
+            <TabsContent value="roles" className="mt-4">
+              <RolesAccessTab />
+            </TabsContent>
+          </>
+        )}
         <TabsContent value="auth" className="mt-4">
           <AuthenticationTab />
         </TabsContent>
@@ -1057,6 +1105,7 @@ function UserFormDialog({
       role,
       department,
       stakeholderId: stakeholderId || null,
+      password: password.trim() || undefined,
       active,
     };
     const res = isEdit
@@ -6584,12 +6633,14 @@ function ThemeColorsTab() {
                 sp.name.toLowerCase() === preset.name.toLowerCase()
             );
             return (
-              <button
+              <div
                 key={preset.name}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => handleApplyPreset(preset)}
+                onKeyDown={(e) => e.key === "Enter" && handleApplyPreset(preset)}
                 className={cn(
-                  "group relative rounded-xl border p-3 text-left transition-all hover:shadow-md",
+                  "group relative rounded-xl border p-3 text-left transition-all hover:shadow-md cursor-pointer select-none",
                   active
                     ? "border-fuchsia-500/50 bg-fuchsia-500/5 ring-1 ring-fuchsia-500/30"
                     : "border-border bg-card hover:border-fuchsia-500/30"
@@ -6664,7 +6715,7 @@ function ThemeColorsTab() {
                     )}
                   </Button>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

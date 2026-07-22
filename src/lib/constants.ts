@@ -175,7 +175,7 @@ export const CE_APPOINTMENTS = [
   "SO(CE)",
 ] as const;
 
-export const STAKEHOLDER_DEPARTMENTS = ["CSLOG", "CE"] as const;
+export const STAKEHOLDER_DEPARTMENTS = ["CSLOG", "CE", "CCED", "Provost", "Supply", "Medical", "Others"] as const;
 
 export const STAKEHOLDER_ROLES = ["Officer", "Sailor"] as const;
 
@@ -324,6 +324,7 @@ export const STAKEHOLDER_CATEGORIES = [
   "CSLOG Officer",
   "CSLOG Sailor",
   "Officer-in-Area",
+  "Provost Officer",
   "Provost Sailor",
   "ADF & Staff",
   "Other Sailor",
@@ -341,6 +342,8 @@ export function stakeholderCategoryColor(cat: string): string {
       return "bg-blue-500/10 text-blue-300 border-blue-500/20";
     case "Officer-in-Area":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Provost Officer":
+      return "bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold";
     case "Provost Sailor":
       return "bg-amber-500/15 text-amber-400 border-amber-500/30";
     case "ADF & Staff":
@@ -369,7 +372,7 @@ export function processFlowColor(flow: string): string {
 }
 
 // ─── User Roles ───
-export const USER_ROLES = ["Admin", "Manager", "Officer", "Clerk", "Viewer"] as const;
+export const USER_ROLES = ["Master Admin", "Admin", "Manager", "Officer", "Clerk", "Viewer"] as const;
 
 // ─── Number Prefix Document Types ───
 export const NUMBER_PREFIX_TYPES = [
@@ -487,22 +490,27 @@ export interface ThemeProfilePreset {
 export const THEME_PROFILE_PRESETS: ThemeProfilePreset[] = [
   // Dark profiles
   { name: "Ocean Blue (Dark)", mode: "dark", primary: "#3b82f6", accent: "#8b5cf6" },
-  { name: "Emerald (Dark)", mode: "dark", primary: "#10b981", accent: "#06b6d4" },
-  { name: "Sunset (Dark)", mode: "dark", primary: "#f59e0b", accent: "#ef4444" },
+  { name: "Emerald Teal (Dark)", mode: "dark", primary: "#10b981", accent: "#06b6d4" },
+  { name: "Cyber Neon (Dark)", mode: "dark", primary: "#06b6d4", accent: "#f43f5e" },
+  { name: "Sunset Flame (Dark)", mode: "dark", primary: "#f59e0b", accent: "#ef4444" },
   { name: "Royal Purple (Dark)", mode: "dark", primary: "#8b5cf6", accent: "#ec4899" },
-  { name: "Crimson (Dark)", mode: "dark", primary: "#dc2626", accent: "#f59e0b" },
-  { name: "Teal (Dark)", mode: "dark", primary: "#14b8a6", accent: "#3b82f6" },
+  { name: "Rose Crimson (Dark)", mode: "dark", primary: "#f43f5e", accent: "#8b5cf6" },
+  { name: "Gold Amber (Dark)", mode: "dark", primary: "#eab308", accent: "#f97316" },
+
   // Light profiles
   { name: "Ocean Blue (Light)", mode: "light", primary: "#2563eb", accent: "#7c3aed" },
-  { name: "Emerald (Light)", mode: "light", primary: "#059669", accent: "#0891b2" },
-  { name: "Sunset (Light)", mode: "light", primary: "#d97706", accent: "#dc2626" },
+  { name: "Emerald Teal (Light)", mode: "light", primary: "#059669", accent: "#0284c7" },
+  { name: "Cyber Indigo (Light)", mode: "light", primary: "#4f46e5", accent: "#e11d48" },
+  { name: "Sunset Flame (Light)", mode: "light", primary: "#d97706", accent: "#dc2626" },
   { name: "Royal Purple (Light)", mode: "light", primary: "#7c3aed", accent: "#db2777" },
-  { name: "Crimson (Light)", mode: "light", primary: "#b91c1c", accent: "#c2410c" },
-  { name: "Teal (Light)", mode: "light", primary: "#0d9488", accent: "#2563eb" },
+  { name: "Rose Crimson (Light)", mode: "light", primary: "#e11d48", accent: "#7c3aed" },
+  { name: "Gold Amber (Light)", mode: "light", primary: "#ca8a04", accent: "#ea580c" },
 ];
 
 export function userRoleColor(role: string): string {
   switch (role) {
+    case "Master Admin":
+      return "bg-purple-500/15 text-purple-400 border-purple-500/30 font-bold";
     case "Admin":
       return "bg-red-500/15 text-red-400 border-red-500/30";
     case "Manager":

@@ -14,7 +14,7 @@ export async function GET() {
       earmarks,
       qcInspections,
     ] = await Promise.all([
-      db.project.findMany({ include: { files: { select: { id: true, fileCost: true } } } }),
+      db.project.findMany({ include: { files: { select: { id: true, fileCost: true, presentPosition: true } } } }),
       db.procurementFile.findMany(),
       db.storeItem.findMany(),
       db.rateContract.findMany(),
@@ -99,23 +99,29 @@ export async function GET() {
         ).length,
         failed: qcInspections.filter((q) => q.qcLevel === "Fail").length,
       },
-      // Most active/valued projects (by actualSpent desc)
+      // Active/valued projects (sorted by allocation + spent desc)
       topProjects: projects
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          voteNumber: p.voteNumber,
-          voteAllocation: p.voteAllocation,
-          committed: p.committed,
-          actualSpent: p.actualSpent,
-          balance: p.voteAllocation - p.actualSpent,
-          utilization: p.voteAllocation > 0 ? (p.actualSpent / p.voteAllocation) * 100 : 0,
-          fileCount: p.files.length,
-          fileValue: p.files.reduce((s, f) => s + f.fileCost, 0),
-          status: p.status,
-        }))
-        .sort((a, b) => b.actualSpent - a.actualSpent)
-        .slice(0, 5),
+        .map((p) => {
+          const files = p.files || [];
+          const inProcessFiles = files.filter((f) => !["Payment Done", "Closed", "QC Passed"].includes(f.presentPosition)).length;
+          const completedFiles = files.filter((f) => ["Payment Done", "Closed", "QC Passed"].includes(f.presentPosition)).length;
+          return {
+            id: p.id,
+            name: p.name,
+            voteNumber: p.voteNumber,
+            voteAllocation: p.voteAllocation,
+            committed: p.committed,
+            actualSpent: p.actualSpent,
+            balance: p.voteAllocation - p.actualSpent,
+            utilization: p.voteAllocation > 0 ? (p.actualSpent / p.voteAllocation) * 100 : 0,
+            fileCount: files.length,
+            inProcessFiles,
+            completedFiles,
+            fileValue: files.reduce((s, f) => s + (f.fileCost || 0), 0),
+            status: p.status,
+          };
+        })
+        .sort((a, b) => (b.voteAllocation + b.actualSpent) - (a.voteAllocation + a.actualSpent)),
       net: totalVoteAllocation,
       task: procurementFiles.length,
       avail: totalVoteAllocation - totalActualSpent,

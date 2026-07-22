@@ -24,7 +24,13 @@ import {
   Loader2,
   Check,
   RefreshCw,
+  Search,
+  Filter,
+  LayoutGrid,
+  Tag,
+  X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   PieChart,
   Pie,
@@ -64,6 +70,123 @@ import {
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+
+// Helper to determine vote category
+function getVoteGroupKey(p: Project): { key: string; label: string; isOther: boolean } {
+  const v = (p.voteNumber || "").trim();
+  const f = (p.financialMean || "").trim();
+  const isOther =
+    !v ||
+    ["NON-NAVAL", "CONTRACTUAL", "NON-VOTE", "OTHER", "N/A"].includes(v.toUpperCase()) ||
+    ["Malima Fund", "Non-Public Fund", "Contractual"].includes(f);
+
+  if (isOther) {
+    return {
+      key: "OTHER",
+      label: "Other Funds & Non-Naval Votes",
+      isOther: true,
+    };
+  }
+
+  return {
+    key: v,
+    label: `Vote: ${v}`,
+    isOther: false,
+  };
+}
+
+function ProjectCard({ project: p, onClick }: { project: Project; onClick: () => void }) {
+  const util = p.utilization ?? 0;
+  return (
+    <div
+      onClick={onClick}
+      className="glass-card rounded-2xl p-5 cursor-pointer hover:border-primary/50 hover:-translate-y-0.5 hover:shadow-md transition-all group border border-border/80 flex flex-col justify-between min-h-[220px]"
+    >
+      <div>
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="min-w-0">
+            <h3 className="font-bold text-foreground group-hover:text-primary transition-colors truncate flex items-center gap-2 text-sm sm:text-base">
+              {p.name}
+              {p.nameAbbreviation && (
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 font-bold shrink-0">
+                  {p.nameAbbreviation}
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate font-medium">
+              <span className="font-semibold text-foreground">{p.voteNumber}</span>
+              {p.benefactor ? ` · ${p.benefactor}` : p.department ? ` · ${p.department}` : ""}
+              {p.reference ? ` · ${p.reference}` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1 justify-end shrink-0">
+            {p.financialMean && p.financialMean !== "Vote" && (
+              <CustomBadge className={cn("border", financialMeanColor(p.financialMean))}>
+                {p.financialMean}
+              </CustomBadge>
+            )}
+            {p.projectType && (
+              <CustomBadge className={cn("border", projectTypeColor(p.projectType))}>
+                {p.projectType}
+              </CustomBadge>
+            )}
+            <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
+              {p.status}
+            </CustomBadge>
+          </div>
+        </div>
+
+        {/* Financial breakdown */}
+        <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+          <div className="bg-secondary/60 rounded-xl py-2 px-1 border border-border/40">
+            <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Budget</p>
+            <p className="text-xs sm:text-sm font-bold text-foreground tabular-nums">
+              {formatCurrency(p.voteAllocation)}
+            </p>
+          </div>
+          <div className="bg-secondary/60 rounded-xl py-2 px-1 border border-border/40">
+            <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Committed</p>
+            <p className="text-xs sm:text-sm font-bold text-amber-500 tabular-nums">
+              {formatCurrency(p.committed)}
+            </p>
+          </div>
+          <div className="bg-secondary/60 rounded-xl py-2 px-1 border border-border/40">
+            <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Balance</p>
+            <p className="text-xs sm:text-sm font-bold text-emerald-500 tabular-nums">
+              {formatCurrency(p.balance ?? p.voteAllocation - p.actualSpent)}
+            </p>
+          </div>
+        </div>
+
+        {/* Utilization */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Utilization</span>
+            <span className="text-xs font-bold text-foreground tabular-nums">{util.toFixed(0)}%</span>
+          </div>
+          <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+            <div
+              className={cn("h-full rounded-full transition-all duration-300", utilizationColor(util))}
+              style={{ width: `${Math.min(util, 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground pt-2.5 border-t border-border/60 font-medium">
+        <span className="flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5 text-primary" />
+          {p.fileCount || 0} files
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+          EDC: {p.endDate ? new Date(p.endDate).toLocaleDateString("en-GB") : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // Donut palette — distinct, accessible in both light & dark themes.
 const DONUT_COLORS = [
@@ -155,8 +278,6 @@ interface Project {
 }
 
 // ─── Bulk Upload CSV row schema ───
-// The columns below match the pp.csv template header exactly. Optional columns
-// are coerced / defaulted during import.
 interface BulkProjectRow {
   ProjectName: string;
   NameAbbreviation: string;
@@ -193,6 +314,12 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+
+  // Vote Filtering & View Mode States
+  const [searchQuery, setSearchQuery] = useState("");
+  const [voteFilter, setVoteFilter] = useState<string>("ALL");
+  const [viewMode, setViewMode] = useState<"grouped" | "grid">("grouped");
+
   if (loading) return <LoadingState label="Loading projects..." />;
   if (error) return <ErrorState message={error} />;
 
@@ -203,7 +330,6 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   const totalFiles = projects?.reduce((s, p) => s + (p.fileCount || 0), 0) ?? 0;
 
   // ── Donut 1: Projects by Type ──
-  // Each defined bucket gets a slice (count of projects of that type).
   const typeData = TYPE_BUCKET_DEFS.map((b) => ({
     name: b.name,
     value: (projects ?? []).filter((p) => p.projectType === b.name).length,
@@ -219,6 +345,66 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   })).filter((d) => d.value > 0);
   const totalStatused = statusData.reduce((s, d) => s + d.value, 0);
 
+  // ── Vote Categories & Groups Calculation ──
+  const voteOptions = (() => {
+    if (!projects) return { navalVotes: [], hasOther: false };
+    const navalSet = new Set<string>();
+    let hasOther = false;
+
+    projects.forEach((p) => {
+      const { key, isOther } = getVoteGroupKey(p);
+      if (isOther) {
+        hasOther = true;
+      } else {
+        navalSet.add(key);
+      }
+    });
+
+    return {
+      navalVotes: Array.from(navalSet).sort(),
+      hasOther,
+    };
+  })();
+
+  const voteGroupsMap = (() => {
+    if (!projects) return new Map<string, { label: string; key: string; isOther: boolean; projects: Project[] }>();
+    const map = new Map<string, { label: string; key: string; isOther: boolean; projects: Project[] }>();
+
+    projects.forEach((p) => {
+      // 1. Search Query Filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = p.name.toLowerCase().includes(q);
+        const matchVote = (p.voteNumber || "").toLowerCase().includes(q);
+        const matchAbbr = (p.nameAbbreviation || "").toLowerCase().includes(q);
+        const matchBen = (p.benefactor || "").toLowerCase().includes(q);
+        const matchDept = (p.department || "").toLowerCase().includes(q);
+        if (!matchName && !matchVote && !matchAbbr && !matchBen && !matchDept) return;
+      }
+
+      const { key, label, isOther } = getVoteGroupKey(p);
+
+      // 2. Vote Filter
+      if (voteFilter !== "ALL") {
+        if (voteFilter === "OTHER" && !isOther) return;
+        if (voteFilter !== "OTHER" && key !== voteFilter) return;
+      }
+
+      if (!map.has(key)) {
+        map.set(key, { label, key, isOther, projects: [] });
+      }
+      map.get(key)!.projects.push(p);
+    });
+
+    return map;
+  })();
+
+  const allFilteredProjects = (() => {
+    const list: Project[] = [];
+    voteGroupsMap.forEach((g) => list.push(...g.projects));
+    return list;
+  })();
+
   return (
     <div>
       <PageHeader
@@ -227,10 +413,10 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         icon={FolderKanban}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5">
+            <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5 rounded-xl">
               <Upload className="h-4 w-4" /> Upload Bulk
             </Button>
-            <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
+            <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5 rounded-xl shadow-xs">
               <Sparkles className="h-4 w-4" /> Add Project (Estimate)
             </Button>
           </div>
@@ -249,20 +435,20 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
       {projects && projects.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           {/* Donut — Projects by Type */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="glass-card border border-border/80 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-1">
               <PieChartIcon className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground">
+              <h3 className="text-sm font-bold text-foreground">
                 Projects by Type
               </h3>
             </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              Distribution of projects across the project-type categories
+            <p className="text-xs font-medium text-muted-foreground mb-3">
+              Distribution of projects across project-type categories
             </p>
             {totalTyped > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-center gap-4">
                 <div className="relative">
-                  <ResponsiveContainer width="100%" height={260}>
+                  <ResponsiveContainer width="100%" height={240}>
                     <PieChart>
                       <Pie
                         data={typeData}
@@ -302,13 +488,13 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-bold">
                       Total
                     </span>
                     <span className="text-2xl font-bold text-foreground leading-tight">
                       {totalTyped}
                     </span>
-                    <span className="text-[10px] text-muted-foreground mt-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium mt-0.5">
                       {typeData.length} type{typeData.length === 1 ? "" : "s"}
                     </span>
                   </div>
@@ -320,11 +506,11 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                     return (
                       <li key={d.name} className="flex items-center gap-2 text-xs">
                         <span
-                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          className="h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs"
                           style={{ background: d.color }}
                         />
-                        <span className="text-foreground flex-1 truncate">{d.name}</span>
-                        <span className="font-semibold text-foreground tabular-nums">{d.value}</span>
+                        <span className="text-foreground flex-1 truncate font-medium">{d.name}</span>
+                        <span className="font-bold text-foreground tabular-nums">{d.value}</span>
                         <span className="text-muted-foreground tabular-nums w-12 text-right">{pct}%</span>
                       </li>
                     );
@@ -339,20 +525,20 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
           </div>
 
           {/* Donut — Projects by Status */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="glass-card border border-border/80 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-1">
               <Activity className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground">
+              <h3 className="text-sm font-bold text-foreground">
                 Projects by Status
               </h3>
             </div>
-            <p className="text-xs text-muted-foreground mb-3">
+            <p className="text-xs font-medium text-muted-foreground mb-3">
               Active / On Hold / Completed / Cancelled distribution
             </p>
             {totalStatused > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-center gap-4">
                 <div className="relative">
-                  <ResponsiveContainer width="100%" height={260}>
+                  <ResponsiveContainer width="100%" height={240}>
                     <PieChart>
                       <Pie
                         data={statusData}
@@ -392,13 +578,13 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-bold">
                       Total
                     </span>
                     <span className="text-2xl font-bold text-foreground leading-tight">
                       {totalStatused}
                     </span>
-                    <span className="text-[10px] text-muted-foreground mt-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium mt-0.5">
                       {statusData.length} status{statusData.length === 1 ? "" : "es"}
                     </span>
                   </div>
@@ -409,11 +595,11 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
                     return (
                       <li key={d.name} className="flex items-center gap-2 text-xs">
                         <span
-                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          className="h-2.5 w-2.5 rounded-full shrink-0 shadow-2xs"
                           style={{ background: d.color }}
                         />
-                        <span className="text-foreground flex-1 truncate">{d.name}</span>
-                        <span className="font-semibold text-foreground tabular-nums">{d.value}</span>
+                        <span className="text-foreground flex-1 truncate font-medium">{d.name}</span>
+                        <span className="font-bold text-foreground tabular-nums">{d.value}</span>
                         <span className="text-muted-foreground tabular-nums w-12 text-right">{pct}%</span>
                       </li>
                     );
@@ -429,7 +615,109 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         </div>
       )}
 
-      {/* Project cards */}
+      {/* ─── VOTE SEPARATION & FILTER TOOLBAR ─── */}
+      <div className="glass-card rounded-2xl p-4 mb-6 border border-border/80 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Search & Filter pills */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 min-w-0">
+          {/* Search box */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search projects, vote number, benefactor..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 bg-background/60 text-xs sm:text-sm rounded-xl border-border/80 focus-visible:ring-primary h-9"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Vote Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-1 shrink-0">
+            <button
+              onClick={() => setVoteFilter("ALL")}
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
+                voteFilter === "ALL"
+                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                  : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+              )}
+            >
+              All Votes ({projects?.length || 0})
+            </button>
+
+            {voteOptions.navalVotes.map((v) => {
+              const count = projects?.filter((p) => getVoteGroupKey(p).key === v).length || 0;
+              return (
+                <button
+                  key={v}
+                  onClick={() => setVoteFilter(v)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
+                    voteFilter === v
+                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                      : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+                  )}
+                >
+                  Vote {v} ({count})
+                </button>
+              );
+            })}
+
+            {voteOptions.hasOther && (
+              <button
+                onClick={() => setVoteFilter("OTHER")}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
+                  voteFilter === "OTHER"
+                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-amber-500 shadow-xs"
+                    : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+                )}
+              >
+                Other Votes ({projects?.filter((p) => getVoteGroupKey(p).isOther).length || 0})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* View Mode Toggle (Grouped vs Grid) */}
+        <div className="flex items-center gap-1 shrink-0 bg-secondary/80 p-1 rounded-xl border border-border/60 self-end lg:self-auto">
+          <button
+            onClick={() => setViewMode("grouped")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150",
+              viewMode === "grouped"
+                ? "bg-card text-foreground shadow-2xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Vote-wise Grouped View"
+          >
+            <Layers className="h-3.5 w-3.5 text-primary" />
+            Vote Sections
+          </button>
+          <button
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150",
+              viewMode === "grid"
+                ? "bg-card text-foreground shadow-2xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Unified Grid View"
+          >
+            <LayoutGrid className="h-3.5 w-3.5 text-primary" />
+            Grid View
+          </button>
+        </div>
+      </div>
+
+      {/* ─── DISPLAY PROJECT LIST / SECTIONS ─── */}
       {!projects || projects.length === 0 ? (
         <EmptyState
           icon={FolderKanban}
@@ -437,109 +725,96 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
           description="Create your first project to start managing vote allocations and procurement files."
           action={
             <div className="flex flex-wrap items-center gap-2 justify-center">
-              <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5">
+              <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5 rounded-xl">
                 <Upload className="h-4 w-4" /> Upload Bulk
               </Button>
-              <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5">
+              <Button onClick={() => setAddOpen(true)} size="sm" className="gap-1.5 rounded-xl shadow-xs">
                 <Sparkles className="h-4 w-4" /> Add Project (Estimate)
               </Button>
             </div>
           }
         />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {projects.map((p) => {
-            const util = p.utilization ?? 0;
+      ) : allFilteredProjects.length === 0 ? (
+        <div className="glass-card rounded-2xl p-8 text-center border border-border/80">
+          <Filter className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
+          <h3 className="text-base font-bold text-foreground">No matching projects found</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            No projects matched your search query "{searchQuery}" or vote filter setting.
+          </p>
+          <Button
+            onClick={() => {
+              setSearchQuery("");
+              setVoteFilter("ALL");
+            }}
+            variant="outline"
+            size="sm"
+            className="mt-4 rounded-xl text-xs font-bold"
+          >
+            Reset Filters
+          </Button>
+        </div>
+      ) : viewMode === "grouped" ? (
+        /* VOTE-WISE GROUPED VIEW */
+        <div className="space-y-6">
+          {Array.from(voteGroupsMap.values()).map((group) => {
+            const grpTotalVote = group.projects.reduce((s, p) => s + p.voteAllocation, 0);
+            const grpTotalCommitted = group.projects.reduce((s, p) => s + p.committed, 0);
+            const grpTotalSpent = group.projects.reduce((s, p) => s + p.actualSpent, 0);
+            const grpTotalBalance = grpTotalVote - grpTotalSpent;
+
             return (
-              <div
-                key={p.id}
-                onClick={() => setSelectedProject(p)}
-                className="bg-card border border-border rounded-xl p-5 cursor-pointer hover:border-primary/50 transition-all group"
-              >
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate flex items-center gap-2">
-                      {p.name}
-                      {p.nameAbbreviation && (
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-                          {p.nameAbbreviation}
+              <div key={group.key} className="glass-card rounded-2xl p-5 border border-border/80 shadow-sm relative overflow-hidden">
+                {/* Vote Banner Card */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-border/60">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-primary/20 via-primary/10 to-accent/20 border border-primary/30 text-primary flex items-center justify-center shrink-0 shadow-2xs">
+                      <Wallet className="h-5 w-5 stroke-[2.2]" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                        {group.label}
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                          {group.projects.length} {group.projects.length === 1 ? "Project" : "Projects"}
                         </span>
-                      )}
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {p.voteNumber}
-                      {p.benefactor ? ` · ${p.benefactor}` : p.department ? ` · ${p.department}` : ""}
-                      {p.reference ? ` · ${p.reference}` : ""}
-                      {p.projectType ? ` · ${p.projectType}` : ""}
-                    </p>
+                      </h3>
+                      <p className="text-xs font-medium text-muted-foreground mt-0.5">
+                        Allocation: <span className="font-semibold text-foreground">{formatCurrency(grpTotalVote)}</span>
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1 justify-end shrink-0">
-                    {p.financialMean && p.financialMean !== "Vote" && (
-                      <CustomBadge className={cn("border", financialMeanColor(p.financialMean))}>
-                        {p.financialMean}
-                      </CustomBadge>
-                    )}
-                    {p.projectType && (
-                      <CustomBadge className={cn("border", projectTypeColor(p.projectType))}>
-                        {p.projectType}
-                      </CustomBadge>
-                    )}
-                    <CustomBadge className={cn("border-0", projectStatusColor(p.status))}>
-                      {p.status}
-                    </CustomBadge>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="px-3 py-1 rounded-xl bg-secondary/70 border border-border/50 text-right">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Committed</p>
+                      <p className="text-xs font-bold text-amber-500 tabular-nums">{formatCurrency(grpTotalCommitted)}</p>
+                    </div>
+                    <div className="px-3 py-1 rounded-xl bg-secondary/70 border border-border/50 text-right">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Actual Spent</p>
+                      <p className="text-xs font-bold text-red-500 tabular-nums">{formatCurrency(grpTotalSpent)}</p>
+                    </div>
+                    <div className="px-3 py-1 rounded-xl bg-secondary/70 border border-border/50 text-right">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Remaining Balance</p>
+                      <p className="text-xs font-bold text-emerald-500 tabular-nums">{formatCurrency(grpTotalBalance)}</p>
+                    </div>
                   </div>
                 </div>
 
-                {/* Financial breakdown */}
-                <div className="grid grid-cols-3 gap-2 mb-3 text-center">
-                  <div className="bg-secondary/50 rounded-lg py-2">
-                    <p className="text-[10px] text-muted-foreground uppercase">Budget</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {formatCurrency(p.voteAllocation)}
-                    </p>
-                  </div>
-                  <div className="bg-secondary/50 rounded-lg py-2">
-                    <p className="text-[10px] text-muted-foreground uppercase">Committed</p>
-                    <p className="text-sm font-semibold text-amber-400">
-                      {formatCurrency(p.committed)}
-                    </p>
-                  </div>
-                  <div className="bg-secondary/50 rounded-lg py-2">
-                    <p className="text-[10px] text-muted-foreground uppercase">Balance</p>
-                    <p className="text-sm font-semibold text-emerald-400">
-                      {formatCurrency(p.balance ?? p.voteAllocation - p.actualSpent)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Utilization */}
-                <div className="mb-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">Utilization</span>
-                    <span className="text-xs font-medium text-foreground">{util.toFixed(0)}%</span>
-                  </div>
-                  <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className={cn("h-full rounded-full transition-all", utilizationColor(util))}
-                      style={{ width: `${Math.min(util, 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
-                  <span className="flex items-center gap-1">
-                    <FileText className="h-3.5 w-3.5" />
-                    {p.fileCount || 0} files
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Layers className="h-3.5 w-3.5" />
-                    EDC: {p.endDate ? new Date(p.endDate).toLocaleDateString("en-GB") : "—"}
-                  </span>
+                {/* Projects Grid for this Vote */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {group.projects.map((p) => (
+                    <ProjectCard key={p.id} project={p} onClick={() => setSelectedProject(p)} />
+                  ))}
                 </div>
               </div>
             );
           })}
+        </div>
+      ) : (
+        /* UNIFIED GRID VIEW */
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {allFilteredProjects.map((p) => (
+            <ProjectCard key={p.id} project={p} onClick={() => setSelectedProject(p)} />
+          ))}
         </div>
       )}
 

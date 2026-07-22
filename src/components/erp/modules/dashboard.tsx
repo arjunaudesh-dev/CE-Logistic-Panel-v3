@@ -73,6 +73,8 @@ interface TopProject {
   balance: number;
   utilization: number;
   fileCount: number;
+  inProcessFiles?: number;
+  completedFiles?: number;
   fileValue: number;
   status: string;
 }
@@ -103,7 +105,6 @@ interface Stats {
 const PIE_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "#64748b"];
 
 // Donut palette — adapts to light/dark theme via the chart-* CSS variables.
-// The 6th entry (neutral slate) is reserved for the "Others" slice in the allocation donut.
 const DONUT_COLORS = [
   "var(--chart-1)",
   "var(--chart-2)",
@@ -144,6 +145,8 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
 
   // toggle for infographics: "value" shows currency, "percent" shows utilization %
   const [viewMode, setViewMode] = useState<"value" | "percent">("value");
+  // responsive limit for displaying active projects
+  const [activeProjectsLimit, setActiveProjectsLimit] = useState<number | "ALL">(6);
   // manage dashboard projects dialog
   const [manageOpen, setManageOpen] = useState(false);
   // hovered slice index for donut highlight
@@ -204,7 +207,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
   const totalProjectsCounted = utilBucketData.reduce((s, d) => s + d.value, 0);
 
   // ── Top projects for "Most Active / Valued" section ──
-  // Filter /api/stats topProjects by showOnDashboard via lookup in allProjects.
   const visibleTopProjects = useMemo<TopProject[]>(() => {
     const tps = stats?.topProjects ?? [];
     if (!allProjects) return tps;
@@ -213,6 +215,12 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
     );
     return tps.filter((p) => visibleIds.has(p.id));
   }, [stats, allProjects]);
+
+  // Displayed projects list based on limit / window size
+  const displayedActiveProjects = useMemo(() => {
+    if (activeProjectsLimit === "ALL") return visibleTopProjects;
+    return visibleTopProjects.slice(0, activeProjectsLimit);
+  }, [visibleTopProjects, activeProjectsLimit]);
 
   // ── Toggle showOnDashboard handler ──
   const handleToggleVisibility = async (project: Project, next: boolean) => {
@@ -241,8 +249,8 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
   const topProjects = visibleTopProjects;
   const totalProjectsAll = allProjects?.length ?? 0;
 
-  // For the chart: in value mode show Rs. millions, in percent mode show utilization %
-  const projectChart = topProjects.map((p) => ({
+  // For the chart: show Allocation, Committed, Spent
+  const projectChart = displayedActiveProjects.map((p) => ({
     name: p.name.length > 14 ? p.name.slice(0, 12) + "…" : p.name,
     Allocation: viewMode === "value" ? Math.round(p.voteAllocation / 1000000) : Math.round(p.utilization),
     Committed: viewMode === "value" ? Math.round(p.committed / 1000000) : p.voteAllocation > 0 ? Math.round((p.committed / p.voteAllocation) * 100) : 0,
@@ -267,18 +275,18 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
     const value = slice.value ?? 0;
     const pct = allocationData.total > 0 ? (value / allocationData.total) * 100 : 0;
     return (
-      <div className="bg-popover text-popover-foreground border border-border rounded-lg p-3 shadow-xl max-w-[280px]">
+      <div className="bg-popover text-popover-foreground border border-border/80 rounded-xl p-3 shadow-xl max-w-[280px]">
         <div className="flex items-center gap-2 mb-1.5">
           <span
-            className="h-2.5 w-2.5 rounded-sm shrink-0"
+            className="h-2.5 w-2.5 rounded-sm shrink-0 shadow-2xs"
             style={{ background: slice.color ?? item?.color ?? "#3b82f6" }}
           />
-          <span className="text-xs font-semibold text-foreground truncate">{slice.name}</span>
+          <span className="text-xs font-bold text-foreground truncate">{slice.name}</span>
         </div>
-        <div className="text-base font-bold text-foreground leading-tight">
+        <div className="text-base font-bold text-foreground leading-tight tabular-nums">
           {formatCurrency(value)}
         </div>
-        <div className="text-[11px] text-muted-foreground mt-0.5">
+        <div className="text-[11px] font-medium text-muted-foreground mt-0.5">
           {pct.toFixed(1)}% of total allocation
         </div>
       </div>
@@ -296,18 +304,18 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
     const value = slice.value ?? 0;
     const pct = totalProjectsCounted > 0 ? (value / totalProjectsCounted) * 100 : 0;
     return (
-      <div className="bg-popover text-popover-foreground border border-border rounded-lg p-3 shadow-xl max-w-[280px]">
+      <div className="bg-popover text-popover-foreground border border-border/80 rounded-xl p-3 shadow-xl max-w-[280px]">
         <div className="flex items-center gap-2 mb-1.5">
           <span
-            className="h-2.5 w-2.5 rounded-sm shrink-0"
+            className="h-2.5 w-2.5 rounded-sm shrink-0 shadow-2xs"
             style={{ background: slice.color ?? item?.color ?? "#22c55e" }}
           />
-          <span className="text-xs font-semibold text-foreground">{slice.name}</span>
+          <span className="text-xs font-bold text-foreground">{slice.name}</span>
         </div>
-        <div className="text-base font-bold text-foreground leading-tight">
+        <div className="text-base font-bold text-foreground leading-tight tabular-nums">
           {value} project{value === 1 ? "" : "s"}
         </div>
-        <div className="text-[11px] text-muted-foreground mt-0.5">
+        <div className="text-[11px] font-medium text-muted-foreground mt-0.5">
           {pct.toFixed(1)}% of tracked projects
         </div>
       </div>
@@ -321,24 +329,24 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
         description="Real-time overview of dockyard operations, procurement & inventory"
         icon={LayoutDashboard}
         actions={
-          <div className="flex items-center gap-1 bg-secondary/60 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-secondary/80 rounded-xl p-1 border border-border/60">
             <button
               onClick={() => setViewMode("value")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                viewMode === "value" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150",
+                viewMode === "value" ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Coins className="h-3.5 w-3.5" /> By Value
+              <Coins className="h-3.5 w-3.5 text-primary" /> By Value
             </button>
             <button
               onClick={() => setViewMode("percent")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                viewMode === "percent" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150",
+                viewMode === "percent" ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Percent className="h-3.5 w-3.5" /> By Percentage
+              <Percent className="h-3.5 w-3.5 text-primary" /> By Percentage
             </button>
           </div>
         }
@@ -351,7 +359,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
           value={formatCurrency(stats.projects.voteAllocation)}
           icon={Wallet}
           accent="blue"
-          sub={`${stats.projects.total} projects`}
+          sub={`${stats.projects.total} total projects`}
         />
         <StatCard
           label="Total Committed"
@@ -377,44 +385,69 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
       </div>
 
       {/* Most Active / Most Valued Projects */}
-      <div className="bg-card border border-border rounded-xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Trophy className="h-4 w-4 text-amber-400" />
-            Most Active / Valued Projects
-            <span className="text-xs text-muted-foreground font-normal">
-              ({viewMode === "value" ? "Rs. Millions" : "Utilization %"})
+      <div className="glass-card border border-border/80 rounded-2xl p-5 mb-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap border-b border-border/50 pb-3">
+          <div className="flex items-center gap-2">
+            <Trophy className="h-4.5 w-4.5 text-amber-400" />
+            <h3 className="text-base font-bold text-foreground">
+              Active Projects & Financial Utilization
+            </h3>
+            <span className="text-xs font-medium text-muted-foreground">
+              ({viewMode === "value" ? "Rs. Values & Allocated Amounts" : "Utilization %"})
             </span>
-          </h3>
+          </div>
+
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Display count selector for window size adaptability */}
+            <div className="flex items-center gap-1 bg-secondary/80 p-1 rounded-xl border border-border/60 text-xs font-semibold">
+              <span className="text-[10px] text-muted-foreground px-1.5 uppercase font-bold">Show:</span>
+              <button
+                onClick={() => setActiveProjectsLimit(6)}
+                className={cn("px-2 py-0.5 rounded-lg transition-colors", activeProjectsLimit === 6 ? "bg-card text-foreground font-bold shadow-2xs" : "text-muted-foreground hover:text-foreground")}
+              >
+                6
+              </button>
+              <button
+                onClick={() => setActiveProjectsLimit(12)}
+                className={cn("px-2 py-0.5 rounded-lg transition-colors", activeProjectsLimit === 12 ? "bg-card text-foreground font-bold shadow-2xs" : "text-muted-foreground hover:text-foreground")}
+              >
+                12
+              </button>
+              <button
+                onClick={() => setActiveProjectsLimit("ALL")}
+                className={cn("px-2 py-0.5 rounded-lg transition-colors", activeProjectsLimit === "ALL" ? "bg-card text-foreground font-bold shadow-2xs" : "text-muted-foreground hover:text-foreground")}
+              >
+                All ({topProjects.length})
+              </button>
+            </div>
+
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setManageOpen(true)}
-              className="h-8"
+              className="h-8 rounded-xl text-xs font-bold"
             >
               <Settings className="h-3.5 w-3.5 mr-1.5" />
-              Manage Dashboard Projects
+              Manage Dashboard
             </Button>
             <button
               onClick={() => onNavigate("projects")}
-              className="text-xs text-primary hover:underline flex items-center gap-1"
+              className="text-xs font-bold text-primary hover:underline flex items-center gap-1 ml-1"
             >
-              View all projects <ArrowRight className="h-3 w-3" />
+              View all projects <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
 
         {/* Visibility count line */}
-        <p className="text-xs text-muted-foreground mb-4">
+        <p className="text-xs font-medium text-muted-foreground mb-4">
           Showing{" "}
-          <span className="font-semibold text-foreground">{topProjects.length}</span> of{" "}
-          <span className="font-semibold text-foreground">{stats.topProjects?.length ?? 0}</span> top
+          <span className="font-bold text-foreground">{displayedActiveProjects.length}</span> of{" "}
+          <span className="font-bold text-foreground">{topProjects.length}</span> active
           projects on dashboard ·{" "}
-          <span className="font-semibold text-foreground">{visibleProjects.length}</span> of{" "}
-          <span className="font-semibold text-foreground">{totalProjectsAll}</span> projects visible
-          overall
+          <span className="font-bold text-foreground">{visibleProjects.length}</span> of{" "}
+          <span className="font-bold text-foreground">{totalProjectsAll}</span> total projects visible
         </p>
 
         {topProjects.length === 0 ? (
@@ -431,9 +464,9 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
         ) : (
           <>
             {/* Chart */}
-            <div className="mb-5">
+            <div className="mb-6">
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={projectChart} barGap={2}>
+                <BarChart data={projectChart} barGap={3}>
                   <XAxis
                     dataKey="name"
                     tick={{ fill: "#94a3b8", fontSize: 11 }}
@@ -448,7 +481,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
                     contentStyle={{
                       background: "#1a1f2e",
                       border: "1px solid #2d3548",
-                      borderRadius: 8,
+                      borderRadius: 12,
                       fontSize: 12,
                     }}
                     formatter={(value: number) =>
@@ -463,60 +496,88 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
               </ResponsiveContainer>
             </div>
 
-            {/* Project detail cards (numerical) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {topProjects.map((p, idx) => {
+            {/* Responsive Active Projects Grid (adapts cleanly to screen width: 1 cols up to 6 cols on 2xl) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-3.5">
+              {displayedActiveProjects.map((p, idx) => {
                 const util = p.utilization;
+                const inProc = p.inProcessFiles ?? 0;
+                const comp = p.completedFiles ?? Math.max(0, (p.fileCount || 0) - inProc);
+                const allocatedVal = p.voteAllocation || 0;
+
                 return (
                   <div
                     key={p.id}
                     onClick={() => onNavigate("projects")}
-                    className="bg-secondary/40 rounded-lg p-3 cursor-pointer hover:bg-secondary/70 transition-colors border border-transparent hover:border-primary/30"
+                    className="glass-card rounded-2xl p-3.5 cursor-pointer hover:bg-secondary/70 transition-all border border-border/80 hover:border-primary/40 shadow-2xs hover:shadow-xs flex flex-col justify-between"
                   >
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-mono text-muted-foreground">#{idx + 1}</span>
-                          <h4 className="font-medium text-sm text-foreground truncate">{p.name}</h4>
+                    <div>
+                      <div className="flex items-start justify-between gap-1.5 mb-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-mono font-bold text-muted-foreground">#{idx + 1}</span>
+                            <h4 className="font-bold text-xs text-foreground truncate" title={p.name}>{p.name}</h4>
+                          </div>
+                          <p className="text-[10px] font-medium text-muted-foreground mt-0.5 truncate">{p.voteNumber}</p>
                         </div>
-                        <p className="text-[10px] text-muted-foreground">{p.voteNumber} · {p.fileCount} files</p>
+                        <CustomBadge className={cn("border-0 shrink-0 text-[10px]", projectStatusColor(p.status))}>
+                          {p.status}
+                        </CustomBadge>
                       </div>
-                      <CustomBadge className={cn("border-0 shrink-0", projectStatusColor(p.status))}>
-                        {p.status}
-                      </CustomBadge>
-                    </div>
-                    {/* numerical breakdown */}
-                    <div className="grid grid-cols-3 gap-1.5 text-center">
-                      <div>
-                        <p className="text-[9px] uppercase text-muted-foreground">Allocation</p>
-                        <p className="text-xs font-semibold text-blue-400">
-                          {viewMode === "value" ? formatCurrency(p.voteAllocation) : "100%"}
+
+                      {/* Explicit Financial Breakdown including Allocated Values */}
+                      <div className="grid grid-cols-2 gap-1.5 mb-2 text-center bg-secondary/60 rounded-xl p-2 border border-border/40">
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Allocated</p>
+                          <p className="text-xs font-bold text-primary tabular-nums">
+                            {formatCurrency(allocatedVal)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Balance</p>
+                          <p className="text-xs font-bold text-emerald-500 tabular-nums">
+                            {formatCurrency(p.balance)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Committed</p>
+                          <p className="text-xs font-bold text-amber-500 tabular-nums">
+                            {formatCurrency(p.committed)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Actual Spent</p>
+                          <p className="text-xs font-bold text-red-500 tabular-nums">
+                            {formatCurrency(p.actualSpent)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Files In-Process + Actual Utilization Metrics */}
+                      <div className="space-y-1 mt-2">
+                        <div className="flex items-center justify-between text-[10px] font-medium text-muted-foreground">
+                          <span className="flex items-center gap-1 truncate font-semibold text-foreground">
+                            <FileText className="h-3 w-3 text-primary shrink-0" />
+                            {inProc} In-Process + {comp} Actual
+                          </span>
+                          <span className="font-bold text-foreground tabular-nums ml-1">{util.toFixed(0)}%</span>
+                        </div>
+
+                        {/* Utilization progress bar against allocated */}
+                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden flex shadow-2xs">
+                          <div
+                            className="bg-amber-500 h-full transition-all"
+                            style={{ width: `${Math.min(100, allocatedVal > 0 ? (p.committed / allocatedVal) * 100 : 0)}%` }}
+                            title={`Committed: ${formatCurrency(p.committed)}`}
+                          />
+                          <div
+                            className={cn("h-full transition-all", utilizationColor(util))}
+                            style={{ width: `${Math.min(100, allocatedVal > 0 ? (p.actualSpent / allocatedVal) * 100 : 0)}%` }}
+                            title={`Actual Spent: ${formatCurrency(p.actualSpent)}`}
+                          />
+                        </div>
+                        <p className="text-[9px] text-muted-foreground text-right font-medium">
+                          {p.fileCount || 0} Total Files
                         </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase text-muted-foreground">Committed</p>
-                        <p className="text-xs font-semibold text-amber-400">
-                          {viewMode === "value"
-                            ? formatCurrency(p.committed)
-                            : p.voteAllocation > 0
-                            ? `${Math.round((p.committed / p.voteAllocation) * 100)}%`
-                            : "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase text-muted-foreground">Spent</p>
-                        <p className="text-xs font-semibold text-red-400">
-                          {viewMode === "value" ? formatCurrency(p.actualSpent) : `${Math.round(util)}%`}
-                        </p>
-                      </div>
-                    </div>
-                    {/* utilization bar */}
-                    <div className="mt-2">
-                      <div className="h-1.5 w-full bg-background rounded-full overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full transition-all", utilizationColor(util))}
-                          style={{ width: `${Math.min(util, 100)}%` }}
-                        />
                       </div>
                     </div>
                   </div>
