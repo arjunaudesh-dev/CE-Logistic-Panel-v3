@@ -8,7 +8,7 @@ interface State<T> {
   refresh: () => void;
 }
 
-/** Lightweight fetch hook with loading/error states and manual refresh. */
+/** Lightweight fetch hook with cache-busting, loading/error states, and manual refresh. */
 export function useFetch<T>(url: string | null): State<T> {
   const [state, setState] = useState<{
     data: T | null;
@@ -29,7 +29,18 @@ export function useFetch<T>(url: string | null): State<T> {
       if (controller.signal.aborted) return;
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const res = await fetch(url, { signal: controller.signal });
+        const cacheBustUrl = url.includes("?")
+          ? `${url}&_t=${Date.now()}`
+          : `${url}?_t=${Date.now()}`;
+
+        const res = await fetch(cacheBustUrl, {
+          signal: controller.signal,
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+          },
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as T;
         if (controller.signal.aborted) return;
@@ -59,7 +70,11 @@ export async function apiRequest(
   try {
     const res = await fetch(url, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+      cache: "no-store",
       body: body ? JSON.stringify(body) : undefined,
     });
     const json = await res.json();
