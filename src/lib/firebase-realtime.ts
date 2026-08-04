@@ -5,11 +5,13 @@ import { db, rawDb } from "@/lib/db";
  * Pushes all new and updated records to the configured Firebase API Database.
  */
 
+const DEFAULT_FIREBASE_URL = "https://ce-web-system-default-rtdb.asia-southeast1.firebasedatabase.app";
+
 export async function syncRecordToFirebase(modelName: string, record: any) {
   const firebaseDbUrl = process.env.FIREBASE_DATABASE_URL || 
     (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID 
       ? `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.firebaseio.com` 
-      : null);
+      : DEFAULT_FIREBASE_URL);
 
   if (!firebaseDbUrl || !record || !record.id) {
     return { ok: false, reason: "Firebase Database URL or record ID missing" };

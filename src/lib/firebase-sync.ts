@@ -20,12 +20,14 @@ import { rawDb } from "@/lib/db";
 
 // 1. Initialize Firebase Client SDK
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCBT1EasmptOV9q3BYe7_142ibc2ShMeOQ",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "ce-web-system.firebaseapp.com",
+  databaseURL: process.env.FIREBASE_DATABASE_URL || "https://ce-web-system-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "ce-web-system",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "ce-web-system.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "963523128034",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:963523128034:web:3e88af557fdcc8ec154cbb",
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-11PRNZR2KY",
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
