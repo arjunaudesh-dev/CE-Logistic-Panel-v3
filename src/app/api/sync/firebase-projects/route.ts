@@ -1,45 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { syncRecordToFirebase, syncAllRecordsFromFirebase } from "@/lib/firebase-realtime";
 
-const FIREBASE_WORK_ORDERS_URL = "https://ncw-ps-operations-default-rtdb.asia-southeast1.firebasedatabase.app/work_orders.json";
-
-interface FirebaseWorkOrder {
-  id?: string;
-  type?: string;
-  name?: string;
-  description?: string;
-  budget_allocation?: number;
-  voteAllocation?: number;
-  committed?: number;
-  actualSpent?: number;
-  startDate?: string;
-  endDate?: string;
-  department?: string;
-  benefactor?: string;
-  reference?: string;
-  reference_no?: string;
-  projectType?: string;
-  financialMean?: string;
-  projectOfficer?: string;
-  incharge?: string;
-  status?: string;
-  zone_id?: string;
-  created_at?: number;
-}
-
-export async function POST(_req: NextRequest) {
-  return NextResponse.json({
-    success: false,
-    disabled: true,
-    message: "CMSys Project & Job sync is disabled for this system. Only Stock Inventory & Location are synchronized.",
-  });
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET() {
-  return NextResponse.json({
-    success: false,
-    disabled: true,
-    message: "CMSys Project & Job sync is disabled for this system. Only Stock Inventory & Location are synchronized.",
-  });
+  try {
+    const result = await syncAllRecordsFromFirebase();
+    return NextResponse.json(result);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
 }
 
+export async function POST(req: NextRequest) {
+  try {
+    const projects = await db.project.findMany();
+    let count = 0;
+    for (const proj of projects) {
+      await syncRecordToFirebase("Project", proj);
+      count++;
+    }
+    return NextResponse.json({
+      success: true,
+      message: `Pushed ${count} projects to Firebase API`,
+      count,
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}

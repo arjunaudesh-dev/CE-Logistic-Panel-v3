@@ -78,7 +78,10 @@ async function logChange(modelName: string, recordId: string, operation: string,
       }
     })
 
-    // Auto-trigger cloud sync if Firebase or remote sync environment is active
+    // Auto-trigger cloud sync to Firebase API for all new/updated records
+    if (data && (operation === 'CREATE' || operation === 'UPDATE')) {
+      import('@/lib/firebase-realtime').then(m => m.syncRecordToFirebase(modelName, data)).catch(() => {});
+    }
     if (process.env.VERCEL || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
       import('@/lib/firebase-sync').then(m => m.syncDatabaseToFirebase()).catch(() => {});
     }
