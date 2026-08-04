@@ -2,29 +2,26 @@ import path from 'path'
 import fs from 'fs'
 
 // Resolve the absolute path to the SQLite database file dynamically
-const candidate1 = path.join(process.cwd(), 'db', 'custom.db')
-const candidate2 = path.join(process.cwd(), 'prisma', 'custom.db')
-const candidate3 = path.join(process.cwd(), '.next', 'standalone', 'db', 'custom.db')
-const candidate4 = path.join(process.cwd(), '.next', 'standalone', 'prisma', 'custom.db')
+const candidate1 = path.join(process.cwd(), 'prisma', 'custom.db')
+const candidate2 = path.join(process.cwd(), 'db', 'custom.db')
+const candidate3 = path.join(process.cwd(), '.next', 'standalone', 'prisma', 'custom.db')
+const candidate4 = path.join(process.cwd(), '.next', 'standalone', 'db', 'custom.db')
 
 let customDbPath = [candidate1, candidate2, candidate3, candidate4].find(p => fs.existsSync(p)) || candidate1
 
 // On Vercel / serverless environments, the deployment directory (/var/task) is read-only.
-// Copy custom.db to /tmp/custom.db so SQLite can perform writes (WAL / journal files).
-if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+// Copy custom.db to /tmp/custom.db ONCE on cold boot if not present so SQLite can perform writes.
+if (process.env.VERCEL) {
   const tmpDbDir = path.join('/tmp', 'db')
   const tmpDbPath = path.join(tmpDbDir, 'custom.db')
   try {
     if (!fs.existsSync(tmpDbDir)) {
       fs.mkdirSync(tmpDbDir, { recursive: true })
     }
-    if (fs.existsSync(customDbPath)) {
-      // Copy database if not present in /tmp or if source is newer
-      const srcStat = fs.statSync(customDbPath)
-      const tmpStat = fs.existsSync(tmpDbPath) ? fs.statSync(tmpDbPath) : null
-      if (!tmpStat || srcStat.mtimeMs > tmpStat.mtimeMs) {
-        fs.copyFileSync(customDbPath, tmpDbPath)
-      }
+    if (fs.existsSync(customDbPath) && !fs.existsSync(tmpDbPath)) {
+      fs.copyFileSync(customDbPath, tmpDbPath)
+    }
+    if (fs.existsSync(tmpDbPath)) {
       customDbPath = tmpDbPath
     }
   } catch (err) {
