@@ -175,6 +175,52 @@ export const CE_APPOINTMENTS = [
   "SO(CE)",
 ] as const;
 
+// ─── NAVY RANKS & BRANCHES ───
+export interface RankOption {
+  label: string;
+  abbreviation: string;
+  type: "Officer" | "Sailor";
+}
+
+export const OFFICER_RANKS: RankOption[] = [
+  { label: "Vice Admiral", abbreviation: "VAdm", type: "Officer" },
+  { label: "Rear Admiral", abbreviation: "RAdm", type: "Officer" },
+  { label: "Commodore", abbreviation: "Cdre", type: "Officer" },
+  { label: "Captain", abbreviation: "Capt", type: "Officer" },
+  { label: "Commander", abbreviation: "Cdr", type: "Officer" },
+  { label: "Lieutenant Commander", abbreviation: "Lt Cdr", type: "Officer" },
+  { label: "Lieutenant", abbreviation: "Lt", type: "Officer" },
+  { label: "Sub Lieutenant", abbreviation: "Sub Lt", type: "Officer" },
+  { label: "Acting Sub Lieutenant", abbreviation: "Act Sub Lt", type: "Officer" },
+  { label: "Midshipman", abbreviation: "Mid", type: "Officer" },
+];
+
+export const SAILOR_RANKS: RankOption[] = [
+  { label: "Master Chief Petty Officer", abbreviation: "MCPO", type: "Sailor" },
+  { label: "Fleet Chief Petty Officer", abbreviation: "FCPO", type: "Sailor" },
+  { label: "Chief Petty Officer", abbreviation: "CPO", type: "Sailor" },
+  { label: "Petty Officer", abbreviation: "PO", type: "Sailor" },
+  { label: "Leading Seaman", abbreviation: "LS", type: "Sailor" },
+  { label: "Able Seaman", abbreviation: "AB", type: "Sailor" },
+  { label: "Ordinary Seaman", abbreviation: "OD", type: "Sailor" },
+  { label: "Recruit", abbreviation: "Rec", type: "Sailor" },
+];
+
+export const ALL_NAVY_RANKS: RankOption[] = [...OFFICER_RANKS, ...SAILOR_RANKS];
+
+export interface BranchOption {
+  label: string;
+  abbreviation: string;
+}
+
+export const BRANCH_OPTIONS: BranchOption[] = [
+  { label: "Civil Engineering - CCED", abbreviation: "(CE)" },
+  { label: "Logistics Officers", abbreviation: "(S)" },
+  { label: "Logistics Writer", abbreviation: "(Wtr)" },
+  { label: "Logistics Store Assistance", abbreviation: "(SA)" },
+  { label: "Provost", abbreviation: "(PRO)" },
+];
+
 export const STAKEHOLDER_DEPARTMENTS = ["CSLOG", "CE", "CCED", "Provost", "Supply", "Medical", "Others"] as const;
 
 export const STAKEHOLDER_ROLES = ["Officer", "Sailor"] as const;

@@ -7,20 +7,23 @@ export async function GET(req: NextRequest) {
     const token = req.cookies.get("ce_session")?.value || null;
     const session = getSession(token);
 
-    // Fallback default admin user if session not set yet in demo
-    const username = session ? session.username : "admin";
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const username = session.username;
     const user = await db.userProfile.findUnique({
       where: { username },
     });
 
     if (!user) {
       return NextResponse.json({
-        id: "demo-user",
-        username: "admin",
-        displayName: "Cdr. R. Perera",
-        email: "r.perera@navy.lk",
-        role: "Admin",
-        department: "Engineering",
+        id: session.id,
+        username: session.username,
+        displayName: session.displayName,
+        email: null,
+        role: session.role,
+        department: session.department,
       });
     }
 

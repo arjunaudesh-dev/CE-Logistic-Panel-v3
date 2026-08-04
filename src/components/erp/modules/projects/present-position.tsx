@@ -53,6 +53,16 @@ import {
 } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogFooter,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import {
   Plus,
   Search,
   History,
@@ -87,6 +97,10 @@ import {
   AlertCircle,
   Building2,
   Clock,
+  SlidersHorizontal,
+  ArrowLeft,
+  RotateCcw,
+  Columns,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -183,6 +197,43 @@ function checkIsOvertime(f: ProjectFile, flows?: ProcessFlow[] | null) {
   return daysInStep > expectedDays;
 }
 
+export type ColumnKey =
+  | "prNumber"
+  | "fileNumber"
+  | "fileGroup"
+  | "itemCode"
+  | "itemName"
+  | "qty"
+  | "unitPrice"
+  | "itemCost"
+  | "fileCost"
+  | "supplier"
+  | "position"
+  | "category"
+  | "actions";
+
+export interface ColumnDef {
+  key: ColumnKey;
+  label: string;
+  defaultWidth: number;
+}
+
+const DEFAULT_COLUMNS: ColumnDef[] = [
+  { key: "prNumber", label: "PR Number", defaultWidth: 120 },
+  { key: "fileNumber", label: "File Number", defaultWidth: 130 },
+  { key: "fileGroup", label: "File Group", defaultWidth: 110 },
+  { key: "itemCode", label: "Item Code", defaultWidth: 100 },
+  { key: "itemName", label: "Item Name", defaultWidth: 200 },
+  { key: "qty", label: "Qty", defaultWidth: 90 },
+  { key: "unitPrice", label: "Unit Price", defaultWidth: 110 },
+  { key: "itemCost", label: "Item Cost", defaultWidth: 100 },
+  { key: "fileCost", label: "Total Cost", defaultWidth: 120 },
+  { key: "supplier", label: "Supplier", defaultWidth: 130 },
+  { key: "position", label: "Position & Status", defaultWidth: 180 },
+  { key: "category", label: "Category", defaultWidth: 110 },
+  { key: "actions", label: "Actions", defaultWidth: 110 },
+];
+
 export function PresentPositionDialog({ project, open, onOpenChange, onChanged }: Props) {
   // Archive (NFA) view toggle — OFF (default) shows active files only,
   // ON shows archived files only (with muted/greyed styling and NFA badges).
@@ -204,8 +255,121 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   const [allocOpen, setAllocOpen] = useState(false);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [activeEstimateId, setActiveEstimateId] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<"createdAt" | "fileCost" | "prNumber">("createdAt");
+  const [sortKey, setSortKey] = useState<ColumnKey | "createdAt">("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Column customization state with persistence per user/profile
+  const PP_COLUMNS_STORAGE_KEY = "ce-pp-table-columns-v2";
+
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() => {
+    if (typeof window === "undefined") return DEFAULT_COLUMNS.map((c) => c.key);
+    try {
+      const stored = localStorage.getItem(`${PP_COLUMNS_STORAGE_KEY}-order`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as ColumnKey[];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_COLUMNS.map((c) => c.key);
+  });
+
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => {
+    if (typeof window === "undefined") return new Set(DEFAULT_COLUMNS.map((c) => c.key));
+    try {
+      const stored = localStorage.getItem(`${PP_COLUMNS_STORAGE_KEY}-visible`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as ColumnKey[];
+        if (Array.isArray(parsed) && parsed.length > 0) return new Set(parsed);
+      }
+    } catch {
+      // ignore
+    }
+    return new Set(DEFAULT_COLUMNS.map((c) => c.key));
+  });
+
+  const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(() => {
+    const map = {} as Record<ColumnKey, number>;
+    DEFAULT_COLUMNS.forEach((c) => (map[c.key] = c.defaultWidth));
+    if (typeof window === "undefined") return map;
+    try {
+      const stored = localStorage.getItem(`${PP_COLUMNS_STORAGE_KEY}-widths`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<ColumnKey, number>;
+        if (parsed && typeof parsed === "object") return { ...map, ...parsed };
+      }
+    } catch {
+      // ignore
+    }
+    return map;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(`${PP_COLUMNS_STORAGE_KEY}-order`, JSON.stringify(columnOrder));
+      localStorage.setItem(`${PP_COLUMNS_STORAGE_KEY}-visible`, JSON.stringify(Array.from(visibleColumns)));
+      localStorage.setItem(`${PP_COLUMNS_STORAGE_KEY}-widths`, JSON.stringify(columnWidths));
+    } catch {
+      // ignore
+    }
+  }, [columnOrder, visibleColumns, columnWidths]);
+
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+
+  const moveColumn = (key: ColumnKey, direction: "left" | "right") => {
+    const idx = columnOrder.indexOf(key);
+    if (idx < 0) return;
+    const newIdx = direction === "left" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= columnOrder.length) return;
+    const nextOrder = [...columnOrder];
+    const temp = nextOrder[idx];
+    nextOrder[idx] = nextOrder[newIdx];
+    nextOrder[newIdx] = temp;
+    setColumnOrder(nextOrder);
+  };
+
+  const toggleColumnVisibility = (key: ColumnKey) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const updateColumnWidth = (key: ColumnKey, width: number) => {
+    setColumnWidths((prev) => ({
+      ...prev,
+      [key]: Math.max(50, Math.min(500, width)),
+    }));
+  };
+
+  const resetColumnsToDefault = () => {
+    setColumnOrder(DEFAULT_COLUMNS.map((c) => c.key));
+    setVisibleColumns(new Set(DEFAULT_COLUMNS.map((c) => c.key)));
+    const map = {} as Record<ColumnKey, number>;
+    DEFAULT_COLUMNS.forEach((c) => (map[c.key] = c.defaultWidth));
+    setColumnWidths(map);
+    try {
+      localStorage.removeItem(`${PP_COLUMNS_STORAGE_KEY}-order`);
+      localStorage.removeItem(`${PP_COLUMNS_STORAGE_KEY}-visible`);
+      localStorage.removeItem(`${PP_COLUMNS_STORAGE_KEY}-widths`);
+    } catch {
+      // ignore
+    }
+  };
+
+  const activeColumns = useMemo(() => {
+    return columnOrder
+      .filter((k) => visibleColumns.has(k))
+      .map((k) => DEFAULT_COLUMNS.find((c) => c.key === k)!)
+      .filter(Boolean);
+  }, [columnOrder, visibleColumns]);
   // Group-by-File (default ON) — merges items sharing the same PR/fileGroupKey into a single row
   const [groupByFile, setGroupByFile] = useState(true);
   // Tracks which group keys are expanded (showing their individual items)
@@ -333,13 +497,23 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       let cmp = 0;
       if (sortKey === "fileCost") cmp = a.fileCost - b.fileCost;
       else if (sortKey === "prNumber") cmp = a.prNumber.localeCompare(b.prNumber);
+      else if (sortKey === "fileNumber") cmp = (a.fileNumber || "").localeCompare(b.fileNumber || "");
+      else if (sortKey === "fileGroup") cmp = (a.fileGroupKey || "").localeCompare(b.fileGroupKey || "");
+      else if (sortKey === "itemCode") cmp = a.itemCode.localeCompare(b.itemCode);
+      else if (sortKey === "itemName") cmp = a.itemName.localeCompare(b.itemName);
+      else if (sortKey === "qty") cmp = a.qty - b.qty;
+      else if (sortKey === "unitPrice") cmp = a.unitPrice - b.unitPrice;
+      else if (sortKey === "itemCost") cmp = (a.unitPrice || 0) * (a.qty || 0) - (b.unitPrice || 0) * (b.qty || 0);
+      else if (sortKey === "supplier") cmp = (a.supplier || "").localeCompare(b.supplier || "");
+      else if (sortKey === "position") cmp = a.presentPosition.localeCompare(b.presentPosition);
+      else if (sortKey === "category") cmp = a.fileCategory.localeCompare(b.fileCategory);
       else cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
   }, [files, search, positionFilter, fileNumberFilter, sortKey, sortDir, processFlows]);
 
-  const toggleSort = (key: typeof sortKey) => {
+  const toggleSort = (key: ColumnKey | "createdAt") => {
     if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
     else {
       setSortKey(key);
@@ -489,6 +663,62 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
     onChanged();
   };
 
+  // Bulk Archive handler for active view
+  const handleBulkArchive = async () => {
+    const selected = filteredFiles.filter((f) => selectedIds.has(f.id));
+    if (selected.length === 0) return;
+    const results = await Promise.all(
+      selected.map((f) =>
+        apiRequest(`/api/projects/${project.id}/files/${f.id}`, "PUT", {
+          isArchived: true,
+          archivedReason: "NFA — Bulk Archived",
+        })
+      )
+    );
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length === 0) {
+      toast({
+        title: `Archived ${selected.length} file(s) to NFA`,
+        description: "Selected files moved to NFA archive",
+      });
+    } else {
+      toast({
+        title: `${failed.length} of ${selected.length} archive action(s) failed`,
+        variant: "destructive",
+      });
+    }
+    clearSelection();
+    refresh();
+    onChanged();
+  };
+
+  // Bulk Permanent Delete handler for archive view
+  const handleBulkPermanentDelete = async () => {
+    const selected = filteredFiles.filter((f) => selectedIds.has(f.id));
+    if (selected.length === 0) return;
+    const results = await Promise.all(
+      selected.map((f) =>
+        apiRequest(`/api/projects/${project.id}/files/${f.id}?force=true`, "DELETE")
+      )
+    );
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length === 0) {
+      toast({
+        title: `Permanently deleted ${selected.length} archived file(s)`,
+        description: "The files were permanently removed from database",
+      });
+    } else {
+      toast({
+        title: `${failed.length} of ${selected.length} delete action(s) failed`,
+        variant: "destructive",
+      });
+    }
+    setBulkDeleteConfirmOpen(false);
+    clearSelection();
+    refresh();
+    onChanged();
+  };
+
   const handleDelete = async (file: ProjectFile) => {
     // Open the small archive (NFA) dialog asking for an optional reason.
     // The actual DELETE request (which archives by default) is fired from the
@@ -542,13 +772,387 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
   // pick the first processed estimate (or any) for the "PR from Estimate" tab
   const estimateForTab = estimates?.find((e) => e.status === "Processed") || estimates?.[0] || null;
 
+  const cellStyle = (colKey: ColumnKey) => ({
+    width: columnWidths[colKey],
+    minWidth: columnWidths[colKey],
+    maxWidth: columnWidths[colKey],
+  });
+
+  const renderCellForKey = (colKey: ColumnKey, f: ProjectFile) => {
+    const isArchived = !!f.isArchived;
+    const hasFileNumber = !!(f.fileNumber && f.fileNumber.trim());
+    const itemCost = (f.unitPrice || 0) * (f.qty || 0);
+
+    switch (colKey) {
+      case "prNumber":
+        return (
+          <TableCell key="prNumber" style={cellStyle("prNumber")} className="font-mono text-xs text-foreground truncate">
+            <div className="flex items-center gap-1.5 truncate">
+              {isArchived && <Archive className="h-3 w-3 text-muted-foreground shrink-0" />}
+              {hasFileNumber ? <span className="text-muted-foreground">—</span> : f.prNumber}
+            </div>
+          </TableCell>
+        );
+      case "fileNumber":
+        return (
+          <TableCell key="fileNumber" style={cellStyle("fileNumber")} className="truncate">
+            {hasFileNumber ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400 truncate">
+                <Hash className="h-3 w-3 shrink-0" />
+                {f.fileNumber}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </TableCell>
+        );
+      case "fileGroup":
+        return (
+          <TableCell key="fileGroup" style={cellStyle("fileGroup")} className="truncate">
+            {f.fileGroupKey && f.fileGroupKey.trim() ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 truncate">
+                <FolderKey className="h-3 w-3 shrink-0" />
+                {f.fileGroupKey}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </TableCell>
+        );
+      case "itemCode":
+        return (
+          <TableCell key="itemCode" style={cellStyle("itemCode")} className="font-mono text-xs truncate">
+            {f.itemCode}
+          </TableCell>
+        );
+      case "itemName":
+        return (
+          <TableCell key="itemName" style={cellStyle("itemName")} className="text-foreground truncate" title={f.itemName}>
+            {f.itemName}
+          </TableCell>
+        );
+      case "qty":
+        return (
+          <TableCell key="qty" style={cellStyle("qty")} className="text-right truncate">
+            {f.qty} {f.unit}
+          </TableCell>
+        );
+      case "unitPrice":
+        return (
+          <TableCell key="unitPrice" style={cellStyle("unitPrice")} className="text-right truncate">
+            {formatCurrency(f.unitPrice)}
+          </TableCell>
+        );
+      case "itemCost":
+        return (
+          <TableCell key="itemCost" style={cellStyle("itemCost")} className="text-right text-foreground/90 truncate">
+            {formatCurrency(itemCost)}
+          </TableCell>
+        );
+      case "fileCost":
+        return (
+          <TableCell key="fileCost" style={cellStyle("fileCost")} className="text-right font-medium text-foreground truncate">
+            {formatCurrency(f.fileCost)}
+          </TableCell>
+        );
+      case "supplier":
+        return (
+          <TableCell key="supplier" style={cellStyle("supplier")} className="text-xs truncate" title={f.supplier || ""}>
+            {f.supplier || "—"}
+          </TableCell>
+        );
+      case "position":
+        return (
+          <TableCell key="position" style={cellStyle("position")}>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <ProgressBadge progress={f.progressPercentage || 0} />
+                <PositionBadge position={f.presentPosition} />
+              </div>
+              {f.responsiblePerson && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                  <User className="h-2.5 w-2.5 shrink-0" />
+                  {f.responsiblePerson}
+                </span>
+              )}
+              {isArchived && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                  <Archive className="h-2.5 w-2.5 shrink-0" />
+                  {f.archivedReason || "NFA — Archived"}
+                  {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
+                </span>
+              )}
+            </div>
+          </TableCell>
+        );
+      case "category":
+        return (
+          <TableCell key="category" style={cellStyle("category")}>
+            <CategoryBadge category={f.fileCategory} />
+          </TableCell>
+        );
+      case "actions":
+        return (
+          <TableCell key="actions" style={cellStyle("actions")} className="text-right">
+            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+              <QuickUpdatePopover
+                files={[f]}
+                projectId={project.id}
+                onSaved={() => { refresh(); onChanged(); }}
+              />
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              {isArchived ? (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive">
+                  <ArchiveRestore className="h-3.5 w-3.5" />
+                </Button>
+              ) : (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)">
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </TableCell>
+        );
+    }
+  };
+
+  const renderGroupCellForKey = (colKey: ColumnKey, g: FileGroup) => {
+    const groupFileGroupKey = g.items[0]?.fileGroupKey || null;
+    const groupArchived = g.items.every((it) => it.isArchived);
+    const expanded = expandedGroups.has(g.key);
+
+    switch (colKey) {
+      case "prNumber":
+        return (
+          <TableCell key="prNumber" style={cellStyle("prNumber")} className="font-mono text-xs text-foreground truncate">
+            <div className="flex items-center gap-2 truncate">
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleGroup(g.key); }}
+                className="text-muted-foreground hover:text-foreground shrink-0"
+                aria-label={expanded ? "Collapse group" : "Expand group"}
+              >
+                {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+              <Files className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="truncate">{g.key}</span>
+              <CustomBadge className="border-0 bg-primary/15 text-primary shrink-0">{g.items.length} items</CustomBadge>
+              {groupArchived && (
+                <CustomBadge className="border-0 bg-amber-500/15 text-amber-400 shrink-0">
+                  <Archive className="h-2.5 w-2.5 mr-1 inline" />NFA
+                </CustomBadge>
+              )}
+            </div>
+          </TableCell>
+        );
+      case "fileNumber":
+        return (
+          <TableCell key="fileNumber" style={cellStyle("fileNumber")} className="truncate">
+            {g.commonFileNumber ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400 truncate">
+                <Hash className="h-3 w-3 shrink-0" />
+                {g.commonFileNumber}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </TableCell>
+        );
+      case "fileGroup":
+        return (
+          <TableCell key="fileGroup" style={cellStyle("fileGroup")} className="truncate">
+            {groupFileGroupKey ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 truncate">
+                <FolderKey className="h-3 w-3 shrink-0" />
+                {groupFileGroupKey}
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-xs italic">multiple</span>
+            )}
+          </TableCell>
+        );
+      case "itemCode":
+        return <TableCell key="itemCode" style={cellStyle("itemCode")} className="text-xs text-muted-foreground italic truncate">multiple</TableCell>;
+      case "itemName":
+        return (
+          <TableCell key="itemName" style={cellStyle("itemName")} className="text-foreground text-xs truncate" title={g.items[0]!.itemName}>
+            {g.items[0]!.itemName}
+            {g.items.length > 1 && <span className="text-muted-foreground"> +{g.items.length - 1} more</span>}
+          </TableCell>
+        );
+      case "qty":
+        return <TableCell key="qty" style={cellStyle("qty")} className="text-right text-xs truncate">{g.totalQty} {g.commonUnit || ""}</TableCell>;
+      case "unitPrice":
+        return <TableCell key="unitPrice" style={cellStyle("unitPrice")} className="text-right text-xs text-muted-foreground italic truncate">varies</TableCell>;
+      case "itemCost":
+        return <TableCell key="itemCost" style={cellStyle("itemCost")} className="text-right text-xs text-muted-foreground italic truncate">varies</TableCell>;
+      case "fileCost":
+        return <TableCell key="fileCost" style={cellStyle("fileCost")} className="text-right font-bold text-foreground truncate">{formatCurrency(g.totalCost)}</TableCell>;
+      case "supplier":
+        return (
+          <TableCell key="supplier" style={cellStyle("supplier")} className="text-xs truncate">
+            {g.commonSupplier ? g.commonSupplier : <span className="text-muted-foreground italic">multiple</span>}
+          </TableCell>
+        );
+      case "position":
+        return (
+          <TableCell key="position" style={cellStyle("position")}>
+            <div className="flex flex-col gap-0.5">
+              {g.commonPosition ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <ProgressBadge progress={g.items[0]?.progressPercentage || 0} />
+                  <PositionBadge position={g.commonPosition} />
+                </div>
+              ) : (
+                <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">mixed</CustomBadge>
+              )}
+              {g.commonResponsiblePerson && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                  <User className="h-2.5 w-2.5 shrink-0" />
+                  {g.commonResponsiblePerson}
+                </span>
+              )}
+            </div>
+          </TableCell>
+        );
+      case "category":
+        return (
+          <TableCell key="category" style={cellStyle("category")}>
+            {g.commonCategory ? <CategoryBadge category={g.commonCategory} /> : <span className="text-xs text-muted-foreground italic">multiple</span>}
+          </TableCell>
+        );
+      case "actions":
+        return (
+          <TableCell key="actions" style={cellStyle("actions")} className="text-right">
+            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+              <QuickUpdatePopover
+                files={g.items}
+                projectId={project.id}
+                onSaved={() => { refresh(); onChanged(); }}
+                isGroup
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => toggleGroup(g.key)}
+                title={expanded ? "Collapse items" : "Expand items"}
+              >
+                {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+          </TableCell>
+        );
+    }
+  };
+
+  const renderChildCellForKey = (colKey: ColumnKey, f: ProjectFile) => {
+    const childCost = (f.unitPrice || 0) * (f.qty || 0);
+    const childArchived = !!f.isArchived;
+
+    switch (colKey) {
+      case "prNumber":
+        return (
+          <TableCell key="prNumber" style={cellStyle("prNumber")} className="pl-8 font-mono text-xs text-muted-foreground truncate">
+            <span className="inline-flex items-center gap-1.5 truncate">
+              <ArrowRight className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+              {f.fileNumber && f.fileNumber.trim() ? "—" : f.prNumber}
+            </span>
+          </TableCell>
+        );
+      case "fileNumber":
+        return (
+          <TableCell key="fileNumber" style={cellStyle("fileNumber")} className="truncate">
+            {f.fileNumber && f.fileNumber.trim() ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400 truncate">
+                <Hash className="h-3 w-3 shrink-0" />
+                {f.fileNumber}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </TableCell>
+        );
+      case "fileGroup":
+        return (
+          <TableCell key="fileGroup" style={cellStyle("fileGroup")} className="truncate">
+            {f.fileGroupKey && f.fileGroupKey.trim() ? (
+              <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 truncate">
+                <FolderKey className="h-3 w-3 shrink-0" />
+                {f.fileGroupKey}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </TableCell>
+        );
+      case "itemCode":
+        return <TableCell key="itemCode" style={cellStyle("itemCode")} className="font-mono text-xs truncate">{f.itemCode}</TableCell>;
+      case "itemName":
+        return <TableCell key="itemName" style={cellStyle("itemName")} className="text-foreground text-xs truncate" title={f.itemName}>{f.itemName}</TableCell>;
+      case "qty":
+        return <TableCell key="qty" style={cellStyle("qty")} className="text-right text-xs truncate">{f.qty} {f.unit}</TableCell>;
+      case "unitPrice":
+        return <TableCell key="unitPrice" style={cellStyle("unitPrice")} className="text-right text-xs truncate">{formatCurrency(f.unitPrice)}</TableCell>;
+      case "itemCost":
+        return <TableCell key="itemCost" style={cellStyle("itemCost")} className="text-right text-xs truncate">{formatCurrency(childCost)}</TableCell>;
+      case "fileCost":
+        return <TableCell key="fileCost" style={cellStyle("fileCost")} className="text-right text-xs font-medium truncate">{formatCurrency(f.fileCost)}</TableCell>;
+      case "supplier":
+        return <TableCell key="supplier" style={cellStyle("supplier")} className="text-xs truncate" title={f.supplier || ""}>{f.supplier || "—"}</TableCell>;
+      case "position":
+        return (
+          <TableCell key="position" style={cellStyle("position")}>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <ProgressBadge progress={f.progressPercentage || 0} />
+                <PositionBadge position={f.presentPosition} />
+              </div>
+              {f.responsiblePerson && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                  <User className="h-2.5 w-2.5 shrink-0" />
+                  {f.responsiblePerson}
+                </span>
+              )}
+              {childArchived && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                  <Archive className="h-2.5 w-2.5 shrink-0" />
+                  {f.archivedReason || "NFA — Archived"}
+                  {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
+                </span>
+              )}
+            </div>
+          </TableCell>
+        );
+      case "category":
+        return <TableCell key="category" style={cellStyle("category")}><CategoryBadge category={f.fileCategory} /></TableCell>;
+      case "actions":
+        return (
+          <TableCell key="actions" style={cellStyle("actions")} className="text-right">
+            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+              <QuickUpdatePopover
+                files={[f]}
+                projectId={project.id}
+                onSaved={() => { refresh(); onChanged(); }}
+              />
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
+              {childArchived ? (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive"><ArchiveRestore className="h-3.5 w-3.5" /></Button>
+              ) : (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)"><Archive className="h-3.5 w-3.5" /></Button>
+              )}
+            </div>
+          </TableCell>
+        );
+    }
+  };
+
   // Single file row renderer — shared between the ungrouped view and the
   // "singles" list of the grouped view. Lives inside the component so it can
   // access setLogFile / setUpdateFile / handleDelete / project.id / refresh.
   const renderSingleFileRow = (f: ProjectFile) => {
-    const hasFileNumber = !!(f.fileNumber && f.fileNumber.trim());
     const isSelected = selectedIds.has(f.id);
-    const itemCost = (f.unitPrice || 0) * (f.qty || 0);
     const isArchived = !!f.isArchived;
     return (
       <TableRow
@@ -567,76 +1171,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
             aria-label={`Select ${f.prNumber}`}
           />
         </TableCell>
-        <TableCell className="font-mono text-xs text-foreground">
-          <div className="flex items-center gap-1.5">
-            {isArchived && <Archive className="h-3 w-3 text-muted-foreground shrink-0" />}
-            {hasFileNumber ? <span className="text-muted-foreground">—</span> : f.prNumber}
-          </div>
-        </TableCell>
-        <TableCell>
-          {hasFileNumber ? (
-            <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
-              <Hash className="h-3 w-3" />
-              {f.fileNumber}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </TableCell>
-        <TableCell>
-          {f.fileGroupKey && f.fileGroupKey.trim() ? (
-            <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-              <FolderKey className="h-3 w-3" />
-              {f.fileGroupKey}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </TableCell>
-        <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
-        <TableCell className="text-foreground">{f.itemName}</TableCell>
-        <TableCell className="text-right">{f.qty} {f.unit}</TableCell>
-        <TableCell className="text-right">{formatCurrency(f.unitPrice)}</TableCell>
-        <TableCell className="text-right text-foreground/90">{formatCurrency(itemCost)}</TableCell>
-        <TableCell className="text-right font-medium text-foreground">{formatCurrency(f.fileCost)}</TableCell>
-        <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
-        <TableCell>
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <ProgressBadge progress={f.progressPercentage || 0} />
-              <PositionBadge position={f.presentPosition} />
-            </div>
-            {f.responsiblePerson && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                <User className="h-2.5 w-2.5" />
-                {f.responsiblePerson}
-              </span>
-            )}
-            {isArchived && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Archive className="h-2.5 w-2.5" />
-                {f.archivedReason || "NFA — Archived"}
-                {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
-              </span>
-            )}
-          </div>
-        </TableCell>
-        <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
-        <TableCell className="text-right">
-          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-            <QuickUpdatePopover
-              files={[f]}
-              projectId={project.id}
-              onSaved={() => { refresh(); onChanged(); }}
-            />
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
-            {isArchived ? (
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive"><ArchiveRestore className="h-3.5 w-3.5" /></Button>
-            ) : (
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)"><Archive className="h-3.5 w-3.5" /></Button>
-            )}
-          </div>
-        </TableCell>
+        {activeColumns.map((col) => renderCellForKey(col.key, f))}
       </TableRow>
     );
   };
@@ -645,10 +1180,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      {/* Header — project metadata is LOCKED (read-only). Editing project name,
-          vote number, funding source, or abbreviation must be done from the
-          Projects list / Add Project wizard — NOT from this window. Only the
-          files within the project can be edited here. */}
+      {/* Header */}
       <div className="border-b border-border bg-card shrink-0">
         <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -723,7 +1255,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
       {/* Body */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="p-4 sm:p-6 space-y-4">
-          {/* Position summary (always visible) */}
+          {/* Position summary */}
           <div>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
               Present Position Summary
@@ -787,7 +1319,80 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     onClick={() => setFileNumberFilter("initiated")}
                   />
                 </div>
-                {/* Archived (NFA) toggle — ON shows archived files only (with muted styling + NFA badge) */}
+                {/* Column Customization Popover */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1.5" title="Customize visible columns, width, and order">
+                      <Columns className="h-4 w-4" />
+                      Columns ({visibleColumns.size}/{columnOrder.length})
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-3 space-y-3" align="end">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> Customize Columns
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={resetColumnsToDefault} className="h-6 text-[10px] gap-1 px-1.5">
+                        <RotateCcw className="h-3 w-3" /> Reset
+                      </Button>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                      {columnOrder.map((colKey, idx) => {
+                        const colDef = DEFAULT_COLUMNS.find((c) => c.key === colKey)!;
+                        const isVisible = visibleColumns.has(colKey);
+                        return (
+                          <div key={colKey} className="flex items-center justify-between gap-2 p-1.5 rounded-md hover:bg-muted/50 text-xs">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Checkbox
+                                checked={isVisible}
+                                onCheckedChange={() => toggleColumnVisibility(colKey)}
+                                id={`col-${colKey}`}
+                              />
+                              <label htmlFor={`col-${colKey}`} className="truncate cursor-pointer font-medium select-none">
+                                {colDef.label}
+                              </label>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <input
+                                type="number"
+                                value={columnWidths[colKey]}
+                                onChange={(e) => updateColumnWidth(colKey, Number(e.target.value))}
+                                className="w-12 h-6 px-1 text-[10px] rounded border border-border bg-background text-right font-mono"
+                                title="Width (px)"
+                              />
+                              <span className="text-[10px] text-muted-foreground">px</span>
+                              <div className="flex items-center gap-0.5 ml-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  disabled={idx === 0}
+                                  onClick={() => moveColumn(colKey, "left")}
+                                  title="Move column left"
+                                >
+                                  <ArrowLeft className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  disabled={idx === columnOrder.length - 1}
+                                  onClick={() => moveColumn(colKey, "right")}
+                                  title="Move column right"
+                                >
+                                  <ArrowRight className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Archived (NFA) toggle */}
                 <Button
                   size="sm"
                   variant={showArchived ? "default" : "outline"}
@@ -825,12 +1430,12 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                 )}
               </div>
 
-              {/* Archived view banner — explains what the user is looking at */}
+              {/* Archived view banner */}
               {showArchived && (
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-4 py-2.5 flex items-center gap-2 text-sm">
                   <Archive className="h-4 w-4 text-amber-400" />
                   <span className="text-foreground">
-                    Showing <span className="font-medium">archived (NFA)</span> files only. These are kept for historical reference and can be restored to active status.
+                    Showing <span className="font-medium">archived (NFA)</span> files only. These are kept for historical reference and can be restored to active status or permanently removed.
                   </span>
                 </div>
               )}
@@ -851,14 +1456,37 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                     <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-xs gap-1.5">
                       <X className="h-3.5 w-3.5" /> Clear
                     </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => setBulkInitiateOpen(true)}
-                      className="gap-1.5"
-                      title="Move all selected files to a new present position"
-                    >
-                      <CheckSquare className="h-4 w-4" /> Initiate Selected
-                    </Button>
+                    {!showArchived ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleBulkArchive}
+                          className="h-8 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                          title="Archive selected files (NFA)"
+                        >
+                          <Archive className="h-3.5 w-3.5" /> Archive Selected (NFA)
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => setBulkInitiateOpen(true)}
+                          className="h-8 text-xs gap-1.5"
+                          title="Move all selected files to a new present position"
+                        >
+                          <CheckSquare className="h-3.5 w-3.5" /> Initiate Selected
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setBulkDeleteConfirmOpen(true)}
+                        className="h-8 text-xs gap-1.5"
+                        title="Permanently remove selected files from database"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Delete Selected Permanently
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -866,7 +1494,7 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
               {/* File register table */}
               <div className="border border-border rounded-lg overflow-hidden">
                 <div className="overflow-x-auto">
-                  <Table>
+                  <Table className="table-fixed w-full">
                     <TableHeader>
                       <TableRow className="hover:bg-transparent border-border">
                         <TableHead className="text-muted-foreground w-10">
@@ -882,31 +1510,42 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                             aria-label="Select all visible files"
                           />
                         </TableHead>
-                        <SortTh label="PR Number" onClick={() => toggleSort("prNumber")} active={sortKey === "prNumber"} dir={sortDir} />
-                        <TableHead className="text-muted-foreground">File Number</TableHead>
-                        <TableHead className="text-muted-foreground">File Group</TableHead>
-                        <TableHead className="text-muted-foreground">Item Code</TableHead>
-                        <TableHead className="text-muted-foreground">Item Name</TableHead>
-                        <TableHead className="text-muted-foreground text-right">Qty</TableHead>
-                        <TableHead className="text-muted-foreground text-right">Unit Price</TableHead>
-                        <TableHead className="text-muted-foreground text-right">Cost</TableHead>
-                        <SortTh label="File Cost" onClick={() => toggleSort("fileCost")} active={sortKey === "fileCost"} dir={sortDir} align="right" />
-                        <TableHead className="text-muted-foreground">Supplier</TableHead>
-                        <TableHead className="text-muted-foreground">Position</TableHead>
-                        <TableHead className="text-muted-foreground">Category</TableHead>
-                        <TableHead className="text-muted-foreground text-right">Actions</TableHead>
+                        {activeColumns.map((col) => (
+                          <TableHead
+                            key={col.key}
+                            style={{
+                              width: columnWidths[col.key],
+                              minWidth: columnWidths[col.key],
+                              maxWidth: columnWidths[col.key],
+                            }}
+                            className={cn(
+                              "text-muted-foreground truncate",
+                              ["qty", "unitPrice", "itemCost", "fileCost", "actions"].includes(col.key) && "text-right"
+                            )}
+                          >
+                            {col.key === "actions" ? (
+                              "Actions"
+                            ) : (
+                              <SortTh
+                                label={col.label}
+                                onClick={() => toggleSort(col.key)}
+                                active={sortKey === col.key}
+                                dir={sortDir}
+                              />
+                            )}
+                          </TableHead>
+                        ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loading ? (
-                        <TableRow><TableCell colSpan={14} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
+                        <TableRow><TableCell colSpan={activeColumns.length + 1} className="text-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></TableCell></TableRow>
                       ) : filteredFiles.length === 0 ? (
-                        <TableRow><TableCell colSpan={14} className="text-center py-8 text-muted-foreground">{showArchived ? "No archived (NFA) files found." : "No files found. Click \"Add File\" to create one."}</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={activeColumns.length + 1} className="text-center py-8 text-muted-foreground">{showArchived ? "No archived (NFA) files found." : "No files found. Click \"Add File\" to create one."}</TableCell></TableRow>
                       ) : groupByFile && groupedView.groups.length > 0 ? (
                         <>
                           {groupedView.groups.map((g) => {
                             const expanded = expandedGroups.has(g.key);
-                            const groupFileGroupKey = g.items[0]?.fileGroupKey || null;
                             const groupArchived = g.items.every((it) => it.isArchived);
                             return (
                               <Fragment key={g.key}>
@@ -932,207 +1571,37 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
                                       );
                                     })()}
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs text-foreground">
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); toggleGroup(g.key); }}
-                                        className="text-muted-foreground hover:text-foreground shrink-0"
-                                        aria-label={expanded ? "Collapse group" : "Expand group"}
-                                      >
-                                        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                                      </button>
-                                      <Files className="h-3.5 w-3.5 text-primary shrink-0" />
-                                      <span className="truncate">{g.key}</span>
-                                      <CustomBadge className="border-0 bg-primary/15 text-primary">{g.items.length} items</CustomBadge>
-                                      {groupArchived && (
-                                        <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">
-                                          <Archive className="h-2.5 w-2.5 mr-1 inline" />NFA
-                                        </CustomBadge>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    {g.commonFileNumber ? (
-                                      <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
-                                        <Hash className="h-3 w-3" />
-                                        {g.commonFileNumber}
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted-foreground">—</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {groupFileGroupKey ? (
-                                      <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-                                        <FolderKey className="h-3 w-3" />
-                                        {groupFileGroupKey}
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted-foreground text-xs italic">multiple</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-xs text-muted-foreground italic">multiple</TableCell>
-                                  <TableCell className="text-foreground text-xs">
-                                    {g.items[0]!.itemName}
-                                    {g.items.length > 1 && (
-                                      <span className="text-muted-foreground"> +{g.items.length - 1} more</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-right text-xs">{g.totalQty} {g.commonUnit || ""}</TableCell>
-                                  <TableCell className="text-right text-xs text-muted-foreground italic">varies</TableCell>
-                                  <TableCell className="text-right text-xs text-muted-foreground italic">varies</TableCell>
-                                  <TableCell className="text-right font-bold text-foreground">{formatCurrency(g.totalCost)}</TableCell>
-                                  <TableCell className="text-xs">
-                                    {g.commonSupplier ? (
-                                      g.commonSupplier
-                                    ) : (
-                                      <span className="text-muted-foreground italic">multiple</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex flex-col gap-0.5">
-                                      {g.commonPosition ? (
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <ProgressBadge progress={g.items[0]?.progressPercentage || 0} />
-                                          <PositionBadge position={g.commonPosition} />
-                                        </div>
-                                      ) : (
-                                        <CustomBadge className="border-0 bg-amber-500/15 text-amber-400">mixed</CustomBadge>
-                                      )}
-                                      {g.commonResponsiblePerson && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                                          <User className="h-2.5 w-2.5" />
-                                          {g.commonResponsiblePerson}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    {g.commonCategory ? (
-                                      <CategoryBadge category={g.commonCategory} />
-                                    ) : (
-                                      <span className="text-xs text-muted-foreground italic">multiple</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                                      <QuickUpdatePopover
-                                        files={g.items}
-                                        projectId={project.id}
-                                        onSaved={() => { refresh(); onChanged(); }}
-                                        isGroup
-                                      />
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7"
-                                        onClick={() => toggleGroup(g.key)}
-                                        title={expanded ? "Collapse items" : "Expand items"}
-                                      >
-                                        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                      </Button>
-                                    </div>
-                                  </TableCell>
+                                  {activeColumns.map((col) => renderGroupCellForKey(col.key, g))}
                                 </TableRow>
                                 {/* Expanded child rows */}
                                 {expanded && g.items.map((f) => {
                                   const childSelected = selectedIds.has(f.id);
-                                  const childCost = (f.unitPrice || 0) * (f.qty || 0);
                                   const childArchived = !!f.isArchived;
                                   return (
-                                  <TableRow
-                                    key={f.id}
-                                    className={cn(
-                                      "border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30",
-                                      childSelected && "bg-primary/[0.06]",
-                                      childArchived && "opacity-60 bg-muted/20"
-                                    )}
-                                    onClick={() => setLogFile(f)}
-                                  >
-                                    <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
-                                      <Checkbox
-                                        checked={childSelected}
-                                        onCheckedChange={() => toggleSelect(f.id)}
-                                        aria-label={`Select ${f.prNumber}`}
-                                      />
-                                    </TableCell>
-                                    <TableCell className="pl-8 font-mono text-xs text-muted-foreground">
-                                      <span className="inline-flex items-center gap-1.5">
-                                        <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
-                                        {f.fileNumber && f.fileNumber.trim() ? "—" : f.prNumber}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell>
-                                      {f.fileNumber && f.fileNumber.trim() ? (
-                                        <span className="inline-flex items-center gap-1 font-mono text-xs text-emerald-400">
-                                          <Hash className="h-3 w-3" />
-                                          {f.fileNumber}
-                                        </span>
-                                      ) : (
-                                        <span className="text-muted-foreground">—</span>
+                                    <TableRow
+                                      key={f.id}
+                                      className={cn(
+                                        "border-border bg-secondary/10 cursor-pointer hover:bg-secondary/30",
+                                        childSelected && "bg-primary/[0.06]",
+                                        childArchived && "opacity-60 bg-muted/20"
                                       )}
-                                    </TableCell>
-                                    <TableCell>
-                                      {f.fileGroupKey && f.fileGroupKey.trim() ? (
-                                        <span className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-                                          <FolderKey className="h-3 w-3" />
-                                          {f.fileGroupKey}
-                                        </span>
-                                      ) : (
-                                        <span className="text-muted-foreground">—</span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="font-mono text-xs">{f.itemCode}</TableCell>
-                                    <TableCell className="text-foreground text-xs">{f.itemName}</TableCell>
-                                    <TableCell className="text-right text-xs">{f.qty} {f.unit}</TableCell>
-                                    <TableCell className="text-right text-xs">{formatCurrency(f.unitPrice)}</TableCell>
-                                    <TableCell className="text-right text-xs">{formatCurrency(childCost)}</TableCell>
-                                    <TableCell className="text-right text-xs font-medium">{formatCurrency(f.fileCost)}</TableCell>
-                                    <TableCell className="text-xs">{f.supplier || "—"}</TableCell>
-                                    <TableCell>
-                                      <div className="flex flex-col gap-0.5">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <ProgressBadge progress={f.progressPercentage || 0} />
-                                          <PositionBadge position={f.presentPosition} />
-                                        </div>
-                                        {f.responsiblePerson && (
-                                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                                            <User className="h-2.5 w-2.5" />
-                                            {f.responsiblePerson}
-                                          </span>
-                                        )}
-                                        {childArchived && (
-                                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                                            <Archive className="h-2.5 w-2.5" />
-                                            {f.archivedReason || "NFA — Archived"}
-                                            {f.archivedAt && ` · ${new Date(f.archivedAt).toLocaleDateString("en-GB")}`}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell><CategoryBadge category={f.fileCategory} /></TableCell>
-                                    <TableCell className="text-right">
-                                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                                        <QuickUpdatePopover
-                                          files={[f]}
-                                          projectId={project.id}
-                                          onSaved={() => { refresh(); onChanged(); }}
+                                      onClick={() => setLogFile(f)}
+                                    >
+                                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                                        <Checkbox
+                                          checked={childSelected}
+                                          onCheckedChange={() => toggleSelect(f.id)}
+                                          aria-label={`Select ${f.prNumber}`}
                                         />
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setUpdateFile(f)} title="Edit File (full dialog)"><Pencil className="h-3.5 w-3.5" /></Button>
-                                        {childArchived ? (
-                                          <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-400 hover:text-emerald-500" onClick={() => handleRestore(f)} title="Restore from NFA archive"><ArchiveRestore className="h-3.5 w-3.5" /></Button>
-                                        ) : (
-                                          <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-400 hover:text-amber-500" onClick={() => handleDelete(f)} title="Archive (NFA)"><Archive className="h-3.5 w-3.5" /></Button>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
+                                      </TableCell>
+                                      {activeColumns.map((col) => renderChildCellForKey(col.key, f))}
+                                    </TableRow>
                                   );
                                 })}
                               </Fragment>
                             );
                           })}
-                          {/* Single-item rows (groups with only 1 item fall back to a normal row) */}
+                          {/* Single-item rows */}
                           {groupedView.singles.map((f) => renderSingleFileRow(f))}
                         </>
                       ) : (
@@ -1262,6 +1731,28 @@ export function PresentPositionDialog({ project, open, onOpenChange, onChanged }
           onChanged();
         }}
       />
+      {/* Bulk Delete Confirm for Archived View */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-400 flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Permanently Delete Files?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete <span className="font-semibold text-foreground">{selectedIds.size}</span> selected archived file(s)? This action will remove them completely from the database and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkPermanentDelete}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              Permanently Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Edit Project Data dialog */}
       <EditProjectDataDialog
         project={project}
@@ -1335,14 +1826,12 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
   );
 }
 
-function SortTh({ label, onClick, active, dir, align = "left" }: { label: string; onClick: () => void; active: boolean; dir: "asc" | "desc"; align?: "left" | "right" }) {
+function SortTh({ label, onClick, active, dir }: { label: string; onClick: () => void; active: boolean; dir: "asc" | "desc" }) {
   return (
-    <TableHead className={align === "right" ? "text-muted-foreground text-right" : "text-muted-foreground"}>
-      <button onClick={onClick} className="inline-flex items-center gap-1 hover:text-foreground">
-        {label}
-        {active && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-      </button>
-    </TableHead>
+    <button onClick={onClick} className="inline-flex items-center gap-1 hover:text-foreground">
+      {label}
+      {active && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+    </button>
   );
 }
 

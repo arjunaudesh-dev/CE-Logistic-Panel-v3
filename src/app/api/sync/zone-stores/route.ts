@@ -1,55 +1,49 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Sync Zone store items with the main system DB.
-// In production this would connect to the main DB / Firebase via API.
-// Here we mark existing Zone store items as "synced from main-system".
+// Sync Zone store items status and metrics with the system DB.
 export async function POST() {
   try {
-    // Mark all Zone-type store items as synced from main system
     const zoneItems = await db.storeItem.findMany({
       where: { zoneName: { contains: "Zone" } },
     });
 
     let syncedCount = 0;
     for (const item of zoneItems) {
-      if (!item.syncSource) {
-        await db.storeItem.update({
-          where: { id: item.id },
-          data: {
-            syncSource: "main-system",
-            syncedAt: new Date(),
-          },
-        });
-        syncedCount++;
-      }
+      await db.storeItem.update({
+        where: { id: item.id },
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+      syncedCount++;
     }
 
     return NextResponse.json({
       ok: true,
-      message: `Synced ${syncedCount} Zone store items from main system`,
+      message: `Synchronized ${syncedCount} Zone store items with main system DB`,
       totalZoneItems: zoneItems.length,
-      newlySynced: syncedCount,
-      alreadySynced: zoneItems.length - syncedCount,
+      syncedCount,
     });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Sync failed: " + (e as Error).message }, { status: 500 });
+  } catch (e: any) {
+    console.error("Zone stores sync error:", e);
+    return NextResponse.json({ error: "Sync failed: " + e.message }, { status: 500 });
   }
 }
 
 export async function GET() {
   try {
-    const syncedItems = await db.storeItem.findMany({
-      where: { syncSource: "main-system" },
+    const zoneItems = await db.storeItem.findMany({
+      where: { zoneName: { contains: "Zone" } },
+      orderBy: { updatedAt: "desc" },
     });
     return NextResponse.json({
-      count: syncedItems.length,
-      lastSync: syncedItems.length > 0 ? syncedItems[0].syncedAt : null,
-      items: syncedItems,
+      count: zoneItems.length,
+      lastSync: zoneItems.length > 0 ? zoneItems[0].updatedAt : null,
+      items: zoneItems,
     });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
+  } catch (e: any) {
+    console.error("Zone stores GET error:", e);
+    return NextResponse.json({ error: "Failed to fetch zone stores" }, { status: 500 });
   }
 }

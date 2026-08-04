@@ -26,6 +26,7 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   description: string;
+  badge?: string | number;
 }
 
 export const NAV_ITEMS: NavItem[] = [

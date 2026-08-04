@@ -1,4 +1,5 @@
 "use client";
+
 import { useState } from "react";
 import { AppShell } from "@/components/erp/app-shell";
 import { ModuleId } from "@/components/erp/nav";
@@ -11,10 +12,30 @@ import { RateFinderModule } from "@/components/erp/modules/rate-finder";
 import { CollectionModule } from "@/components/erp/modules/collection";
 import { StakeholdersModule } from "@/components/erp/modules/stakeholders";
 import { SettingsModule } from "@/components/erp/modules/settings";
+import { LoginWall } from "@/components/auth/login-wall";
+import { Loader2, Anchor } from "lucide-react";
+
+interface SessionResponse {
+  authenticated: boolean;
+  user: {
+    id: string;
+    username: string;
+    displayName: string;
+    role: string;
+    department: string | null;
+  } | null;
+}
 
 export default function Home() {
   const [active, setActive] = useState<ModuleId>("dashboard");
-  const { data: stats, refresh } = useFetch<{
+
+  const {
+    data: sessionData,
+    loading: sessionLoading,
+    refresh: refreshSession,
+  } = useFetch<SessionResponse>("/api/auth/session");
+
+  const { data: stats, refresh: refreshStats } = useFetch<{
     net: number;
     task: number;
     avail: number;
@@ -23,9 +44,30 @@ export default function Home() {
 
   const handleNavigate = (id: ModuleId) => {
     setActive(id);
-    refresh();
+    refreshStats();
   };
 
+  // Loading state while checking session
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background text-foreground space-y-4">
+        <div className="h-14 w-14 rounded-2xl bg-gradient-to-tr from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20 animate-pulse">
+          <Anchor className="h-7 w-7 text-primary-foreground animate-spin" />
+        </div>
+        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <span>Verifying Naval Logistics Session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, show full-screen Login Wall
+  if (!sessionData?.authenticated) {
+    return <LoginWall onLoginSuccess={refreshSession} />;
+  }
+
+  // Authenticated state
   return (
     <AppShell active={active} onNavigate={handleNavigate} stats={stats}>
       {active === "dashboard" && <Dashboard onNavigate={handleNavigate} />}

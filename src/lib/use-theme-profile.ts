@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { THEME_PROFILE_PRESETS } from "./constants";
 
 export interface ActiveThemeProfile {
   name: string;
@@ -92,5 +93,21 @@ export function useThemeProfile() {
     }
   }, []);
 
-  return { profile, setProfile };
+  const setThemeByPreset = useCallback(
+    (presetName: string) => {
+      const found = THEME_PROFILE_PRESETS.find((p) => p.name === presetName);
+      if (found) {
+        setProfile(found);
+      }
+    },
+    [setProfile]
+  );
+
+  return {
+    profile,
+    setProfile,
+    currentTheme: profile,
+    presets: THEME_PROFILE_PRESETS,
+    setThemeByPreset,
+  };
 }

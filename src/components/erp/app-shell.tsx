@@ -283,6 +283,11 @@ export function AppShell({ active, onNavigate, stats, children }: AppShellProps)
     refreshNotifs();
   };
 
+  const handleLogout = async () => {
+    await apiRequest("/api/auth/logout", "POST");
+    window.location.reload();
+  };
+
   // Extract initials
   const initials = useMemo(() => {
     const name = userProfile?.displayName || "Radhika Perera";
@@ -447,7 +452,10 @@ export function AppShell({ active, onNavigate, stats, children }: AppShellProps)
                   <User className="h-4 w-4 text-primary" /> Profile & Account Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-border/60" />
-                <DropdownMenuItem className="rounded-lg cursor-pointer text-red-500 dark:text-red-400 font-medium flex items-center gap-2">
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="rounded-lg cursor-pointer text-red-500 dark:text-red-400 font-medium flex items-center gap-2"
+                >
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -59,6 +59,9 @@ import {
   departmentColor,
   ratingColor,
   ratingLabel,
+  OFFICER_RANKS,
+  SAILOR_RANKS,
+  BRANCH_OPTIONS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -1217,6 +1220,28 @@ function CategorySection({
 // ─────────────────────────────────────────────────────────
 // Stakeholder Form (Add / Edit)
 // ─────────────────────────────────────────────────────────
+function parseRankAndBranch(raw: string | null | undefined): { rankBase: string; branchAbbr: string } {
+  if (!raw) return { rankBase: "", branchAbbr: "" };
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(.*?)\s*(\([A-Za-z0-9&+\s-]+\))$/);
+  if (match) {
+    return {
+      rankBase: match[1].trim(),
+      branchAbbr: match[2].trim(),
+    };
+  }
+  return { rankBase: trimmed, branchAbbr: "" };
+}
+
+function formatRankAndBranch(rankBase: string, branchAbbr: string): string {
+  const r = rankBase.trim();
+  let b = branchAbbr.trim();
+  if (b && !b.startsWith("(")) b = `(${b}`;
+  if (b && !b.endsWith(")")) b = `${b})`;
+  if (r && b) return `${r} ${b}`;
+  return r || b;
+}
+
 interface StakeholderFormProps {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -1236,7 +1261,9 @@ function StakeholderFormDialog({
 
   // Form state (initialised once from `initial` — keyed remount via `key` prop on caller)
   const [name, setName] = useState(initial?.name ?? "");
-  const [rankOrRate, setRankOrRate] = useState(initial?.rankOrRate ?? "");
+  const parsedRank = parseRankAndBranch(initial?.rankOrRate);
+  const [rankBase, setRankBase] = useState(parsedRank.rankBase);
+  const [branchAbbr, setBranchAbbr] = useState(parsedRank.branchAbbr);
   const [svcNumber, setSvcNumber] = useState(initial?.svcNumber ?? "");
   const [appointment, setAppointment] = useState(initial?.appointment ?? "");
   const [department, setDepartment] = useState(initial?.department ?? "CSLOG");
@@ -1299,9 +1326,10 @@ function StakeholderFormDialog({
       return;
     }
     setSaving(true);
+    const computedRankOrRate = formatRankAndBranch(rankBase, branchAbbr);
     const body = {
       name: name.trim(),
-      rankOrRate: rankOrRate.trim() || null,
+      rankOrRate: computedRankOrRate.trim() || null,
       svcNumber: svcNumber.trim() || null,
       appointment: appointment || null,
       department,
@@ -1356,13 +1384,104 @@ function StakeholderFormDialog({
                 required
               />
             </Field>
-            <Field label="Rank / Rate">
-              <Input
-                value={rankOrRate}
-                onChange={(e) => setRankOrRate(e.target.value)}
-                placeholder="e.g. Commander / Leading Seaman"
-              />
-            </Field>
+            {/* Rank / Rate & Branch Abbreviation Selectors */}
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg border border-border p-3 bg-secondary/20">
+              <Field label="Rank / Rate">
+                <div className="space-y-2">
+                  <Input
+                    value={rankBase}
+                    onChange={(e) => setRankBase(e.target.value)}
+                    placeholder="Type or select rank (e.g. Cdr, Capt, PO, LS...)"
+                  />
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Officer Ranks:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {OFFICER_RANKS.map((r) => (
+                        <button
+                          key={r.abbreviation}
+                          type="button"
+                          onClick={() => setRankBase(r.abbreviation)}
+                          title={`${r.label} (${r.abbreviation})`}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                            rankBase === r.abbreviation || rankBase === r.label
+                              ? "bg-primary text-primary-foreground border-primary font-medium"
+                              : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                          )}
+                        >
+                          {r.abbreviation}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block pt-1">
+                      Sailor Rates:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {SAILOR_RANKS.map((r) => (
+                        <button
+                          key={r.abbreviation}
+                          type="button"
+                          onClick={() => setRankBase(r.abbreviation)}
+                          title={`${r.label} (${r.abbreviation})`}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                            rankBase === r.abbreviation || rankBase === r.label
+                              ? "bg-primary text-primary-foreground border-primary font-medium"
+                              : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                          )}
+                        >
+                          {r.abbreviation}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </Field>
+
+              <Field label="Branch Abbreviation">
+                <div className="space-y-2">
+                  <Input
+                    value={branchAbbr}
+                    onChange={(e) => setBranchAbbr(e.target.value)}
+                    placeholder="e.g. (CE), (S), (Wtr), (SA), (PRO)"
+                  />
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Select Branch:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {BRANCH_OPTIONS.map((b) => (
+                        <button
+                          key={b.abbreviation}
+                          type="button"
+                          onClick={() => setBranchAbbr(b.abbreviation)}
+                          title={b.label}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                            branchAbbr === b.abbreviation
+                              ? "bg-primary text-primary-foreground border-primary font-medium"
+                              : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                          )}
+                        >
+                          {b.abbreviation}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Live preview */}
+                  {(rankBase || branchAbbr) && (
+                    <div className="pt-1 text-xs text-muted-foreground flex items-center gap-1.5">
+                      <span>Combined Rank:</span>
+                      <CustomBadge className="border-primary/30 bg-primary/10 text-primary font-mono">
+                        {formatRankAndBranch(rankBase, branchAbbr)}
+                      </CustomBadge>
+                    </div>
+                  )}
+                </div>
+              </Field>
+            </div>
             <Field label="SVC Number">
               <Input
                 value={svcNumber}
@@ -1406,18 +1525,30 @@ function StakeholderFormDialog({
               </Select>
             </Field>
             <Field label="Appointment">
-              <Select value={appointment} onValueChange={setAppointment}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select appointment" />
-                </SelectTrigger>
-                <SelectContent>
-                  {apptOptions.map((a) => (
-                    <SelectItem key={a} value={a}>
+              <div className="space-y-1.5">
+                <Input
+                  value={appointment}
+                  onChange={(e) => setAppointment(e.target.value)}
+                  placeholder="Type or select appointment (e.g. CSLOG, ASO(E)...)"
+                />
+                <div className="flex flex-wrap gap-1">
+                  {apptOptions.filter((a) => a !== "all").map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => setAppointment(a)}
+                      className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                        appointment === a
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                      )}
+                    >
                       {a}
-                    </SelectItem>
+                    </button>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              </div>
             </Field>
             <Field label="Role">
               <Select value={role} onValueChange={setRole}>
