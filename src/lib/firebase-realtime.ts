@@ -16,7 +16,10 @@ export async function syncRecordToFirebase(modelName: string, record: any) {
   }
 
   try {
-    const endpoint = `${firebaseDbUrl.replace(/\/$/, "")}/${modelName.toLowerCase()}s/${record.id}.json`;
+    const authParam = (process.env.FIREBASE_DATABASE_SECRET || process.env.FIREBASE_AUTH_TOKEN)
+      ? `?auth=${process.env.FIREBASE_DATABASE_SECRET || process.env.FIREBASE_AUTH_TOKEN}`
+      : '';
+    const endpoint = `${firebaseDbUrl.replace(/\/$/, "")}/${modelName.toLowerCase()}s/${record.id}.json${authParam}`;
     const res = await fetch(endpoint, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -51,7 +54,10 @@ export async function syncAllRecordsFromFirebase() {
   }
 
   try {
-    const res = await fetch(`${firebaseDbUrl.replace(/\/$/, "")}/.json`, { cache: "no-store" });
+    const authParam = (process.env.FIREBASE_DATABASE_SECRET || process.env.FIREBASE_AUTH_TOKEN)
+      ? `?auth=${process.env.FIREBASE_DATABASE_SECRET || process.env.FIREBASE_AUTH_TOKEN}`
+      : '';
+    const res = await fetch(`${firebaseDbUrl.replace(/\/$/, "")}/.json${authParam}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const data = await res.json();
@@ -59,30 +65,48 @@ export async function syncAllRecordsFromFirebase() {
 
     let totalSynced = 0;
 
-    // Sync Projects if present in Firebase API
-    if (data.projects) {
-      for (const [id, proj] of Object.entries<any>(data.projects)) {
-        if (proj && proj.name) {
-          await rawDb.project.upsert({
-            where: { id },
-            create: {
-              id,
-              name: proj.name,
-              nameAbbreviation: proj.nameAbbreviation || null,
-              voteNumber: proj.voteNumber || "VOTE-GENERAL",
-              voteAllocation: Number(proj.voteAllocation) || 0,
-              committed: Number(proj.committed) || 0,
-              actualSpent: Number(proj.actualSpent) || 0,
-              status: proj.status || "Active",
-            },
-            update: {
-              name: proj.name,
-              voteNumber: proj.voteNumber,
-              voteAllocation: Number(proj.voteAllocation) || 0,
-              status: proj.status || "Active",
-            },
-          });
-          totalSynced++;
+    const MODEL_MAPPINGS: { key: string; clientName: string }[] = [
+      { key: "projects", clientName: "project" },
+      { key: "projectfiles", clientName: "projectFile" },
+      { key: "procurementfiles", clientName: "procurementFile" },
+      { key: "itemmasters", clientName: "itemMaster" },
+      { key: "storezones", clientName: "storeZone" },
+      { key: "storeitems", clientName: "storeItem" },
+      { key: "ratecontracts", clientName: "rateContract" },
+      { key: "stakeholders", clientName: "stakeholder" },
+      { key: "votes", clientName: "vote" },
+      { key: "processflows", clientName: "processFlow" },
+      { key: "userprofiles", clientName: "userProfile" },
+    ];
+
+    for (const mapping of MODEL_MAPPINGS) {
+      const recordsMap = data[mapping.key];
+      if (recordsMap && typeof recordsMap === 'object') {
+        const client = (rawDb as any)[mapping.clientName];
+        if (!client) continue;
+
+        for (const [id, item] of Object.entries<any>(recordsMap)) {
+          if (!item || typeof item !== 'object') continue;
+
+          // Clean item fields for Prisma
+          const cleanItem: any = {};
+          for (const k of Object.keys(item)) {
+            if (!k.startsWith('_') && (typeof item[k] !== 'object' || item[k] === null)) {
+              cleanItem[k] = item[k];
+            }
+          }
+          cleanItem.id = id;
+
+          try {
+            await client.upsert({
+              where: { id },
+              create: cleanItem,
+              update: cleanItem,
+            });
+            totalSynced++;
+          } catch (e) {
+            console.error(`[Firebase Pull Error] Failed to upsert ${mapping.clientName}:${id}`, e);
+          }
         }
       }
     }
