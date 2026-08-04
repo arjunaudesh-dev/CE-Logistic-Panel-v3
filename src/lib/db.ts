@@ -29,8 +29,13 @@ if (process.env.VERCEL) {
   }
 }
 
-const dbUrl = `file:${customDbPath}`
-process.env.DATABASE_URL = dbUrl
+// If a remote DATABASE_URL is explicitly set (e.g. Postgres, Turso, Supabase), use it. Otherwise use local SQLite custom.db.
+const isRemoteDb = process.env.DATABASE_URL && !process.env.DATABASE_URL.startsWith('file:')
+const dbUrl = isRemoteDb ? process.env.DATABASE_URL! : `file:${customDbPath}`
+
+if (!isRemoteDb) {
+  process.env.DATABASE_URL = dbUrl
+}
 
 // Require PrismaClient AFTER process.env.DATABASE_URL is set
 const { PrismaClient } = require('@prisma/client');
@@ -72,6 +77,11 @@ async function logChange(modelName: string, recordId: string, operation: string,
         synced: false
       }
     })
+
+    // Auto-trigger cloud sync if Firebase or remote sync environment is active
+    if (process.env.VERCEL || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+      import('@/lib/firebase-sync').then(m => m.syncDatabaseToFirebase()).catch(() => {});
+    }
   } catch (err) {
     console.error(`Error logging change for ${modelName}:`, err)
   }
