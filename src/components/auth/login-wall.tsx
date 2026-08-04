@@ -25,10 +25,8 @@ interface LoginWallProps {
 }
 
 const PRESET_CREDENTIALS = [
-  { username: "rperera", password: "admin123", role: "Admin", name: "Cdr. R. Perera", dept: "CSLOG" },
-  { username: "tjaya", password: "manager123", role: "Manager", name: "Capt. T. Jayasuriya", dept: "CE" },
-  { username: "mfernando", password: "officer123", role: "Officer", name: "Lt. M. Fernando", dept: "CSLOG" },
-  { username: "pbandara", password: "clerk123", role: "Clerk", name: "PO Bandara", dept: "CSLOG" },
+  { username: "kmau.kahandawa", password: "arjuna@1991", role: "Admin", name: "KMAU Kahandawa", dept: "CSLOG" },
+  { username: "KMAU Kahandawa", password: "arjuna@1991", role: "Admin", name: "KMAU Kahandawa", dept: "CSLOG" },
 ];
 
 export function LoginWall({ onLoginSuccess }: LoginWallProps) {

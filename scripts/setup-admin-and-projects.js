@@ -388,9 +388,18 @@ async function main() {
   console.log("Setting up Master Admin account & 25 official projects...");
 
   const pwHash = hashPassword("arjuna@1991");
-  const adminUsernames = ["admin", "KMAU Kahandawa", "kmau.kahandawa"];
+  const realUsernames = ["KMAU Kahandawa", "kmau.kahandawa"];
 
-  for (const uname of adminUsernames) {
+  // Purge all dummy user accounts
+  await prisma.userProfile.deleteMany({
+    where: {
+      username: {
+        notIn: realUsernames
+      }
+    }
+  });
+
+  for (const uname of realUsernames) {
     await prisma.userProfile.upsert({
       where: { username: uname },
       update: {
@@ -411,7 +420,7 @@ async function main() {
     });
   }
 
-  console.log("Master Admin user accounts set up successfully (Name: KMAU Kahandawa, PW: arjuna@1991)");
+  console.log("Master Admin user accounts set up (Name: KMAU Kahandawa, PW: arjuna@1991), dummy users purged.");
 
   let projectCount = 0;
   for (const projData of ACTUAL_PROJECTS) {

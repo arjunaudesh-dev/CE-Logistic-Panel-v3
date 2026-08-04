@@ -2181,10 +2181,8 @@ function AuthenticationTab() {
   const [deletingUser, setDeletingUser] = useState(false);
 
   const defaultCredentials = [
-    { u: "rperera", p: "admin123", role: "Admin" },
-    { u: "tjaya", p: "manager123", role: "Manager" },
-    { u: "mfernando", p: "officer123", role: "Officer" },
-    { u: "pbandara", p: "clerk123", role: "Clerk" },
+    { u: "kmau.kahandawa", p: "arjuna@1991", role: "Admin" },
+    { u: "KMAU Kahandawa", p: "arjuna@1991", role: "Admin" },
   ];
 
   async function handleLogin(e: React.FormEvent) {
