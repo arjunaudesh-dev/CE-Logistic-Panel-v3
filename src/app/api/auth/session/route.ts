@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth";
 export async function GET(req: NextRequest) {
   try {
     const token = req.cookies.get("ce_session")?.value || null;
-    const user = getSession(token);
+    const user = await getSession(token);
     return NextResponse.json({ user, authenticated: !!user });
   } catch (e) {
     console.error(e);

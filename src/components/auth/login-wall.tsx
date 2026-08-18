@@ -21,13 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/use-fetch";
 
 interface LoginWallProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (user?: any) => void;
 }
-
-const PRESET_CREDENTIALS = [
-  { username: "kmau.kahandawa", password: "arjuna@1991", role: "Admin", name: "KMAU Kahandawa", dept: "CSLOG" },
-  { username: "KMAU Kahandawa", password: "arjuna@1991", role: "Admin", name: "KMAU Kahandawa", dept: "CSLOG" },
-];
 
 export function LoginWall({ onLoginSuccess }: LoginWallProps) {
   const [username, setUsername] = useState("");
@@ -59,11 +54,12 @@ export function LoginWall({ onLoginSuccess }: LoginWallProps) {
       setLoading(false);
 
       if (res.ok) {
+        const loggedInUser = (res.data as any)?.user;
         toast({
           title: "Authentication Successful 🎉",
-          description: `Welcome back, ${(res.data as any)?.user?.displayName || username}!`,
+          description: `Welcome back, ${loggedInUser?.displayName || username}!`,
         });
-        onLoginSuccess();
+        onLoginSuccess(loggedInUser);
       } else {
         setErrorMsg(res.error || "Invalid username or password");
         toast({
@@ -81,11 +77,6 @@ export function LoginWall({ onLoginSuccess }: LoginWallProps) {
         variant: "destructive",
       });
     }
-  };
-
-  const handlePresetSelect = (u: string, p: string) => {
-    setUsername(u);
-    setPassword(p);
   };
 
   return (
@@ -174,35 +165,6 @@ export function LoginWall({ onLoginSuccess }: LoginWallProps) {
             )}
           </Button>
         </form>
-
-        {/* Quick Presets */}
-        <div className="pt-2 border-t border-border/60 space-y-2.5">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider text-center">
-            Quick Test Accounts
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {PRESET_CREDENTIALS.map((cred) => (
-              <button
-                key={cred.username}
-                type="button"
-                onClick={() => handlePresetSelect(cred.username, cred.password)}
-                className="p-2.5 rounded-xl border border-border/60 bg-card/40 hover:bg-secondary/60 text-left transition-colors flex flex-col justify-between group cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-foreground group-hover:text-primary">
-                    {cred.username}
-                  </span>
-                  <CustomBadge className="text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">
-                    {cred.role}
-                  </CustomBadge>
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-1">
-                  {cred.name}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* System Footer */}

@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch recent file logs (last 10 updates)
     const recentLogs = await db.fileLog.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { changedAt: "desc" },
       take: 8,
       include: {
         file: {
@@ -83,12 +83,13 @@ export async function GET(req: NextRequest) {
 
     // Map Procurement file log notifications
     recentLogs.forEach((log) => {
+      if (!log.file) return;
       const id = `log-${log.id}`;
       notifications.push({
         id,
-        title: `Procurement Update: ${log.file.prNumber}`,
-        message: `${log.file.itemName} moved from '${log.oldPosition || "Raised"}' → '${log.newPosition}'`,
-        time: new Date(log.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        title: `Procurement Update: ${log.file.prNumber || "PR"}`,
+        message: `${log.file.itemName || "Item"} moved from '${log.oldPosition || "Raised"}' → '${log.newPosition}'`,
+        time: new Date(log.changedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         type: "procurement",
         read: readNotificationIds.has(id),
       });
@@ -96,10 +97,11 @@ export async function GET(req: NextRequest) {
 
     // Map Split Order entry notifications
     recentSplitEntries.forEach((e) => {
+      if (!e.sub || !e.sub.header) return;
       const id = `split-${e.id}`;
       notifications.push({
         id,
-        title: `Delivery Entry: ${e.sub.header.fileNumber}`,
+        title: `Delivery Entry: ${e.sub.header.fileNumber || "Split Order"}`,
         message: `Received ${e.receivedQty} units under PO ${e.sub.poNumber}${
           e.vehicleNumber ? ` (Vehicle: ${e.vehicleNumber})` : ""
         }`,
@@ -115,8 +117,8 @@ export async function GET(req: NextRequest) {
       notifications,
       unreadCount,
     });
-  } catch (e) {
-    console.error("Notifications GET error:", e);
+  } catch (e: any) {
+    console.error("Notifications GET error:", e?.stack || e);
     return NextResponse.json({ notifications: [], unreadCount: 0 }, { status: 500 });
   }
 }

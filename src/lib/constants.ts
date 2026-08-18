@@ -5,7 +5,7 @@ export const PRESENT_POSITIONS = [
   "GS Approval",
   "Budget Check",
   "Tender Called",
-  " quotation Received",
+  "Quotation Received",
   "BEC Evaluation",
   "AOE Approval",
   "PO Placed",

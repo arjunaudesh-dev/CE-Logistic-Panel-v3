@@ -25,6 +25,7 @@ export async function syncRecordToFirebase(modelName: string, record: any) {
     const res = await fetch(endpoint, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(4000),
       body: JSON.stringify({
         ...record,
         _syncedAt: new Date().toISOString(),

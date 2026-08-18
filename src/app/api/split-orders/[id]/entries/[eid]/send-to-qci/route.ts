@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 // Send a split order entry to QCI
+// [eid] = SplitOrderEntry.id
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; eid: string }> }
@@ -13,7 +14,6 @@ export async function POST(
       data: {
         sentToQCI: true,
         sentToQCIAt: new Date(),
-        status: "In QCI",
       },
     });
     return NextResponse.json(updated);

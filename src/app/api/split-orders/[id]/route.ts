@@ -7,12 +7,19 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const order = await db.splitOrder.findUnique({
+    const header = await db.splitOrderHeader.findUnique({
       where: { id },
-      include: { entries: { orderBy: { createdAt: "asc" } } },
+      include: {
+        splits: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            entries: { orderBy: { createdAt: "asc" } },
+          },
+        },
+      },
     });
-    if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(order);
+    if (!header) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json(header);
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
@@ -25,7 +32,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await db.splitOrder.delete({ where: { id } });
+    await db.splitOrderHeader.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error(e);

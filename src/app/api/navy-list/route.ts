@@ -30,51 +30,66 @@ export async function POST(req: NextRequest) {
           category: b.category || null,
         })),
       });
-      // also update stakeholders (seniority / category / department) where name matches
+      // also upsert stakeholders (seniority / category / department / appointment) so they appear in Stakeholders Directory
       for (const r of body) {
         if (!r.name) continue;
-        const data: Record<string, unknown> = {};
-        if (r.seniority != null && !isNaN(Number(r.seniority))) {
-          data.seniority = Number(r.seniority);
-        }
-        if (r.category) {
-          data.category = r.category;
-        }
-        if (r.department) {
-          data.department = r.department;
-        }
-        // For sailors, infer the area-store location from the appointment
-        // (best-effort hint — falls back to "General" when nothing matches).
+        let areaStoreLoc: string | null = null;
         if (
           r.category &&
           (r.category === "CCED Sailor" || r.category === "CSLOG Sailor") &&
           r.appointment
         ) {
           const appt = String(r.appointment).toLowerCase();
-          if (appt.includes("bms") || appt.includes("plumb")) {
-            data.areaStoreLocation = "BMS";
-          } else if (appt.includes("metal") || appt.includes("alum")) {
-            data.areaStoreLocation = "Metal";
-          } else if (appt.includes("paint")) {
-            data.areaStoreLocation = "Paint";
-          } else if (appt.includes("oil") || appt.includes("lub")) {
-            data.areaStoreLocation = "Oil & Lubricant";
-          } else if (appt.includes("station")) {
-            data.areaStoreLocation = "Stationary";
-          } else {
-            data.areaStoreLocation = "General";
-          }
+          if (appt.includes("bms") || appt.includes("plumb")) areaStoreLoc = "BMS";
+          else if (appt.includes("metal") || appt.includes("alum")) areaStoreLoc = "Metal";
+          else if (appt.includes("paint")) areaStoreLoc = "Paint";
+          else if (appt.includes("oil") || appt.includes("lub")) areaStoreLoc = "Oil & Lubricant";
+          else if (appt.includes("station")) areaStoreLoc = "Stationary";
+          else areaStoreLoc = "General";
         }
-        if (Object.keys(data).length === 0) continue;
-        await db.stakeholder
-          .updateMany({
-            where: { name: r.name },
-            data,
-          })
-          .catch(() => {});
+
+        const existing = await db.stakeholder.findFirst({
+          where: {
+            OR: [
+              { name: { equals: r.name } },
+              ...(r.svcNumber ? [{ svcNumber: { equals: r.svcNumber } }] : [])
+            ]
+          }
+        });
+
+        if (existing) {
+          await db.stakeholder.update({
+            where: { id: existing.id },
+            data: {
+              rankOrRate: r.rank || existing.rankOrRate,
+              svcNumber: r.svcNumber || existing.svcNumber,
+              appointment: r.appointment || existing.appointment,
+              department: r.department || existing.department,
+              category: r.category || existing.category,
+              seniority: r.seniority != null ? Number(r.seniority) : existing.seniority,
+              areaStoreLocation: areaStoreLoc || existing.areaStoreLocation,
+            }
+          }).catch(() => {});
+        } else {
+          await db.stakeholder.create({
+            data: {
+              name: r.name,
+              rankOrRate: r.rank || null,
+              svcNumber: r.svcNumber || null,
+              appointment: r.appointment || null,
+              department: r.department || "CSLOG",
+              category: r.category || "Officer",
+              seniority: r.seniority != null ? Number(r.seniority) : 999,
+              areaStoreLocation: areaStoreLoc,
+              availability: "Available",
+              role: r.category && r.category.includes("Officer") ? "Officer" : "Sailor",
+            }
+          }).catch(() => {});
+        }
       }
       return NextResponse.json(created, { status: 201 });
     }
+
     const record = await db.navyListImport.create({
       data: {
         name: body.name,
@@ -86,18 +101,43 @@ export async function POST(req: NextRequest) {
         category: body.category || null,
       },
     });
-    // single-object path: also update stakeholder if name matches
+
     if (body.name) {
-      const data: Record<string, unknown> = {};
-      if (body.seniority != null && !isNaN(Number(body.seniority))) {
-        data.seniority = Number(body.seniority);
-      }
-      if (body.category) data.category = body.category;
-      if (body.department) data.department = body.department;
-      if (Object.keys(data).length > 0) {
-        await db.stakeholder
-          .updateMany({ where: { name: body.name }, data })
-          .catch(() => {});
+      const existing = await db.stakeholder.findFirst({
+        where: {
+          OR: [
+            { name: { equals: body.name } },
+            ...(body.svcNumber ? [{ svcNumber: { equals: body.svcNumber } }] : [])
+          ]
+        }
+      });
+
+      if (existing) {
+        await db.stakeholder.update({
+          where: { id: existing.id },
+          data: {
+            rankOrRate: body.rank || existing.rankOrRate,
+            svcNumber: body.svcNumber || existing.svcNumber,
+            appointment: body.appointment || existing.appointment,
+            department: body.department || existing.department,
+            category: body.category || existing.category,
+            seniority: body.seniority != null ? Number(body.seniority) : existing.seniority,
+          }
+        }).catch(() => {});
+      } else {
+        await db.stakeholder.create({
+          data: {
+            name: body.name,
+            rankOrRate: body.rank || null,
+            svcNumber: body.svcNumber || null,
+            appointment: body.appointment || null,
+            department: body.department || "CSLOG",
+            category: body.category || "Officer",
+            seniority: body.seniority != null ? Number(body.seniority) : 999,
+            availability: "Available",
+            role: body.category && body.category.includes("Officer") ? "Officer" : "Sailor",
+          }
+        }).catch(() => {});
       }
     }
     return NextResponse.json(record, { status: 201 });

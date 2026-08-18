@@ -1532,7 +1532,7 @@ function StakeholderFormDialog({
                   placeholder="Type or select appointment (e.g. CSLOG, ASO(E)...)"
                 />
                 <div className="flex flex-wrap gap-1">
-                  {apptOptions.filter((a) => a !== "all").map((a) => (
+                  {apptOptions.filter((a) => (a as string) !== "all").map((a) => (
                     <button
                       key={a}
                       type="button"

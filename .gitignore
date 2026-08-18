@@ -52,3 +52,7 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Local scratch and nested workspace
+scratch/
+WDis/

@@ -28,6 +28,7 @@ interface SessionResponse {
 
 export default function Home() {
   const [active, setActive] = useState<ModuleId>("dashboard");
+  const [localAuth, setLocalAuth] = useState<boolean>(false);
 
   const {
     data: sessionData,
@@ -47,8 +48,16 @@ export default function Home() {
     refreshStats();
   };
 
+  const handleLoginSuccess = (_user?: unknown) => {
+    setLocalAuth(true);
+    refreshSession();
+    refreshStats();
+  };
+
+  const isAuthenticated = localAuth || !!sessionData?.authenticated;
+
   // Loading state while checking session
-  if (sessionLoading) {
+  if (sessionLoading && !localAuth) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background text-foreground space-y-4">
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-tr from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20 animate-pulse">
@@ -63,8 +72,8 @@ export default function Home() {
   }
 
   // If not authenticated, show full-screen Login Wall
-  if (!sessionData?.authenticated) {
-    return <LoginWall onLoginSuccess={refreshSession} />;
+  if (!isAuthenticated) {
+    return <LoginWall onLoginSuccess={handleLoginSuccess} />;
   }
 
   // Authenticated state

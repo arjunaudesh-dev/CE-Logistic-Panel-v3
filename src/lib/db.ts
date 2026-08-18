@@ -1,5 +1,6 @@
 import path from 'path'
 import fs from 'fs'
+import { PrismaClient } from '@prisma/client'
 
 // Resolve the absolute path to the SQLite database file dynamically
 const candidate1 = path.join(process.cwd(), 'prisma', 'custom.db')
@@ -36,9 +37,6 @@ const dbUrl = isRemoteDb ? process.env.DATABASE_URL! : `file:${customDbPath}`
 if (!isRemoteDb) {
   process.env.DATABASE_URL = dbUrl
 }
-
-// Require PrismaClient AFTER process.env.DATABASE_URL is set
-const { PrismaClient } = require('@prisma/client');
 
 // 1. Raw client used for seeds, migrations, and applying sync data without loop feedbacks
 export const rawDb =
@@ -90,53 +88,51 @@ async function logChange(modelName: string, recordId: string, operation: string,
   }
 }
 
-// 2. Extended client for normal application use (automatically logs mutations)
+// 2. Extended client for normal application use (automatically logs mutations in background)
 export const db = rawDb.$extends({
   query: {
     $allModels: {
       async create({ model, args, query }) {
         const result = await query(args)
-        await logChange(model, result.id, 'CREATE', result)
+        if (result && result.id) {
+          logChange(model, result.id, 'CREATE', result).catch(() => {})
+        }
         return result
       },
       async update({ model, args, query }) {
         const result = await query(args)
-        await logChange(model, result.id, 'UPDATE', result)
+        if (result && result.id) {
+          logChange(model, result.id, 'UPDATE', result).catch(() => {})
+        }
         return result
       },
       async delete({ model, args, query }) {
         const result = await query(args)
-        await logChange(model, result.id || args.where.id, 'DELETE', null)
+        const recordId = result?.id || args?.where?.id
+        if (recordId) {
+          logChange(model, recordId, 'DELETE', null).catch(() => {})
+        }
         return result
       },
       async updateMany({ model, args, query }) {
-        const modelClient = getModelClient(model)
-        if (!modelClient) return query(args)
-
-        // Find affected IDs before applying the update
-        const affected = await modelClient.findMany({
-          where: args.where,
-          select: { id: true }
-        })
         const result = await query(args)
-        for (const record of affected) {
-          await logChange(model, record.id, 'UPDATE', args.data)
-        }
+        setTimeout(async () => {
+          try {
+            const modelClient = getModelClient(model)
+            if (!modelClient) return
+            const affected = await modelClient.findMany({
+              where: args.where,
+              select: { id: true }
+            })
+            for (const record of affected) {
+              logChange(model, record.id, 'UPDATE', args.data).catch(() => {})
+            }
+          } catch {}
+        }, 0)
         return result
       },
       async deleteMany({ model, args, query }) {
-        const modelClient = getModelClient(model)
-        if (!modelClient) return query(args)
-
-        // Find affected IDs before applying the delete
-        const affected = await modelClient.findMany({
-          where: args.where,
-          select: { id: true }
-        })
         const result = await query(args)
-        for (const record of affected) {
-          await logChange(model, record.id, 'DELETE', null)
-        }
         return result
       }
     }
