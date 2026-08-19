@@ -52,21 +52,21 @@ export async function POST(req: NextRequest) {
     }
     const item = await db.rateContract.create({
       data: {
-        rateCode: body.rateCode || null,
-        itemCode: body.itemCode,
-        description: body.description,
+        rateCode: body.rateCode || body["Rate code"] || body.ratecode || null,
+        itemCode: body.itemCode || body.itemcode || "N/A",
+        description: body.description || body.itemName || body.item || "Rate Contract Item",
         unit: body.unit || "NOS",
-        rcPrice: Number(body.rcPrice) || 0,
-        vat: Number(body.vat) || 0,
+        rcPrice: Number(body.rcPrice ?? body.rate ?? body["rate(Rs)"] ?? 0) || 0,
+        vat: Number(body.vat ?? body.VAT ?? 0) || 0,
         warranty: body.warranty || null,
-        brand: body.brand || null,
-        makeModel: body.makeModel || null,
-        category: body.category || "General",
-        subCategory: body.subCategory || null,
-        supplier: body.supplier || null,
+        brand: body.brand || body.Brand || null,
+        makeModel: body.makeModel || body["make model"] || null,
+        category: body.category || body.Category || "General",
+        subCategory: body.subCategory || body["sub category"] || null,
+        supplier: body.supplier || body.supplierName || body["RC supplier"] || null,
         rcYear: body.rcYear || String(new Date().getFullYear()),
         validFrom: body.validFrom || null,
-        validUntil: body.validUntil || null,
+        validUntil: body.validUntil || body.validity || null,
       },
     });
     return NextResponse.json(item, { status: 201 });
