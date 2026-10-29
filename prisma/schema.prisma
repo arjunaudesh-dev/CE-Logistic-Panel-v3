@@ -30,6 +30,16 @@ model Project {
   status        String   @default("Active") // Active | On Hold | Completed | Cancelled
   description   String?
   showOnDashboard Boolean @default(true) // toggle visibility on operational dashboard
+  requirementGroup String? // Maintenance requirement group
+
+  // SP V1 Architecture & Integration Fields
+  spCode            String?  // SP V1 code e.g. "SP-REL-001", "SP-CSL-001"
+  spCategory        String?  // SP category: Religious | Clean Sri Lanka | Housing | Miscellaneous
+  sourceSystem      String   @default("LOGISTICS") // LOGISTICS | SP_V1
+  approvalRef       String?  // approval ref e.g. "NCW/SIG/2026/045"
+  approvalType      String?  // Signal | Minute Sheet
+  approvalAuthority String?  // e.g. "Commander Eastern Naval Command"
+  workScope         String?  // detailed work scope description
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -37,6 +47,10 @@ model Project {
   allocations  Allocation[]
   estimates    Estimate[]
   earmarks     EarmarkedItem[]
+
+  @@index([spCode])
+  @@index([spCategory])
+  @@index([sourceSystem])
 }
 
 model ProjectFile {
@@ -139,8 +153,12 @@ model ProcurementFile {
   progressPercentage Float @default(0)
   processFlowId      String?
   fileCategory    String   @default("General")
+  fileNumber      String?
+  fileGroupKey    String?
   createdBy       String?
   authorizedBy    String?
+  responsiblePerson String?
+  spCode          String?  // SP V1 Code link
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -148,6 +166,8 @@ model ProcurementFile {
 
   @@index([presentPosition])
   @@index([supplier])
+  @@index([projectId])
+  @@index([spCode])
 }
 
 model ProcurementLog {

@@ -8,12 +8,16 @@ export async function GET(req: NextRequest) {
     const position = searchParams.get("position");
     const category = searchParams.get("category");
     const project = searchParams.get("project");
+    const spCode = searchParams.get("spCode");
+    const projectId = searchParams.get("projectId");
 
     const where: Record<string, unknown> = {};
     if (supplier && supplier !== "all") where.supplier = supplier;
     if (position && position !== "all") where.presentPosition = position;
     if (category && category !== "all") where.fileCategory = category;
     if (project && project !== "all") where.projectName = project;
+    if (spCode && spCode !== "all") where.spCode = spCode;
+    if (projectId && projectId !== "all") where.projectId = projectId;
 
     const files = await db.procurementFile.findMany({
       where,
@@ -37,6 +41,7 @@ export async function POST(req: NextRequest) {
 
     const file = await db.procurementFile.create({
       data: {
+        projectId: body.projectId || null,
         projectName: body.projectName || null,
         voteNumber: body.voteNumber || null,
         prNumber: body.prNumber,
@@ -49,8 +54,12 @@ export async function POST(req: NextRequest) {
         supplier: body.supplier || null,
         presentPosition: position,
         fileCategory: body.fileCategory || "General",
+        fileGroupKey: body.fileGroupKey || null,
+        fileNumber: body.fileNumber || null,
         createdBy: body.createdBy || "Officer",
         authorizedBy: body.authorizedBy || null,
+        responsiblePerson: body.responsiblePerson || null,
+        spCode: body.spCode || null,
         logs: {
           create: {
             newPosition: position,

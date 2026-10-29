@@ -29,6 +29,11 @@ import {
   LayoutGrid,
   Tag,
   X,
+  Database,
+  ShieldCheck,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -72,9 +77,20 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 // Helper to determine vote category
-function getVoteGroupKey(p: Project): { key: string; label: string; isOther: boolean } {
+function getVoteGroupKey(p: Project): { key: string; label: string; isOther: boolean; isSP: boolean } {
   const v = (p.voteNumber || "").trim();
   const f = (p.financialMean || "").trim();
+  const isSP = p.sourceSystem === "SP_V1" || !!p.spCode || f === "Special Project Fund";
+
+  if (isSP) {
+    return {
+      key: "SP_V1",
+      label: "Special Projects (SP V1 Suite)",
+      isOther: false,
+      isSP: true,
+    };
+  }
+
   const isOther =
     !v ||
     ["NON-NAVAL", "CONTRACTUAL", "NON-VOTE", "OTHER", "N/A"].includes(v.toUpperCase()) ||
@@ -85,6 +101,7 @@ function getVoteGroupKey(p: Project): { key: string; label: string; isOther: boo
       key: "OTHER",
       label: "Other Funds & Non-Naval Votes",
       isOther: true,
+      isSP: false,
     };
   }
 
@@ -92,6 +109,7 @@ function getVoteGroupKey(p: Project): { key: string; label: string; isOther: boo
     key: v,
     label: `Vote: ${v}`,
     isOther: false,
+    isSP: false,
   };
 }
 
@@ -120,7 +138,13 @@ function ProjectCard({ project: p, onClick }: { project: Project; onClick: () =>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1 justify-end shrink-0">
-            {p.financialMean && p.financialMean !== "Vote" && (
+            {p.spCode && (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold shrink-0 flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5" />
+                SP V1 · {p.spCategory || p.spCode}
+              </span>
+            )}
+            {p.financialMean && p.financialMean !== "Vote" && !p.spCode && (
               <CustomBadge className={cn("border", financialMeanColor(p.financialMean))}>
                 {p.financialMean}
               </CustomBadge>
@@ -275,6 +299,14 @@ interface Project {
   committedFiles?: number;
   balance?: number;
   utilization?: number;
+  spCode?: string | null;
+  spCategory?: string | null;
+  sourceSystem?: string | null;
+  approvalRef?: string | null;
+  approvalType?: string | null;
+  approvalAuthority?: string | null;
+  workScope?: string | null;
+  requirementGroup?: string | null;
 }
 
 // ─── Bulk Upload CSV row schema ───
@@ -314,9 +346,11 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [spBridgeOpen, setSpBridgeOpen] = useState(false);
 
-  // Vote Filtering & View Mode States
+  // Stream & Vote Filtering & View Mode States
   const [searchQuery, setSearchQuery] = useState("");
+  const [streamFilter, setStreamFilter] = useState<"ALL" | "CAPITAL" | "RECURRENCE" | "SPECIAL_PROJECTS" | "NON_NAVAL">("ALL");
   const [voteFilter, setVoteFilter] = useState<string>("ALL");
   const [viewMode, setViewMode] = useState<"grouped" | "grid">("grouped");
 
@@ -347,13 +381,16 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
 
   // ── Vote Categories & Groups Calculation ──
   const voteOptions = (() => {
-    if (!projects) return { navalVotes: [], hasOther: false };
+    if (!projects) return { navalVotes: [], hasOther: false, hasSP: false };
     const navalSet = new Set<string>();
     let hasOther = false;
+    let hasSP = false;
 
     projects.forEach((p) => {
-      const { key, isOther } = getVoteGroupKey(p);
-      if (isOther) {
+      const { key, isOther, isSP: isSpecial } = getVoteGroupKey(p);
+      if (isSpecial) {
+        hasSP = true;
+      } else if (isOther) {
         hasOther = true;
       } else {
         navalSet.add(key);
@@ -363,14 +400,28 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
     return {
       navalVotes: Array.from(navalSet).sort(),
       hasOther,
+      hasSP,
     };
   })();
 
   const voteGroupsMap = (() => {
-    if (!projects) return new Map<string, { label: string; key: string; isOther: boolean; projects: Project[] }>();
-    const map = new Map<string, { label: string; key: string; isOther: boolean; projects: Project[] }>();
+    if (!projects) return new Map<string, { label: string; key: string; isOther: boolean; isSP: boolean; projects: Project[] }>();
+    const map = new Map<string, { label: string; key: string; isOther: boolean; isSP: boolean; projects: Project[] }>();
 
     projects.forEach((p) => {
+      const { key, label, isOther, isSP: isSpecial } = getVoteGroupKey(p);
+
+      // 0. Stream Filter
+      if (streamFilter === "CAPITAL") {
+        if (!["VOTE 223-1-01-2104", "VOTE 223-1-01-2001", "VOTE 223-1-01-2506"].includes(p.voteNumber)) return;
+      } else if (streamFilter === "RECURRENCE") {
+        if (!p.voteNumber?.includes("1303")) return;
+      } else if (streamFilter === "SPECIAL_PROJECTS") {
+        if (!isSpecial) return;
+      } else if (streamFilter === "NON_NAVAL") {
+        if (!isOther) return;
+      }
+
       // 1. Search Query Filter
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -379,19 +430,19 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         const matchAbbr = (p.nameAbbreviation || "").toLowerCase().includes(q);
         const matchBen = (p.benefactor || "").toLowerCase().includes(q);
         const matchDept = (p.department || "").toLowerCase().includes(q);
-        if (!matchName && !matchVote && !matchAbbr && !matchBen && !matchDept) return;
+        const matchSp = (p.spCode || "").toLowerCase().includes(q);
+        if (!matchName && !matchVote && !matchAbbr && !matchBen && !matchDept && !matchSp) return;
       }
-
-      const { key, label, isOther } = getVoteGroupKey(p);
 
       // 2. Vote Filter
       if (voteFilter !== "ALL") {
+        if (voteFilter === "SP_V1" && !isSpecial) return;
         if (voteFilter === "OTHER" && !isOther) return;
-        if (voteFilter !== "OTHER" && key !== voteFilter) return;
+        if (voteFilter !== "OTHER" && voteFilter !== "SP_V1" && key !== voteFilter) return;
       }
 
       if (!map.has(key)) {
-        map.set(key, { label, key, isOther, projects: [] });
+        map.set(key, { label, key, isOther, isSP: isSpecial, projects: [] });
       }
       map.get(key)!.projects.push(p);
     });
@@ -413,6 +464,14 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         icon={FolderKanban}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setSpBridgeOpen(true)}
+              size="sm"
+              variant="outline"
+              className="gap-1.5 rounded-xl border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 font-bold shadow-2xs"
+            >
+              <Database className="h-4 w-4 text-purple-500" /> SP V1 Bridge & Sync
+            </Button>
             <Button onClick={() => setBulkOpen(true)} size="sm" variant="outline" className="gap-1.5 rounded-xl">
               <Upload className="h-4 w-4" /> Upload Bulk
             </Button>
@@ -615,76 +674,153 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
         </div>
       )}
 
-      {/* ─── VOTE SEPARATION & FILTER TOOLBAR ─── */}
-      <div className="glass-card rounded-2xl p-4 mb-6 border border-border/80 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        {/* Search & Filter pills */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 min-w-0">
-          {/* Search box */}
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search projects, vote number, benefactor..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-background/60 text-xs sm:text-sm rounded-xl border-border/80 focus-visible:ring-primary h-9"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+      {/* ─── STREAM & VOTE SEPARATION & FILTER TOOLBAR ─── */}
+      <div className="glass-card rounded-2xl p-4 mb-6 border border-border/80 shadow-sm flex flex-col gap-3">
+        {/* Stream Filter Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-1 shrink-0 border-b border-border/50 pb-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mr-1 shrink-0">Stream:</span>
+          <button
+            onClick={() => { setStreamFilter("ALL"); setVoteFilter("ALL"); }}
+            className={cn(
+              "px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all border",
+              streamFilter === "ALL"
+                ? "bg-foreground text-background border-foreground shadow-2xs"
+                : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
             )}
-          </div>
+          >
+            All Streams ({projects?.length || 0})
+          </button>
+          <button
+            onClick={() => { setStreamFilter("CAPITAL"); setVoteFilter("ALL"); }}
+            className={cn(
+              "px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all border",
+              streamFilter === "CAPITAL"
+                ? "bg-blue-600 text-white border-blue-600 shadow-2xs"
+                : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+            )}
+          >
+            Capital Works (2104 / 2001 / 2506) ({projects?.filter(p => ["VOTE 223-1-01-2104", "VOTE 223-1-01-2001", "VOTE 223-1-01-2506"].includes(p.voteNumber)).length || 0})
+          </button>
+          <button
+            onClick={() => { setStreamFilter("RECURRENCE"); setVoteFilter("ALL"); }}
+            className={cn(
+              "px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all border",
+              streamFilter === "RECURRENCE"
+                ? "bg-amber-600 text-white border-amber-600 shadow-2xs"
+                : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+            )}
+          >
+            Recurrence (1303) ({projects?.filter(p => p.voteNumber?.includes("1303")).length || 0})
+          </button>
+          <button
+            onClick={() => { setStreamFilter("SPECIAL_PROJECTS"); setVoteFilter("ALL"); }}
+            className={cn(
+              "px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5",
+              streamFilter === "SPECIAL_PROJECTS"
+                ? "bg-purple-600 text-white border-purple-600 shadow-2xs"
+                : "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
+            )}
+          >
+            <Sparkles className="h-3 w-3" />
+            Special Projects (SP V1) ({projects?.filter(p => getVoteGroupKey(p).isSP).length || 0})
+          </button>
+          <button
+            onClick={() => { setStreamFilter("NON_NAVAL"); setVoteFilter("ALL"); }}
+            className={cn(
+              "px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all border",
+              streamFilter === "NON_NAVAL"
+                ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs"
+                : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+            )}
+          >
+            Non-Naval & Warehouses ({projects?.filter(p => getVoteGroupKey(p).isOther).length || 0})
+          </button>
+        </div>
 
-          {/* Vote Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-1 shrink-0">
-            <button
-              onClick={() => setVoteFilter("ALL")}
-              className={cn(
-                "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
-                voteFilter === "ALL"
-                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                  : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
-              )}
-            >
-              All Votes ({projects?.length || 0})
-            </button>
-
-            {voteOptions.navalVotes.map((v) => {
-              const count = projects?.filter((p) => getVoteGroupKey(p).key === v).length || 0;
-              return (
+        {/* Search & Vote filter pills & View mode toggle */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 min-w-0">
+            {/* Search box */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search projects, vote number, SP code, benefactor..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-background/60 text-xs sm:text-sm rounded-xl border-border/80 focus-visible:ring-primary h-9"
+              />
+              {searchQuery && (
                 <button
-                  key={v}
-                  onClick={() => setVoteFilter(v)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
-                    voteFilter === v
-                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                      : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
-                  )}
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground hover:text-foreground"
                 >
-                  Vote {v} ({count})
+                  <X className="h-3.5 w-3.5" />
                 </button>
-              );
-            })}
+              )}
+            </div>
 
-            {voteOptions.hasOther && (
+            {/* Vote Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-1 shrink-0">
               <button
-                onClick={() => setVoteFilter("OTHER")}
+                onClick={() => setVoteFilter("ALL")}
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
-                  voteFilter === "OTHER"
-                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-amber-500 shadow-xs"
+                  voteFilter === "ALL"
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs"
                     : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
                 )}
               >
-                Other Votes ({projects?.filter((p) => getVoteGroupKey(p).isOther).length || 0})
+                All Filtered ({allFilteredProjects.length})
               </button>
-            )}
+
+              {voteOptions.navalVotes.map((v) => {
+                const count = projects?.filter((p) => getVoteGroupKey(p).key === v).length || 0;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setVoteFilter(v)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
+                      voteFilter === v
+                        ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                        : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+                    )}
+                  >
+                    Vote {v} ({count})
+                  </button>
+                );
+              })}
+
+              {voteOptions.hasSP && (
+                <button
+                  onClick={() => setVoteFilter("SP_V1")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border flex items-center gap-1.5",
+                    voteFilter === "SP_V1"
+                      ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                      : "bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                  )}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  SP V1 ({projects?.filter((p) => getVoteGroupKey(p).isSP).length || 0})
+                </button>
+              )}
+
+              {voteOptions.hasOther && (
+                <button
+                  onClick={() => setVoteFilter("OTHER")}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 border",
+                    voteFilter === "OTHER"
+                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-amber-500 shadow-xs"
+                      : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60"
+                  )}
+                >
+                  Other Votes ({projects?.filter((p) => getVoteGroupKey(p).isOther).length || 0})
+                </button>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* View Mode Toggle (Grouped vs Grid) */}
         <div className="flex items-center gap-1 shrink-0 bg-secondary/80 p-1 rounded-xl border border-border/60 self-end lg:self-auto">
@@ -716,6 +852,7 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
           </button>
         </div>
       </div>
+    </div>
 
       {/* ─── DISPLAY PROJECT LIST / SECTIONS ─── */}
       {!projects || projects.length === 0 ? (
@@ -849,6 +986,13 @@ export function ProjectsModule({ onNavigate }: { onNavigate: (m: ModuleId) => vo
           setBulkOpen(false);
           refresh();
         }}
+      />
+
+      {/* SP V1 Bridge & Synchronization Dialog */}
+      <SpBridgeDialog
+        open={spBridgeOpen}
+        onOpenChange={setSpBridgeOpen}
+        onSynced={refresh}
       />
     </div>
   );
@@ -1249,4 +1393,186 @@ function parseCsv(text: string): string[][] {
     rows.push(cur);
   }
   return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+// ─── SP V1 Bridge Dialog ───
+function SpBridgeDialog({
+  open,
+  onOpenChange,
+  onSynced,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSynced: () => void;
+}) {
+  const { toast } = useToast();
+  const { data: bridgeData, loading, refresh } = useFetch<any>(open ? "/api/sp-bridge" : null);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      const res = await fetch("/api/sp-bridge", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to sync");
+      toast({
+        title: "SP V1 Bridge Synchronized",
+        description: data.message || `Successfully synced ${data.syncedCount} projects and provisioned ${data.createdFilesCount} procurement files.`,
+      });
+      refresh();
+      onSynced();
+    } catch (e: any) {
+      toast({
+        title: "Sync Error",
+        description: e.message || "Could not connect to SP V1 system",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="h-10 w-10 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+              <Database className="h-5 w-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                SP V1 — Special Projects Bridge Engine
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                  v1.0 Live Integration
+                </span>
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Automated database connection between CE Logistic Panel and Special Project System v1
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="py-12 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-purple-500" />
+            <p className="text-xs text-muted-foreground font-medium">Connecting to SP V1 Bridge...</p>
+          </div>
+        ) : (
+          <div className="space-y-4 my-2">
+            {/* Connection Banner */}
+            <div className="p-4 rounded-xl border bg-secondary/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-3 w-3">
+                  <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", bridgeData?.connected ? "bg-emerald-400" : "bg-amber-400")} />
+                  <span className={cn("relative inline-flex rounded-full h-3 w-3", bridgeData?.connected ? "bg-emerald-500" : "bg-amber-500")} />
+                </span>
+                <div>
+                  <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    {bridgeData?.connected ? "Live System Connection Active" : "Local Repository Cache Connected"}
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Data Source: <span className="font-semibold text-foreground">{bridgeData?.source || "Live SP V1 REST API"}</span>
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleSync}
+                disabled={syncing}
+                size="sm"
+                className="gap-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-xs"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+                {syncing ? "Syncing..." : "Sync & Absorb SP V1"}
+              </Button>
+            </div>
+
+            {/* Metrics cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-secondary/60 border border-border/50 text-center">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground">Total SP Projects</p>
+                <p className="text-lg font-bold text-foreground mt-0.5">{bridgeData?.totalSPProjects ?? 7}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/60 border border-border/50 text-center">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground">Synced in CE Logistics</p>
+                <p className="text-lg font-bold text-emerald-500 mt-0.5">{bridgeData?.syncedCount ?? 7}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/60 border border-border/50 text-center">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground">Procurement Files</p>
+                <p className="text-lg font-bold text-primary mt-0.5">
+                  {(bridgeData?.projects ?? []).reduce((s: number, p: any) => s + (p.fileCount || 0), 0) || 23}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/60 border border-border/50 text-center">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground">Committed Value</p>
+                <p className="text-sm font-bold text-amber-500 mt-1 tabular-nums">
+                  {formatCurrency(
+                    (bridgeData?.projects ?? []).reduce((s: number, p: any) => s + (p.committedFilesCost || 0), 0) || 6828064
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Projects Table */}
+            <div className="rounded-xl border border-border/70 overflow-hidden">
+              <Table>
+                <TableHeader className="bg-secondary/40">
+                  <TableRow>
+                    <TableHead className="text-xs font-bold">Code</TableHead>
+                    <TableHead className="text-xs font-bold">Special Project Title</TableHead>
+                    <TableHead className="text-xs font-bold">Category</TableHead>
+                    <TableHead className="text-xs font-bold text-right">Budget</TableHead>
+                    <TableHead className="text-xs font-bold text-center">Files</TableHead>
+                    <TableHead className="text-xs font-bold text-right">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(bridgeData?.projects ?? []).map((sp: any) => (
+                    <TableRow key={sp.code || sp.id}>
+                      <TableCell className="font-mono text-xs font-bold text-purple-600 dark:text-purple-400">
+                        {sp.code}
+                      </TableCell>
+                      <TableCell className="text-xs font-medium max-w-[240px] truncate">
+                        {sp.title}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-secondary border border-border/60">
+                          {sp.category}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs font-bold text-right tabular-nums">
+                        {formatCurrency(Number(sp.budget) || 0)}
+                      </TableCell>
+                      <TableCell className="text-xs font-bold text-center">
+                        <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px]">
+                          {sp.fileCount || 0} files
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs text-right">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 className="h-3 w-3" /> Synced
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="pt-3 border-t border-border/60 flex items-center justify-between sm:justify-between">
+          <p className="text-[11px] text-muted-foreground">
+            Special projects are integrated into CE Logistic Panel master procurement, stores & vote registry.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl">
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

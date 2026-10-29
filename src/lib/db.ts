@@ -47,7 +47,7 @@ export const rawDb =
         url: dbUrl,
       },
     },
-    log: ['query'],
+    log: process.env.DEBUG_PRISMA ? ['query', 'error', 'warn'] : ['error'],
   })
 
 if (process.env.NODE_ENV !== 'production') (globalThis as any).prisma = rawDb

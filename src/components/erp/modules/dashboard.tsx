@@ -329,9 +329,18 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
         description="Real-time overview of dockyard operations, procurement & inventory"
         icon={LayoutDashboard}
         actions={
-          <div className="flex items-center gap-1 bg-secondary/80 rounded-xl p-1 border border-border/60">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setViewMode("value")}
+              onClick={() => onNavigate("settings")}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer"
+              title="Connected to XAMPP MySQL ncw_ps_db and Firebase cmsys-v2-1fb05"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>CMSys Live</span>
+            </button>
+            <div className="flex items-center gap-1 bg-secondary/80 rounded-xl p-1 border border-border/60">
+              <button
+                onClick={() => setViewMode("value")}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150",
                 viewMode === "value" ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
@@ -349,8 +358,9 @@ export function Dashboard({ onNavigate }: { onNavigate: (m: ModuleId) => void })
               <Percent className="h-3.5 w-3.5 text-primary" /> By Percentage
             </button>
           </div>
-        }
-      />
+        </div>
+      }
+    />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

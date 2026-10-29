@@ -56,3 +56,6 @@ server.log
 # Local scratch and nested workspace
 scratch/
 WDis/
+
+.firebase/
+public_dist/

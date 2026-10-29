@@ -50,6 +50,14 @@ export async function PUT(
         status: body.status || "Active",
         description: body.description || null,
         showOnDashboard: body.showOnDashboard !== undefined ? body.showOnDashboard : undefined,
+        spCode: body.spCode !== undefined ? body.spCode : undefined,
+        spCategory: body.spCategory !== undefined ? body.spCategory : undefined,
+        sourceSystem: body.sourceSystem !== undefined ? body.sourceSystem : undefined,
+        approvalRef: body.approvalRef !== undefined ? body.approvalRef : undefined,
+        approvalType: body.approvalType !== undefined ? body.approvalType : undefined,
+        approvalAuthority: body.approvalAuthority !== undefined ? body.approvalAuthority : undefined,
+        workScope: body.workScope !== undefined ? body.workScope : undefined,
+        requirementGroup: body.requirementGroup !== undefined ? body.requirementGroup : undefined,
       },
     });
     return NextResponse.json(updated);

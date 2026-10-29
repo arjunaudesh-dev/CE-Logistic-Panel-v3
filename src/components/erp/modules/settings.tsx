@@ -125,7 +125,9 @@ import {
   ChevronDown,
   ChevronUp,
   Filter,
+  Database,
 } from "lucide-react";
+import { CMSysBridgeTab } from "@/components/erp/modules/cmsys-bridge-tab";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -387,6 +389,7 @@ function flowAccent(name: string): {
 // Main Module
 // ─────────────────────────────────────────────────────────
 type SettingsTab =
+  | "cmsys-bridge"
   | "users"
   | "roles"
   | "auth"
@@ -425,6 +428,13 @@ export function SettingsModule() {
     iconClass: string;
     masterOnly?: boolean;
   }[] = [
+    {
+      value: "cmsys-bridge",
+      label: "CMSys Ecosystem",
+      short: "CMSys",
+      icon: Database,
+      iconClass: "bg-teal-500/15 text-teal-400",
+    },
     {
       value: "users",
       label: "User Profiles",
@@ -552,6 +562,10 @@ export function SettingsModule() {
             })}
           </TabsList>
         </div>
+
+        <TabsContent value="cmsys-bridge" className="mt-4">
+          <CMSysBridgeTab />
+        </TabsContent>
 
         {isMasterAdmin && (
           <>

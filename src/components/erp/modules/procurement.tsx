@@ -84,6 +84,7 @@ interface ProcurementLog {
 
 interface ProcurementFile {
   id: string;
+  projectId?: string | null;
   projectName: string | null;
   voteNumber: string | null;
   prNumber: string;
@@ -96,8 +97,12 @@ interface ProcurementFile {
   supplier: string | null;
   presentPosition: string;
   fileCategory: string;
+  fileGroupKey?: string | null;
+  fileNumber?: string | null;
   createdBy: string | null;
   authorizedBy: string | null;
+  responsiblePerson?: string | null;
+  spCode?: string | null;
   createdAt: string;
   updatedAt: string;
   logs?: ProcurementLog[];
@@ -992,7 +997,14 @@ export function ProcurementModule() {
                             </TableCell>
                             <TableCell className="text-xs whitespace-nowrap">
                               <div className="flex flex-col">
-                                <span className="text-foreground truncate max-w-[160px]">{f.projectName || "—"}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-foreground truncate max-w-[160px]">{f.projectName || "—"}</span>
+                                  {f.spCode && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">
+                                      {f.spCode}
+                                    </span>
+                                  )}
+                                </div>
                                 {f.voteNumber && (
                                   <span className="text-[10px] text-muted-foreground">{f.voteNumber}</span>
                                 )}
@@ -1073,9 +1085,16 @@ export function ProcurementModule() {
                       </TableCell>
                       <TableCell className="text-xs whitespace-nowrap">
                         <div className="flex flex-col">
-                          <span className="text-foreground truncate max-w-[160px]">
-                            {f.projectName || "—"}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-foreground truncate max-w-[160px]">
+                              {f.projectName || "—"}
+                            </span>
+                            {f.spCode && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">
+                                {f.spCode}
+                              </span>
+                            )}
+                          </div>
                           {f.voteNumber && (
                             <span className="text-[10px] text-muted-foreground">
                               {f.voteNumber}

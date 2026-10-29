@@ -310,6 +310,7 @@ export const PROJECT_TYPES = [
   "Maintenance",
   "General Requirement",
   "Contractual Job",
+  "Special Project",
 ] as const;
 
 export function projectTypeColor(type: string): string {
@@ -326,6 +327,30 @@ export function projectTypeColor(type: string): string {
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
     case "Contractual Job":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Special Project":
+      return "bg-rose-500/15 text-rose-400 border-rose-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export const SP_CATEGORIES = [
+  "Religious",
+  "Clean Sri Lanka",
+  "Housing",
+  "Miscellaneous",
+] as const;
+
+export function spCategoryColor(cat: string): string {
+  switch (cat) {
+    case "Religious":
+      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+    case "Clean Sri Lanka":
+      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Housing":
+      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+    case "Miscellaneous":
+      return "bg-purple-500/15 text-purple-400 border-purple-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   }
@@ -620,6 +645,7 @@ export const FINANCIAL_MEANS = [
   "Malima Fund",
   "Non-Public Fund",
   "Contractual",
+  "Special Project Fund",
 ] as const;
 
 export function financialMeanColor(mean: string): string {
@@ -633,6 +659,8 @@ export function financialMeanColor(mean: string): string {
       return "bg-violet-500/15 text-violet-400 border-violet-500/30";
     case "Contractual":
       return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+    case "Special Project Fund":
+      return "bg-rose-500/15 text-rose-400 border-rose-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   }

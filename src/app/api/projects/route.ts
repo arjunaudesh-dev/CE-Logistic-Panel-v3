@@ -54,6 +54,14 @@ export async function POST(req: NextRequest) {
         status: body.status || "Active",
         description: body.description || null,
         showOnDashboard: body.showOnDashboard !== false,
+        spCode: body.spCode || null,
+        spCategory: body.spCategory || null,
+        sourceSystem: body.sourceSystem || "LOGISTICS",
+        approvalRef: body.approvalRef || null,
+        approvalType: body.approvalType || null,
+        approvalAuthority: body.approvalAuthority || null,
+        workScope: body.workScope || null,
+        requirementGroup: body.requirementGroup || null,
       },
     });
     return NextResponse.json(project, { status: 201 });
